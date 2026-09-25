@@ -2,7 +2,7 @@
 
 > 🌐 **English** · [中文](roadmap_zh.md)
 
-> **What this is**: A **buildable overview** of the agreed v1 scope (P0–P7) — sliced into **M0–M13** following the principles of atomicity, frontend/backend parallelism, and deployable verification at the end of every milestone.
+> **What this is**: A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the planned receipt-inbox and agent-accounting follow-ons **M14–M15**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
 >
 > **What this is not**: A line-by-line construction guide. This document stays at the level of "milestones + methodology + constraints"; the **atomic step list** for each milestone is written out JIT in `docs/plan/milestones/M<x>.md` (template: `milestones/_TEMPLATE.md`).
 >
@@ -109,10 +109,10 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4. Milestone Map M0–M13 (including inserted M2.5 · Settings UX refactor / M6.5 · Cost accounting / M11.5 · Quote deposits)
+## 4. Milestone Map M0–M15 (including inserted M2.5 · Settings UX refactor / M6.5 · Cost accounting / M11.5 · Quote deposits)
 
 > Dependencies: **M0 → M1 → M2 → (M2.5) → {M3, M4}**, then two parallelisable tracks:
-> ① **Document track**: M5 → M6 → **M6.5** → M7; ② **Expense track**: M8 (depends only on M2 base currency + M4 dictionaries, optionally M3 customers, **independent of invoices/quotes/payments**). The two tracks converge at M9 → M10, then continue through **M11 (private-transport business mileage) → M11.5 (quote deposits and final-invoice settlement) → M12 (advance/final invoices and credit notes) → M13 (Document Artifact backfill)**.
+> ① **Document track**: M5 → M6 → **M6.5** → M7; ② **Expense track**: M8 (depends only on M2 base currency + M4 dictionaries, optionally M3 customers, **independent of invoices/quotes/payments**). The two tracks converge at M9 → M10, then continue through **M11 (private-transport business mileage) → M11.5 (quote deposits and final-invoice settlement) → M12 (advance/final invoices and credit notes) → M13 (Document Artifact backfill) → M14 (receipt inbox and review) → M15 (agent receipt intake)**.
 > Parallelisable: M3‖M4; document track‖expense track (M8 can run alongside M5/M6/M7). **M2.5 is a pure frontend UX fix, non-blocking** — it slots after M2 and can run in parallel with M3/M4; it blocks nothing. The "🟢 deployment smoke test" at the end of each entry is that milestone's acceptance signal.
 
 ### M0 · Foundation skeleton (walking skeleton) | corresponds to P0
@@ -257,11 +257,23 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **Atomic delivery / acceptance**: four steps delivered contract/enum/file validation, exact upload+canonical output reuse, optional advisory AI comparison, and frontend/regression closure. Final automation passed Ruff, mypy, 1243 default and 1074 PostgreSQL integration tests, OpenAPI codegen freshness, 148 frontend tests, EN/ZH key parity, frontend and Docker builds, and the CJK PDF smoke. The walkthrough also produced and verified a purpose-bounded AI output-budget fix: receipt extraction 1024 tokens, artifact comparison 4096, and capability probing 512.
 - **🟢 Deployment smoke test**: Upload a legacy PDF to an issued zero-artifact Invoice; verify optional AI warnings never block confirmation; ordinary Download/Send reuse the exact uploaded bytes; change settlement state and verify a new artifact appears while the original remains byte-identical and downloadable.
 
+### M14 · Receipt inbox and review | expense-track follow-on
+- **Status**: ⬜ Not started. Scope below is a direction only; product decisions, API contract, and atomic steps will be refined with the author before implementation.
+- **Goal**: Upload a receipt before creating an Expense, retain the original image/PDF and AI extraction suggestions, then review and confirm it into a complete Expense later. Eliminate placeholder Expense entries used only to enable receipt upload.
+- **Key content / boundary**: A company-scoped, persistent pending-receipt workflow shared by web and future agent intake; reuse existing receipt validation, storage, and AI extraction. Missing or uncertain fields remain visible for review. Pending receipts are not confirmed Expenses and must not enter expense, P/L, or VAT reports. Confirmation uses the existing backend expense and money rules; failure and abandoned-upload handling need explicit design.
+- **🟢 Deployment smoke test**: Upload an image and a PDF from the web without first creating an Expense; inspect saved originals and AI suggestions; correct missing fields and confirm each once; verify pending records do not affect reports and confirmed Expenses retain their receipts.
+
+### M15 · Agent receipt intake | depends on M14
+- **Status**: ⬜ Not started. Scope below is a direction only; authentication, deployment topology, API/MCP contract, and atomic steps will be refined with the author before implementation.
+- **Goal**: Let an authorized agent, initially Hermes via Telegram, submit a received receipt to the M14 inbox automatically and return its processing result and review link. Keep the integration usable by other MCP-capable agents, including Codex.
+- **Key content / boundary**: A small business MCP over the shared backend intake workflow, with revocable, limited agent credentials; authorized Telegram sender/chat controls; attachment transfer; idempotency for repeated messages; clear failure/retry status and traceability. AI suggestions stay pending until the author confirms the accounting entry in the web app. No direct database writes or automatic posting to expense/VAT reports.
+- **🟢 Deployment smoke test**: Send an image and a PDF to the authorized Telegram chat; Hermes submits each once, replies with the pending result and review link, and a repeated delivery creates no duplicate. Review and confirm in the web app; unauthorized messages and processing failures create no confirmed Expense.
+
 ---
 
-## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M13)
+## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M15)
 
-> **Status**: Explicitly **not doing** in the current roadmap through M13; this note is kept here so it's easy to pick up later. **No DB schema is reserved now** — any future columns/tables are additive migrations, existing data is unaffected, cost is acceptable, no need to pre-allocate.
+> **Status**: Explicitly **not doing** in the current roadmap through M15; this note is kept here so it's easy to pick up later. **No DB schema is reserved now** — any future columns/tables are additive migrations, existing data is unaffected, cost is acceptable, no need to pre-allocate.
 
 - **What it is**: Connect an **external transaction provider** and automatically pull transaction feeds from partner banks via API, eliminating manual entry. **Provider-agnostic**: Plaid (used behind YNAB), GoCardless Bank Account Data (formerly Nordigen, EU open banking, AIS free tier), Tink / TrueLayer, etc. — selection deferred.
 - **Two use cases**:
@@ -275,7 +287,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4.y Beyond the roadmap (vNext) · PDF document/letterhead template customisation (memo only, not in M0–M13)
+## 4.y Beyond the roadmap (vNext) · PDF document/letterhead template customisation (memo only, not in M0–M15)
 
 > **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**. Elaborates on M9's OUT item "custom / multiple PDF template sets → deferred (one template family + CSS interface)". **No schema reserved now** — everything will be additive.
 >
@@ -286,7 +298,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **The big concern is security (guardrail 7)**: User input entering PDF = XSS/SSRF surface; reuse / strengthen sanitisation — reference the two bugs fixed 2026-06-14: `{{ css | safe }}` font escaping and SVG `<style>` inline class sanitisation; body uses "plain text + explicit placeholders + escaping" rather than arbitrary HTML/CSS. Plus template editor UI + preview + built-in defaults when values are absent.
 - **Granularity**: Configured per document type (invoice / quote) × language (EN / ZH), following the email template structure.
 
-## 4.z Beyond the roadmap (vNext) · Customer address free-text block (memo only, not in M0–M13)
+## 4.z Beyond the roadmap (vNext) · Customer address free-text block (memo only, not in M0–M15)
 
 > **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**.
 
@@ -344,7 +356,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 docs/
   insight/btw-aangifte-2026-guide.md # Dutch VAT/BTW filing conventions (authoritative, structured guide to official Tax Authority instructions)
   plan/
-    roadmap.md                       # This document: overview + methodology + constraints + M0–M13
+    roadmap.md                       # This document: overview + methodology + constraints + M0–M15
     milestones/
       _TEMPLATE.md                   # Milestone refinement template
       M0.md, M1.md, ...              # Produced JIT before starting work (atomic step lists)
@@ -381,5 +393,7 @@ docs/
 | M11.5 | Quote deposits and final-invoice settlement | 🟢 Done (2026-08-28; recovery orchestrator review of the 2026-08-27 base implementation and milestone cross-step review converged with no findings; orchestrated receipt-email refinement added localized single-language warnings and source-audited email, converged after three fixup/re-review rounds, and passed Ruff/mypy/default 1067/integration 872/migrations 14/codegen no drift/build/i18n 1236/Docker; author walkthrough accepted with no findings; historical base-milestone per-step commits could not be reconstructed) |
 | M12 | Advance/Final Invoices and Credit Notes | 🟢 Done (2026-09-02; orchestrated Steps 1–11 and blind reviews converged; Ruff/mypy/default 1125/integration 1065, migrations, codegen, frontend Node/Vitest 122 + build + EN/ZH 1423, Docker/CJK PDF all green; risk-based author walkthrough plus final read-only test-data audit passed; five walkthrough refinements fixed) |
 | M13 | Document Artifact Backfill | 🟢 Done (2026-09-05; orchestrated Steps 1–4 and blind reviews converged; AI output-budget walkthrough fix re-reviewed with no findings; Ruff/mypy/default 1243/integration 1074, migrations, codegen, frontend 148 + build + EN/ZH 1458, Docker/CJK PDF all green; author Standard-Invoice Happy Path passed, remaining manual paths accepted on automated evidence) |
+| M14 | Receipt inbox and review | ⬜ Not started; high-level scope only, JIT design pending |
+| M15 | Agent receipt intake (MCP; Hermes/Telegram first) | ⬜ Not started; depends on M14, JIT design pending |
 
 > Legend: ⬜ Not started | 🟡 In progress | 🟢 Done (deployment smoke test passed)
