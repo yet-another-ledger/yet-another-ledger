@@ -258,10 +258,11 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 - **🟢 部署自测点**：向零 artifact 的已开具 Invoice 上传旧 PDF；验证可选 AI warning 从不阻断确认；普通 Download/Send 复用上传的精确字节；改变结算状态后验证出现新 artifact，且原件仍 byte-identical 并可下载。
 
 ### M14 · 收据收件箱与审阅｜开支线 follow-on
-- **状态**：⬜ 未开始。下述仅为方向；产品决策、API 契约及原子步骤待实施前与作者共同细化。
+- **状态**：🟡 设计已共定；尚未开始实现和验收。完整契约、冻结决策及六个原子步骤见 `milestones/M14_zh.md`。
 - **目标**：先上传收据，再创建 Expense；持久保存图片/PDF 原件及 AI 识别建议，之后审阅并确认成完整 Expense。不再为上传收据创建占位 Expense。
-- **关键内容 / 边界**：按公司隔离、供网页与未来 Agent 共用的待处理收据流程；复用现有收据验证、存储和 AI 识别。缺失或不确定的字段保留待审阅提示。待处理收据不是已确认 Expense，不进入开支、P/L 或 VAT 报表。确认时复用现有后端 Expense 与金额规则；失败和弃置上传的处理需明确设计。
-- **🟢 部署自测点**：网页无需先建 Expense，即可分别上传图片和 PDF；查看已保存原件与 AI 建议；补正缺失字段后各确认一次；验证待处理记录不影响报表，确认后的 Expense 保留对应收据。
+- **关键内容 / 边界**：一条按公司隔离的待审核项代表一笔采购，最多保存五份原件；上传／文件变更后自动尝试整组 AI 提取，建议持久保存并可手动重试。AI 失败不阻断手工审阅。确认时沿用现有后端金额规则，原子创建一笔非草稿 Expense 并转挂原件；保留已处理历史。待审核项不进入 Expense、P/L 和 VAT 报表，只有作者显式操作才丢弃。M15 的传输、凭据和投递去重另行设计。
+- **原子交付**：六步依次覆盖契约／迁移、持久收件／文件、AI 建议、只确认一次、完整网页 UX，以及回归／报告收尾。
+- **🟢 部署自测点**：网页无需先建 Expense，即可上传图片和 PDF；向一条待审核项补传第二份文件，查看原件和 AI 建议、从 AI 失败中恢复、修正缺失字段并只确认一次；验证待审核记录不影响报表，确认后的 Expense 保留全部收据。
 
 ### M15 · Agent 自动收件｜依赖 M14
 - **状态**：⬜ 未开始。下述仅为方向；鉴权、部署拓扑、API/MCP 契约及原子步骤待实施前与作者共同细化。
@@ -393,7 +394,7 @@ docs/
 | M11.5 | 报价定金与最终发票结算 | 🟢 完成（2026-08-28；2026-08-27 base 实现的恢复式编排盲审与里程碑跨步骤总审均收敛至无 finding；编排式收据邮件 refinement 增加本地化单语警示与按来源审计的邮件，经三轮 fixup/复审收敛，并通过 Ruff/mypy/默认 1067/integration 872/migrations 14/codegen 无漂移/build/i18n 1236/Docker；作者人工 walkthrough 验收无 finding；无法重建 base milestone 历史逐 Step commits） |
 | M12 | Advance/Final Invoice 与 Credit Note | 🟢 完成（2026-09-02；编排 Step 1–11 与盲审均收敛；Ruff/mypy/默认 1125/integration 1065、迁移、codegen、前端 Node/Vitest 122 + build + EN/ZH 1423、Docker/CJK PDF 全绿；作者风险导向 walkthrough 与最终测试数据只读审计通过；5 项 walkthrough refinement 已修复） |
 | M13 | Document Artifact 历史补传 | 🟢 完成（2026-09-05；编排 Step 1–4 与盲审均收敛；AI 输出预算 walkthrough 修正复审零 finding；Ruff/mypy/默认 1243/integration 1074、迁移、codegen、前端 148 + build + EN/ZH 1458、Docker/CJK PDF 全绿；作者 Standard Invoice Happy Path 通过，其余人工路径以自动化证据验收） |
-| M14 | 收据收件箱与审阅 | ⬜ 未开始；仅列高层范围，具体设计待 JIT 细化 |
+| M14 | 收据收件箱与审阅 | 🟡 设计已共定；待实现和验收；见 `milestones/M14_zh.md` |
 | M15 | Agent 自动收件（MCP；Hermes/Telegram 优先） | ⬜ 未开始；依赖 M14，具体设计待 JIT 细化 |
 
 > 图例：⬜ 未开始 ｜ 🟡 进行中 ｜ 🟢 完成（已过部署自测点）
