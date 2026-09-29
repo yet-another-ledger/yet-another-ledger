@@ -173,6 +173,18 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true },
       },
       {
+        path: 'receipt-inbox',
+        name: 'receipt-inbox',
+        component: () => import('../views/expenses/ReceiptInbox.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'receipt-inbox/:id',
+        name: 'receipt-inbox-detail',
+        component: () => import('../views/expenses/ReceiptInbox.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
         path: 'expenses/new',
         name: 'expense-new',
         component: () => import('../views/expenses/ExpenseEdit.vue'),

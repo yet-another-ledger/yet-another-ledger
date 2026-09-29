@@ -18,6 +18,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { localDateStr } from '../../utils/date'
+import { toExpenseInput, usePurchaseExpenseDictionaries } from '../../composables/usePurchaseExpenseDictionaries'
 import {
   NForm, NFormItem, NInput, NInputNumber, NSelect, NCheckbox,
   NButton, NSpace, NAlert, NSpin, NText, NTag,
@@ -30,17 +31,11 @@ import {
 } from '@vicons/ionicons5'
 import { useExpensesStore } from '../../stores/expenses'
 import type { ExpenseRead, ExpenseAttachmentRead } from '../../stores/expenses'
-import { get, post, ApiError } from '../../api/http'
+import { post, ApiError } from '../../api/http'
 import type { components } from '../../api/schema'
 
 type PaidBy = components['schemas']['PaidBy']
-type ExpenseCategoryRead = components['schemas']['ExpenseCategoryRead']
 type ExpenseCalculateResult = components['schemas']['ExpenseCalculateResult']
-type ExpenseCategoryListResponse = components['schemas']['ExpenseCategoryListResponse']
-type VatTreatmentRead = components['schemas']['VatTreatmentRead']
-type VatTreatmentListResponse = components['schemas']['VatTreatmentListResponse']
-type VatRateRead = components['schemas']['VatRateRead']
-type VatRateListResponse = components['schemas']['VatRateListResponse']
 
 const route = useRoute()
 const router = useRouter()
@@ -72,9 +67,7 @@ const isDraft = ref(false)
 const recurringExpenseId = ref<string | null>(null)
 
 // ---- Dictionary data ----
-const categories = ref<ExpenseCategoryRead[]>([])
-const vatTreatments = ref<VatTreatmentRead[]>([])
-const vatRates = ref<VatRateRead[]>([])
+const { categories, rates: vatRates, categoryOptions, purchaseTreatmentOptions, vatRateOptions, load: loadDictionaries } = usePurchaseExpenseDictionaries()
 
 // ---- Page state ----
 const loading = ref(false)
@@ -96,34 +89,7 @@ const aiNote = ref<string | null>(null)
 const lastAiAttachmentId = ref<string | null>(null)
 
 // ---- Options ----
-const categoryOptions = computed(() =>
-  categories.value.map(c => ({ label: c.name, value: c.id }))
-)
-
-// Only PURCHASE-side treatments
-const purchaseTreatmentOptions = computed(() =>
-  vatTreatments.value
-    .filter(t => t.side === 'PURCHASE')
-    .map(t => ({ label: `${t.code} – ${t.label}`, value: t.id }))
-)
-
-const vatRateOptions = computed(() =>
-  vatRates.value.map(r => ({ label: `${r.percent}% – ${r.label}`, value: r.id }))
-)
-
 // ---- Load data ----
-async function loadDictionaries() {
-  const [catRes, treatRes, rateRes] = await Promise.all([
-    get<ExpenseCategoryListResponse>('/api/v1/expense-categories'),
-    get<VatTreatmentListResponse>('/api/v1/vat-treatments'),
-    get<VatRateListResponse>('/api/v1/vat-rates'),
-  ])
-  categories.value = catRes.items
-  // vatTreatments: filter for PURCHASE side in options, but load all
-  vatTreatments.value = treatRes.items
-  vatRates.value = rateRes.items
-}
-
 function fillFromExpense(expense: ExpenseRead) {
   expenseDate.value = expense.expense_date
   categoryId.value = expense.category_id ?? null
@@ -193,7 +159,7 @@ async function handleSave() {
   try {
     // Only send raw inputs — no gross/base_*/is_draft (red-line 1)
     // Bookkeeping fields (M8.5): passed as-is, no local computation
-    const body = {
+    const body = toExpenseInput({
       expense_date: expenseDate.value,
       category_id: categoryId.value,
       supplier_name: supplierName.value || null,
@@ -207,7 +173,7 @@ async function handleSave() {
       paid_by: paidBy.value,
       business_percentage: businessPercentage.value,
       depreciation_years: depreciationYears.value,
-    }
+    })
     let result: ExpenseRead
     if (isEdit.value && expenseId.value) {
       result = await store.updateExpense(expenseId.value, body)

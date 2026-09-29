@@ -118,20 +118,52 @@ def _drop_database(url: str) -> None:
 
 
 def _query(
-    url: str, statement: str, params: dict[str, object] | None = None
+    url: str,
+    statement: str,
+    params: dict[str, object] | None = None,
+    *,
+    company_id: uuid.UUID | None = None,
 ) -> list[dict[str, object]]:
-    """Run a short SQL assertion against the isolated migration database."""
+    """Run SQL in the isolated migration DB, optionally with tenant context."""
 
     async def _run() -> list[dict[str, object]]:
         engine = create_async_engine(url)
         try:
             async with engine.begin() as conn:
+                if company_id is not None:
+                    await conn.execute(
+                        text("SELECT set_config('jai.company_id', :company_id, true)"),
+                        {"company_id": str(company_id)},
+                    )
                 rows: list[dict[str, object]] = []
                 for command in (part.strip() for part in statement.split(";") if part.strip()):
                     result = await conn.execute(text(command), params or {})
                     if result.returns_rows:
                         rows = [dict(row) for row in result.mappings().all()]
                 return rows
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_run())
+
+
+def _expect_integrity_error(
+    url: str, statement: str, params: dict[str, object]
+) -> str:
+    """Execute one invalid raw SQL write and return its database error text."""
+
+    async def _run() -> str:
+        engine = create_async_engine(url)
+        try:
+            async with engine.connect() as conn:
+                transaction = await conn.begin()
+                try:
+                    await conn.execute(text(statement), params)
+                except IntegrityError as exc:
+                    await transaction.rollback()
+                    return str(exc.orig)
+                await transaction.rollback()
+                raise AssertionError("Expected PostgreSQL integrity constraint to reject write.")
         finally:
             await engine.dispose()
 
@@ -365,6 +397,168 @@ class TestMigrations:
         )
         assert retained == upgraded
         assert _run_alembic("upgrade", "head", url=self.url).returncode == 0
+
+    def test_0043_preserves_legacy_attachments_and_guards_parent_ownership(self) -> None:
+        """A production-shaped 0042 upgrade keeps Expense history and enforces XOR ownership."""
+        # Establish a revision on a fresh test database as well as in the full
+        # suite, where earlier migration tests may already have reached head.
+        initial_upgrade = _run_alembic("upgrade", "head", url=self.url)
+        assert initial_upgrade.returncode == 0, initial_upgrade.stderr
+        assert _run_alembic("downgrade", "0025", url=self.url).returncode == 0
+        ids = _insert_0025_expense_sentinel(self.url)
+        assert _run_alembic("upgrade", "0042", url=self.url).returncode == 0
+        before = _query(
+            self.url,
+            "SELECT net_amount, vat_amount, gross_amount FROM expense WHERE id=:expense_id",
+            {"expense_id": ids["expense_id"]},
+        )
+        old_file = _query(
+            self.url,
+            "SELECT company_id, expense_id, storage_key, filename, byte_size "
+            "FROM expense_attachment WHERE id=:attachment_id",
+            {"attachment_id": ids["attachment_id"]},
+        )
+
+        upgraded = _run_alembic("upgrade", "head", url=self.url)
+        assert upgraded.returncode == 0, upgraded.stderr
+        assert _query(
+            self.url,
+            "SELECT net_amount, vat_amount, gross_amount FROM expense WHERE id=:expense_id",
+            {"expense_id": ids["expense_id"]},
+        ) == before
+        assert _query(
+            self.url,
+            "SELECT company_id, expense_id, storage_key, filename, byte_size, receipt_inbox_id "
+            "FROM expense_attachment WHERE id=:attachment_id",
+            {"attachment_id": ids["attachment_id"]},
+        ) == [{**old_file[0], "receipt_inbox_id": None}]
+
+        inbox_id = uuid.uuid4()
+        _query(
+            self.url,
+            "INSERT INTO receipt_inbox (id, company_id) VALUES (:id, :company_id)",
+            {"id": inbox_id, "company_id": ids["company_id"]},
+            company_id=ids["company_id"],
+        )
+        bad_zero = _expect_integrity_error(
+            self.url,
+            "INSERT INTO expense_attachment "
+            "(id, company_id, storage_key, mime_type, byte_size) "
+            "VALUES (:id, :company_id, 'zero', 'application/pdf', 1)",
+            {"id": uuid.uuid4(), "company_id": ids["company_id"]},
+        )
+        assert "ck_expense_attachment_exactly_one_parent" in str(bad_zero)
+        bad_two = _expect_integrity_error(
+            self.url,
+            "INSERT INTO expense_attachment "
+            "(id, company_id, expense_id, receipt_inbox_id, storage_key, mime_type, byte_size) "
+            "VALUES (:id, :company_id, :expense_id, :inbox_id, 'two', 'application/pdf', 1)",
+            {
+                "id": uuid.uuid4(),
+                "company_id": ids["company_id"],
+                "expense_id": ids["expense_id"],
+                "inbox_id": inbox_id,
+            },
+        )
+        assert "ck_expense_attachment_exactly_one_parent" in str(bad_two)
+
+        inbox_file_id = uuid.uuid4()
+        _query(
+            self.url,
+            "INSERT INTO expense_attachment "
+            "(id, company_id, receipt_inbox_id, storage_key, mime_type, byte_size) "
+            "VALUES (:id, :company_id, :inbox_id, 'inbox/key', 'application/pdf', 1)",
+            {
+                "id": inbox_file_id,
+                "company_id": ids["company_id"],
+                "inbox_id": inbox_id,
+            },
+        )
+        assert _query(
+            self.url,
+            "SELECT id FROM expense_attachment WHERE id=:id",
+            {"id": inbox_file_id},
+        ) == [{"id": inbox_file_id}]
+
+        downgrade = _run_alembic("downgrade", "0042", url=self.url)
+        assert downgrade.returncode != 0
+        assert "cannot downgrade receipt inbox while inbox rows exist" in downgrade.stderr
+
+        _query(
+            self.url,
+            "DELETE FROM receipt_inbox WHERE id=:id",
+            {"id": inbox_id},
+            company_id=ids["company_id"],
+        )
+        assert _query(
+            self.url,
+            "SELECT id FROM expense_attachment WHERE id=:id",
+            {"id": inbox_file_id},
+        ) == []
+
+        # A confirmed item has already transferred its file to Expense. Its
+        # attachment no longer prevents SET NOT NULL, so the explicit guard
+        # must still reject a downgrade and preserve processed history.
+        confirmed_id = uuid.uuid4()
+        transferred_file_id = uuid.uuid4()
+        _query(
+            self.url,
+            "INSERT INTO receipt_inbox (id, company_id) VALUES (:id, :company_id)",
+            {"id": confirmed_id, "company_id": ids["company_id"]},
+            company_id=ids["company_id"],
+        )
+        _query(
+            self.url,
+            "INSERT INTO expense_attachment "
+            "(id, company_id, receipt_inbox_id, storage_key, mime_type, byte_size) "
+            "VALUES (:id, :company_id, :inbox_id, 'transferred/key', 'application/pdf', 1); "
+            "UPDATE expense_attachment SET expense_id=:expense_id, receipt_inbox_id=NULL "
+            "WHERE id=:id",
+            {
+                "id": transferred_file_id,
+                "company_id": ids["company_id"],
+                "inbox_id": confirmed_id,
+                "expense_id": ids["expense_id"],
+            },
+        )
+        _query(
+            self.url,
+            "UPDATE receipt_inbox SET status='CONFIRMED', expense_id=:expense_id, "
+            "confirmed_at=now() WHERE id=:id",
+            {"id": confirmed_id, "expense_id": ids["expense_id"]},
+            company_id=ids["company_id"],
+        )
+        downgrade = _run_alembic("downgrade", "0042", url=self.url)
+        assert downgrade.returncode != 0
+        assert "cannot downgrade receipt inbox while inbox rows exist" in downgrade.stderr
+        assert _query(
+            self.url,
+            "SELECT id FROM receipt_inbox WHERE id=:id",
+            {"id": confirmed_id},
+        ) == []
+        assert _query(
+            self.url,
+            "SELECT id FROM receipt_inbox WHERE id=:id",
+            {"id": confirmed_id},
+            company_id=ids["company_id"],
+        ) == [{"id": confirmed_id}]
+        _query(
+            self.url,
+            "DELETE FROM receipt_inbox WHERE id=:id",
+            {"id": confirmed_id},
+            company_id=ids["company_id"],
+        )
+        assert _run_alembic("downgrade", "0042", url=self.url).returncode == 0
+        assert _query(
+            self.url,
+            "SELECT expense_id, storage_key FROM expense_attachment WHERE id=:id",
+            {"id": ids["attachment_id"]},
+        ) == [{"expense_id": ids["expense_id"], "storage_key": "sentinel/key"}]
+        assert _query(
+            self.url,
+            "SELECT expense_id, storage_key FROM expense_attachment WHERE id=:id",
+            {"id": transferred_file_id},
+        ) == [{"expense_id": ids["expense_id"], "storage_key": "transferred/key"}]
 
     def test_0040_downgrade_round_trip_without_refund_tombstones(self) -> None:
         """0040 remains reversible when no deleted Refund owner exists."""

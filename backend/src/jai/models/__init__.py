@@ -36,6 +36,7 @@ from jai.models.number_sequence import NumberSequence  # noqa: F401
 from jai.models.payment import Payment, PaymentTax  # noqa: F401
 from jai.models.product import Product, ProductCategory  # noqa: F401
 from jai.models.quote import Quote, QuoteLine, QuoteLineTax, QuoteTax  # noqa: F401
+from jai.models.receipt_inbox import ReceiptInbox  # noqa: F401
 from jai.models.recurring_expense import RecurringExpense  # noqa: F401
 from jai.models.setting import Setting  # noqa: F401
 from jai.models.user import User  # noqa: F401

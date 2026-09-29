@@ -391,16 +391,32 @@ async def create_expense(
     - D11: net/vat quantised to minor unit; gross = net + vat.
     - D9: deductible defaults via category.default_deductible → True.
     """
+    exp = await create_expense_record(session, company_id, body, creator_id)
+    await session.commit()
+    await session.refresh(exp)
+    # New expense: no attachments yet
+    return _expense_to_read(exp, attachment_count=0)
+
+
+async def create_expense_record(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    body: ExpenseInput,
+    creator_id: uuid.UUID | None,
+) -> Expense:
+    """Build and flush a confirmed PURCHASE Expense without committing.
+
+    Callers that coordinate the Expense with other rows can use this primitive
+    to keep the entire operation inside their transaction.
+    """
     exp = Expense()
     exp.kind = ExpenseKind.PURCHASE
     exp.is_draft = False
     exp.creator_id = creator_id
     await _apply_body(session, exp, body, company_id)
     session.add(exp)
-    await session.commit()
-    await session.refresh(exp)
-    # New expense: no attachments yet
-    return _expense_to_read(exp, attachment_count=0)
+    await session.flush()
+    return exp
 
 
 async def _count_attachments(
@@ -702,6 +718,8 @@ def _attachment_to_read(att: ExpenseAttachment) -> ExpenseAttachmentRead:
 
     ``storage_key`` is intentionally excluded from the schema (red-line 7 / D2).
     """
+    if att.expense_id is None:
+        raise ValueError("Pending inbox attachments are not Expense attachments.")
     return ExpenseAttachmentRead(
         id=att.id,
         expense_id=att.expense_id,
@@ -820,6 +838,9 @@ async def get_attachment_content(
     FileNotFoundError
         If the disk file is missing (storage inconsistency).
     """
+    from jai.db import set_rls_company
+
+    await set_rls_company(session, company_id)
     att = await _load_attachment(session, attachment_id, company_id)
     content = storage.open(att.storage_key)
     return content, att.mime_type
@@ -841,7 +862,12 @@ async def delete_attachment(
     LookupError
         If the attachment does not exist or belongs to a different company.
     """
+    from jai.db import set_rls_company
+
+    await set_rls_company(session, company_id)
     att = await _load_attachment(session, attachment_id, company_id)
+    if isinstance(att.receipt_inbox_id, uuid.UUID):
+        raise LookupError("Pending inbox attachments can only be removed through the inbox.")
     key = att.storage_key
 
     # Delete disk file (best-effort; failures logged but not raised)

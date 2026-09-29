@@ -2868,6 +2868,116 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/receipt-inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Receipt Inbox
+         * @description List the company's receipt inbox, newest first.
+         */
+        get: operations["list_receipt_inbox_api_v1_receipt_inbox_get"];
+        put?: never;
+        /**
+         * Create Receipt Inbox
+         * @description Create a receipt group with one to five files.
+         */
+        post: operations["create_receipt_inbox_api_v1_receipt_inbox_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/receipt-inbox/{inbox_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Receipt Inbox */
+        get: operations["get_receipt_inbox_api_v1_receipt_inbox__inbox_id__get"];
+        put?: never;
+        post?: never;
+        /** Discard Receipt Inbox */
+        delete: operations["discard_receipt_inbox_api_v1_receipt_inbox__inbox_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/receipt-inbox/{inbox_id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Append Receipt Inbox Files */
+        post: operations["append_receipt_inbox_files_api_v1_receipt_inbox__inbox_id__files_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/receipt-inbox/{inbox_id}/files/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Receipt Inbox File */
+        delete: operations["remove_receipt_inbox_file_api_v1_receipt_inbox__inbox_id__files__file_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/receipt-inbox/{inbox_id}/extract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Extract Receipt Inbox */
+        post: operations["extract_receipt_inbox_api_v1_receipt_inbox__inbox_id__extract_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/receipt-inbox/{inbox_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Receipt Inbox */
+        post: operations["confirm_receipt_inbox_api_v1_receipt_inbox__inbox_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3117,6 +3227,16 @@ export interface components {
             multimodal: boolean;
             /** Detail */
             detail: string;
+        };
+        /** Body_append_receipt_inbox_files_api_v1_receipt_inbox__inbox_id__files_post */
+        Body_append_receipt_inbox_files_api_v1_receipt_inbox__inbox_id__files_post: {
+            /** Files */
+            files: string[];
+        };
+        /** Body_create_receipt_inbox_api_v1_receipt_inbox_post */
+        Body_create_receipt_inbox_api_v1_receipt_inbox_post: {
+            /** Files */
+            files: string[];
         };
         /** Body_upload_attachment_endpoint_api_v1_expenses__expense_id__attachments_post */
         Body_upload_attachment_endpoint_api_v1_expenses__expense_id__attachments_post: {
@@ -8121,6 +8241,99 @@ export interface components {
              */
             lines: components["schemas"]["InvoiceLineInput"][];
         };
+        /**
+         * ReceiptInboxAIState
+         * @enum {string}
+         */
+        ReceiptInboxAIState: "NOT_RUN" | "RUNNING" | "READY" | "UNAVAILABLE" | "FAILED";
+        /** ReceiptInboxConfirmationRead */
+        ReceiptInboxConfirmationRead: {
+            inbox: components["schemas"]["ReceiptInboxRead"];
+            expense: components["schemas"]["ExpenseRead"];
+        };
+        /** ReceiptInboxConflict */
+        ReceiptInboxConflict: {
+            detail: components["schemas"]["ReceiptInboxErrorCode"];
+            /** Expense Id */
+            expense_id?: string | null;
+        };
+        /**
+         * ReceiptInboxErrorCode
+         * @enum {string}
+         */
+        ReceiptInboxErrorCode: "INBOX_NOT_PENDING" | "FILE_LIMIT_REACHED" | "LAST_FILE" | "ALREADY_CONFIRMED" | "AI_DISABLED" | "AI_NOT_CONFIGURED" | "AI_TIMEOUT" | "AI_PROVIDER_ERROR" | "AI_INVALID_RESPONSE";
+        /** ReceiptInboxExtractRequest */
+        ReceiptInboxExtractRequest: {
+            /**
+             * Language
+             * @default en
+             * @enum {string}
+             */
+            language?: "en" | "zh";
+        };
+        /** ReceiptInboxFileRead */
+        ReceiptInboxFileRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Filename */
+            filename: string | null;
+            /** Mime Type */
+            mime_type: string;
+            /** Byte Size */
+            byte_size: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ReceiptInboxListResponse */
+        ReceiptInboxListResponse: {
+            /** Items */
+            items: components["schemas"]["ReceiptInboxRead"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** ReceiptInboxRead */
+        ReceiptInboxRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["ReceiptInboxStatus"];
+            /** Files */
+            files: components["schemas"]["ReceiptInboxFileRead"][];
+            ai_state: components["schemas"]["ReceiptInboxAIState"];
+            ai_suggestion: components["schemas"]["ExpenseAIPrefill"] | null;
+            ai_error_code: components["schemas"]["ReceiptInboxErrorCode"] | null;
+            /** Expense Id */
+            expense_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Confirmed At */
+            confirmed_at: string | null;
+        };
+        /**
+         * ReceiptInboxStatus
+         * @enum {string}
+         */
+        ReceiptInboxStatus: "PENDING" | "CONFIRMED";
         /**
          * RecurringExpenseInput
          * @description Request body for POST/PUT /api/v1/recurring-expenses.
@@ -15588,6 +15801,318 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DashboardSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_receipt_inbox_api_v1_receipt_inbox_get: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["ReceiptInboxStatus"] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptInboxListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_receipt_inbox_api_v1_receipt_inbox_post: {
+        parameters: {
+            query?: {
+                language?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_create_receipt_inbox_api_v1_receipt_inbox_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptInboxRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_receipt_inbox_api_v1_receipt_inbox__inbox_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                inbox_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptInboxRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discard_receipt_inbox_api_v1_receipt_inbox__inbox_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                inbox_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptInboxConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    append_receipt_inbox_files_api_v1_receipt_inbox__inbox_id__files_post: {
+        parameters: {
+            query?: {
+                language?: string;
+            };
+            header?: never;
+            path: {
+                inbox_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_append_receipt_inbox_files_api_v1_receipt_inbox__inbox_id__files_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptInboxRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptInboxConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_receipt_inbox_file_api_v1_receipt_inbox__inbox_id__files__file_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                inbox_id: string;
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptInboxRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptInboxConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    extract_receipt_inbox_api_v1_receipt_inbox__inbox_id__extract_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                inbox_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReceiptInboxExtractRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptInboxRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptInboxConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_receipt_inbox_api_v1_receipt_inbox__inbox_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                inbox_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptInboxConfirmationRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptInboxConflict"];
                 };
             };
             /** @description Validation Error */

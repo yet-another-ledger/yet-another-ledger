@@ -9,8 +9,9 @@ Architecture
   transport without touching the network (D6 – never hit real endpoints in tests).
 - PDF receipts are rasterised with ``pypdfium2`` (pure-wheel, no poppler) and
   encoded as PNG images for the multimodal ``image_url`` parts (D16).
-- The extraction result (``ExpenseAIPrefill``) is **never persisted** – it is
-  returned as-is for the user to review and confirm (D5).
+- The legacy Expense endpoint returns ``ExpenseAIPrefill`` without persisting it.
+  Receipt inbox callers persist only the parsed, validated prefill plus a safe
+  state/error code; provider responses and source bytes are never persisted.
 
 Security
 --------
@@ -204,6 +205,35 @@ class ChatCompletionTruncatedError(RuntimeError):
     """The provider stopped because the requested completion budget was exhausted."""
 
 
+class AIUnavailableError(ValueError):
+    """A safe, stable reason why extraction is not configured or enabled."""
+
+    def __init__(self, code: str, message: str | None = None):
+        self.code = code
+        super().__init__(message or code)
+
+
+class AIExtractionError(RuntimeError):
+    """A safe provider failure code without private response details."""
+
+    def __init__(self, code: str, message: str | None = None):
+        self.code = code
+        messages = {
+            "AI_TIMEOUT": (
+                "AI model request timed out. The receipt may be too complex or the "
+                "service is temporarily unavailable."
+            ),
+            "AI_PROVIDER_ERROR": (
+                "The AI service could not process the receipt. Check the AI settings "
+                "or retry later."
+            ),
+            "AI_INVALID_RESPONSE": (
+                "AI returned an invalid response. Please retry or enter the details manually."
+            ),
+        }
+        super().__init__(message or messages.get(code, "AI extraction failed."))
+
+
 # ---------------------------------------------------------------------------
 # Config resolution (mirrors services/email.py::_get_smtp_config)
 # ---------------------------------------------------------------------------
@@ -373,6 +403,23 @@ def _build_messages(
 
     content.append({"type": "text", "text": prompt_text})
 
+    return [{"role": "user", "content": content}]
+
+
+def _build_group_messages(
+    files: list[tuple[str, list[bytes]]], prompt_text: str
+) -> list[dict[str, Any]]:
+    """Build one multimodal request, preserving each source image's MIME."""
+    content: list[dict[str, Any]] = []
+    for mime_type, pages in files:
+        resolved_mime = "image/png" if mime_type == "application/pdf" else mime_type
+        for image_bytes in pages:
+            encoded = base64.b64encode(image_bytes).decode("ascii")
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{resolved_mime};base64,{encoded}"},
+            })
+    content.append({"type": "text", "text": prompt_text})
     return [{"role": "user", "content": content}]
 
 
@@ -599,7 +646,7 @@ async def _match_category(
 
 
 # ---------------------------------------------------------------------------
-# Public API: extract_from_attachment
+# Public API: extract_from_attachment / extract_from_files
 # ---------------------------------------------------------------------------
 
 
@@ -621,7 +668,8 @@ async def extract_from_attachment(
     5. Build Chat Completions request + call model.
     6. Parse output defensively → ``ExpenseAIPrefill`` (all nullable).
     7. Best-effort category name matching.
-    8. Return the prefill – never persisted (D5).
+    8. Return the prefill. The legacy endpoint does not persist it; inbox
+       callers persist only this validated model, never provider output.
 
     Raises
     ------
@@ -649,6 +697,10 @@ async def extract_from_attachment(
         raise LookupError(
             f"Attachment {attachment_id} not found or does not belong to this company."
         )
+    if isinstance(attachment.receipt_inbox_id, uuid.UUID):
+        raise LookupError(
+            "Pending inbox attachments can only be extracted through the inbox workflow."
+        )
 
     # 2. Check AI config
     ai_cfg = await _get_ai_config(session)
@@ -658,22 +710,37 @@ async def extract_from_attachment(
             "this feature."
         )
     if not ai_cfg.api_key:
-        raise ValueError(
-            "AI API key is not configured. Add your key in Settings → AI."
-        )
+        raise ValueError("AI API key is not configured. Add your key in Settings → AI.")
     if not ai_cfg.model:
-        raise ValueError(
-            "AI model is not configured. Set the model name in Settings → AI."
-        )
+        raise ValueError("AI model is not configured. Set the model name in Settings → AI.")
 
-    # 3. Read bytes from storage (get_storage is module-level for testability)
-    storage = get_storage()
-    raw_bytes = storage.open(attachment.storage_key)
+    # Keep the legacy entry point and its guards while sharing the exact same
+    # parser/prompt/model implementation as whole inbox groups.
+    return await extract_from_files(
+        session, company_id,
+        [(attachment.mime_type, get_storage().open(attachment.storage_key))],
+        client=client, language=language,
+    )
 
-    # 4. Rasterise to image list (raises ValueError for unsupported MIME → 422)
-    image_list = _attachment_to_images(attachment.mime_type, raw_bytes)
 
-    # 5. Build prompt and call model
+async def extract_from_files(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    files: list[tuple[str, bytes]],
+    client: httpx.AsyncClient | None = None,
+    language: str | None = None,
+    strict_response: bool = False,
+) -> ExpenseAIPrefill:
+    """Extract one suggestion from a complete ordered group of files."""
+    if not files:
+        raise ValueError("At least one receipt file is required.")
+    ai_cfg = await _get_ai_config(session)
+    if not ai_cfg.enabled:
+        raise AIUnavailableError("AI_DISABLED", "AI receipt extraction is disabled.")
+    if not ai_cfg.api_key or not ai_cfg.model or not ai_cfg.base_url:
+        raise AIUnavailableError("AI_NOT_CONFIGURED", "AI is not configured.")
+
+    # Build prompt and call model.
     date_context = (
         f"\n\nFor reference, today's date is {date.today().isoformat()}. "
         "A receipt date ON OR BEFORE today is normal — do NOT flag it as future. "
@@ -688,8 +755,11 @@ async def extract_from_attachment(
         + _OUTPUT_CONTRACT
     )
 
-    mime_hint = attachment.mime_type.split(";")[0].strip().lower()
-    messages = _build_messages(image_list, prompt_text, mime_hint=mime_hint)
+    group_images: list[tuple[str, list[bytes]]] = []
+    for mime, raw_bytes in files:
+        normalized_mime = mime.split(";")[0].strip().lower()
+        group_images.append((normalized_mime, _attachment_to_images(normalized_mime, raw_bytes)))
+    messages = _build_group_messages(group_images, prompt_text)
 
     try:
         raw_response = await _call_chat_completions(
@@ -701,34 +771,38 @@ async def extract_from_attachment(
             max_tokens=RECEIPT_EXTRACTION_MAX_TOKENS,
         )
     except httpx.TimeoutException as exc:
-        logger.warning("AI: request timed out for attachment %s", attachment_id)
-        raise RuntimeError(
+        raise AIExtractionError(
+            "AI_TIMEOUT",
             "AI model request timed out. The receipt may be too complex or the "
-            "service is temporarily unavailable."
+            "service is temporarily unavailable.",
         ) from exc
     except httpx.ConnectError as exc:
-        logger.warning("AI: connection error for attachment %s: %s", attachment_id, exc)
-        raise RuntimeError(
-            "Could not connect to the AI service. Check the base URL in Settings → AI."
+        raise AIExtractionError(
+            "AI_PROVIDER_ERROR",
+            "Could not connect to the AI service. Check the base URL in Settings → AI.",
         ) from exc
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code
-        logger.warning(
-            "AI: HTTP %d error for attachment %s", status_code, attachment_id
-        )
-        raise RuntimeError(
-            f"AI service returned HTTP {status_code}. "
-            "Check your API key and model configuration."
+        logger.warning("AI provider returned HTTP %d", status_code)
+        raise AIExtractionError(
+            "AI_PROVIDER_ERROR",
+            f"AI service returned HTTP {status_code}. Check your API key and model configuration.",
         ) from exc
-    except RuntimeError:
-        raise
+    except ChatCompletionTruncatedError as exc:
+        raise AIExtractionError("AI_INVALID_RESPONSE") from exc
+    except RuntimeError as exc:
+        raise AIExtractionError("AI_INVALID_RESPONSE") from exc
     except Exception as exc:
-        logger.warning(
-            "AI: unexpected error for attachment %s: %s", attachment_id, exc
-        )
-        raise RuntimeError(f"AI extraction failed: {exc}") from exc
+        raise AIExtractionError("AI_PROVIDER_ERROR") from exc
 
     # 6. Parse output defensively
+    if strict_response:
+        try:
+            valid_json = json.loads(_strip_code_fence(raw_response))
+        except (json.JSONDecodeError, ValueError):
+            raise AIExtractionError("AI_INVALID_RESPONSE") from None
+        if not isinstance(valid_json, dict):
+            raise AIExtractionError("AI_INVALID_RESPONSE")
     parsed = _parse_model_output(raw_response)
 
     # 7. Best-effort category matching

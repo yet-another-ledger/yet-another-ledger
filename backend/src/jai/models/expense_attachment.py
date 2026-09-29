@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -37,6 +38,13 @@ class ExpenseAttachment(Base):
     """Metadata for a receipt file attached to an expense."""
 
     __tablename__ = "expense_attachment"
+    __table_args__ = (
+        CheckConstraint(
+            "(expense_id IS NOT NULL AND receipt_inbox_id IS NULL) OR "
+            "(expense_id IS NULL AND receipt_inbox_id IS NOT NULL)",
+            name="ck_expense_attachment_exactly_one_parent",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -51,10 +59,17 @@ class ExpenseAttachment(Base):
     )
 
     # -- Parent expense (CASCADE: delete expense → delete metadata rows, D12) --
-    expense_id: Mapped[uuid.UUID] = mapped_column(
+    expense_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("expense.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+        index=True,
+    )
+
+    receipt_inbox_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("receipt_inbox.id", ondelete="CASCADE"),
+        nullable=True,
         index=True,
     )
 

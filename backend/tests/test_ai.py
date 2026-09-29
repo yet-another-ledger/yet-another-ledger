@@ -983,6 +983,54 @@ async def test_extract_from_attachment_happy_path_png() -> None:
 
 
 @pytest.mark.asyncio
+async def test_extract_from_files_preserves_mixed_image_mimes_and_filters_fields() -> None:
+    """A mixed receipt group keeps each image MIME and persists only prefill fields."""
+    import uuid
+
+    from jai.services.ai import extract_from_files
+
+    session = AsyncMock()
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=lambda: None)
+    )
+    cfg = AiSettings(
+        enabled=True, api_key="sk-group-test", model="vision", base_url="http://group-ai"
+    )
+    # Inputs can be tiny opaque test bytes: only the MIME/message construction matters here.
+    response = {"choices": [{"message": {"content": (
+        '{"summary":"fuel","vat_treatment_id":"attacker",'
+        '"vat_rate_id":"attacker","confidence":"medium"}'
+    )}}]}
+    requested: list[dict[str, object]] = []
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        import json
+
+        requested.append(json.loads(request.content))
+        return httpx.Response(200, json=response)
+
+    with patch("jai.services.ai._get_ai_config", new=AsyncMock(return_value=cfg)):
+        with respx.mock(base_url="http://group-ai") as mock:
+            mock.post("/chat/completions").mock(side_effect=capture)
+            async with httpx.AsyncClient() as client:
+                result = await extract_from_files(
+                    session,
+                    uuid.uuid4(),
+                    [("image/jpeg", b"jpeg"), ("image/webp", b"webp"), ("image/png", b"png")],
+                    client=client,
+                )
+
+    content = requested[0]["messages"][0]["content"]
+    urls = [part["image_url"]["url"] for part in content if part["type"] == "image_url"]
+    assert [url.split(";", 1)[0] for url in urls] == [
+        "data:image/jpeg", "data:image/webp", "data:image/png"
+    ]
+    assert result.summary == "fuel"
+    assert not hasattr(result, "vat_treatment_id")
+    assert not hasattr(result, "vat_rate_id")
+
+
+@pytest.mark.asyncio
 async def test_extract_from_attachment_language_zh_in_prompt() -> None:
     """language='zh' → sent prompt contains Simplified Chinese context + category guard."""
     user_content = await _run_extract_capture_prompt(language="zh", base_url="http://fake-zh")

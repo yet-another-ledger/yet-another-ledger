@@ -33,6 +33,7 @@ from jai.api.payments import router as payments_router
 from jai.api.pdf import router as pdf_router
 from jai.api.products import router as products_router
 from jai.api.quotes import router as quotes_router
+from jai.api.receipt_inbox import router as receipt_inbox_router
 from jai.api.recurring_expenses import router as recurring_expenses_router
 from jai.api.reports import router as reports_router
 from jai.api.settings import router as settings_router
@@ -268,6 +269,7 @@ def create_app() -> FastAPI:
     app.include_router(attachments_router)
     app.include_router(content_router)
     app.include_router(reports_router)
+    app.include_router(receipt_inbox_router)
 
     # -- Static files + SPA fallback (deployment mode) ----------------------
     if settings.static_dir is not None:

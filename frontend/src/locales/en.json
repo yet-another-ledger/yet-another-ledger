@@ -78,8 +78,17 @@
     "quoteTotal": "Original quote gross",
     "finalTotal": "Full project gross",
     "residualPayable": "Residual payable",
-    "modes": { "UNSET": "Choose a billing mode", "DIRECT_INVOICE": "Direct invoice", "RECEIPT_ONLY": "Receipt-only deposits", "FORMAL_ADVANCE": "Formal advance and final" },
-    "artifactReasons": { "DOWNLOAD": "Downloaded", "SEND": "Sent by email", "UPLOAD": "Uploaded original" },
+    "modes": {
+      "UNSET": "Choose a billing mode",
+      "DIRECT_INVOICE": "Direct invoice",
+      "RECEIPT_ONLY": "Receipt-only deposits",
+      "FORMAL_ADVANCE": "Formal advance and final"
+    },
+    "artifactReasons": {
+      "DOWNLOAD": "Downloaded",
+      "SEND": "Sent by email",
+      "UPLOAD": "Uploaded original"
+    },
     "upload": {
       "permanentWarning": "This original PDF is permanent in JAI: it cannot be deleted or replaced.",
       "fileLabel": "Original historical PDF",
@@ -98,11 +107,55 @@
       "confirmTitle": "Confirm permanent original upload",
       "confirm": "Upload permanently",
       "confirmBody": "Upload {filename} as the original artifact for Invoice {invoice}? JAI provides no delete or replace action.",
-      "status": { "MATCH": "Match", "MISMATCH": "Mismatch", "NOT_FOUND": "Not found", "WARNING": "Warning", "INCONCLUSIVE": "Inconclusive" },
-      "fields": { "DOCUMENT_NUMBER": "Document number", "DOCUMENT_KIND": "Document kind", "DOCUMENT_DATE": "Document date", "SUPPLY_OR_ADVANCE_DATE": "Supply or advance date", "SELLER": "Seller", "BUYER": "Buyer", "CURRENCY": "Currency", "TOTAL_EXCL_VAT": "Total excluding VAT", "VAT_TOTAL": "VAT total", "TOTAL_INCL_VAT": "Total including VAT" }
+      "status": {
+        "MATCH": "Match",
+        "MISMATCH": "Mismatch",
+        "NOT_FOUND": "Not found",
+        "WARNING": "Warning",
+        "INCONCLUSIVE": "Inconclusive"
+      },
+      "fields": {
+        "DOCUMENT_NUMBER": "Document number",
+        "DOCUMENT_KIND": "Document kind",
+        "DOCUMENT_DATE": "Document date",
+        "SUPPLY_OR_ADVANCE_DATE": "Supply or advance date",
+        "SELLER": "Seller",
+        "BUYER": "Buyer",
+        "CURRENCY": "Currency",
+        "TOTAL_EXCL_VAT": "Total excluding VAT",
+        "VAT_TOTAL": "VAT total",
+        "TOTAL_INCL_VAT": "Total including VAT"
+      }
     },
-    "relations": { "QUOTE_TO_INVOICE": "Quote converted to invoice", "QUOTE_TO_PAYMENT": "Quote payment", "INVOICE_TO_PAYMENT": "Invoice payment", "CREDIT_NOTE_TO_REFUND": "Credit refund", "INVOICE_TO_CREDIT_NOTE": "Credit of source", "REPLACEMENT_OF": "Replacement of credit", "COMPENSATES_CREDIT": "Compensates credit" },
-    "events": { "MODE_LOCKED": "Billing mode locked", "INVOICE_CREATED": "Document draft created", "QUOTE_PAYMENT_CREATED": "Quote payment recorded", "QUOTE_PAYMENT_UPDATED": "Quote payment updated", "QUOTE_PAYMENT_DELETED": "Quote payment deleted", "INVOICE_DELETED": "Document deleted", "INVOICE_UPDATED": "Document updated", "INVOICE_ISSUED": "Document issued", "INVOICE_STATUS_CHANGED": "Document status changed", "INVOICE_PAYMENT_CREATED": "Invoice payment recorded", "INVOICE_PAYMENT_UPDATED": "Invoice payment updated", "INVOICE_PAYMENT_DELETED": "Invoice payment deleted", "REFUND_CREATED": "Refund recorded", "REFUND_UPDATED": "Refund updated", "REFUND_DELETED": "Refund deleted", "REPLACEMENT_CREATED": "Replacement draft created", "COMPENSATING_INVOICE_CREATED": "Compensating draft created", "PROJECT_CANCELLATION_CREDIT_CREATED": "Cancellation Credit draft created" },
+    "relations": {
+      "QUOTE_TO_INVOICE": "Quote converted to invoice",
+      "QUOTE_TO_PAYMENT": "Quote payment",
+      "INVOICE_TO_PAYMENT": "Invoice payment",
+      "CREDIT_NOTE_TO_REFUND": "Credit refund",
+      "INVOICE_TO_CREDIT_NOTE": "Credit of source",
+      "REPLACEMENT_OF": "Replacement of credit",
+      "COMPENSATES_CREDIT": "Compensates credit"
+    },
+    "events": {
+      "MODE_LOCKED": "Billing mode locked",
+      "INVOICE_CREATED": "Document draft created",
+      "QUOTE_PAYMENT_CREATED": "Quote payment recorded",
+      "QUOTE_PAYMENT_UPDATED": "Quote payment updated",
+      "QUOTE_PAYMENT_DELETED": "Quote payment deleted",
+      "INVOICE_DELETED": "Document deleted",
+      "INVOICE_UPDATED": "Document updated",
+      "INVOICE_ISSUED": "Document issued",
+      "INVOICE_STATUS_CHANGED": "Document status changed",
+      "INVOICE_PAYMENT_CREATED": "Invoice payment recorded",
+      "INVOICE_PAYMENT_UPDATED": "Invoice payment updated",
+      "INVOICE_PAYMENT_DELETED": "Invoice payment deleted",
+      "REFUND_CREATED": "Refund recorded",
+      "REFUND_UPDATED": "Refund updated",
+      "REFUND_DELETED": "Refund deleted",
+      "REPLACEMENT_CREATED": "Replacement draft created",
+      "COMPENSATING_INVOICE_CREATED": "Compensating draft created",
+      "PROJECT_CANCELLATION_CREDIT_CREATED": "Cancellation Credit draft created"
+    },
     "errors": {
       "UNKNOWN": "The operation could not be completed. Refresh and try again.",
       "INVALID_ARTIFACT_FILE": "Choose a valid PDF file and try again.",
@@ -169,7 +222,8 @@
     "expenses": "Expenses",
     "recurring": "Recurring",
     "reports": "Reports",
-    "openMenu": "Open navigation menu"
+    "openMenu": "Open navigation menu",
+    "receiptInbox": "Receipt Inbox"
   },
   "health": {
     "backend": "backend: {status}",
@@ -1542,5 +1596,57 @@
       "empty": "No confirmed expenses in this date range.",
       "uncategorised": "Uncategorised"
     }
+  },
+  "receiptInbox": {
+    "title": "Receipt Inbox",
+    "back": "Back to inbox",
+    "pending": "Pending",
+    "processed": "Processed",
+    "providerNotice": "When AI extraction is enabled, receipt content is sent to your configured AI provider.",
+    "chooseFiles": "Choose receipt files",
+    "upload": "Upload receipts",
+    "uploading": "Uploading…",
+    "empty": "No inbox items.",
+    "unnamed": "Receipt",
+    "file": "file",
+    "files": "files",
+    "ai": {
+      "NOT_RUN": "AI extraction has not run",
+      "RUNNING": "AI extraction in progress",
+      "READY": "Suggestions ready for review",
+      "UNAVAILABLE": "AI extraction unavailable",
+      "FAILED": "AI extraction failed"
+    },
+    "errors": {
+      "AI_DISABLED": "AI extraction is disabled",
+      "AI_NOT_CONFIGURED": "AI provider is not configured",
+      "AI_TIMEOUT": "AI provider timed out",
+      "AI_PROVIDER_ERROR": "AI provider request failed",
+      "AI_INVALID_RESPONSE": "AI returned incomplete or invalid data",
+      "INBOX_NOT_PENDING": "This item is no longer pending",
+      "FILE_LIMIT_REACHED": "The item can contain at most five files",
+      "LAST_FILE": "Keep at least one file; discard the item to remove all files",
+      "ALREADY_CONFIRMED": "This item was already confirmed"
+    },
+    "missingFields": "Some receipt details are missing or uncertain. Review every field before confirming.",
+    "retry": "Retry extraction",
+    "retrying": "Retrying…",
+    "discard": "Discard item",
+    "receiptPreview": "Receipt preview",
+    "removing": "Removing…",
+    "addFiles": "Choose more files",
+    "append": "Add files",
+    "reviewTitle": "Review and confirm expense",
+    "confirm": "Confirm expense",
+    "confirming": "Confirming…",
+    "confirmed": "Expense confirmed.",
+    "validation": "Choose a category, VAT treatment, VAT rate, and enter both amounts.",
+    "alreadyConfirmed": "This receipt was already confirmed. Open the existing expense below.",
+    "conflict": "The item changed. Reload it and review the current state.",
+    "openExpense": "Open expense",
+    "expenseUnavailable": "The linked expense is unavailable (it may have been deleted).",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "pageRange": "{start}–{end} of {total}"
   }
 }

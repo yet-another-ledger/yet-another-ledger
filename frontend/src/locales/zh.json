@@ -78,8 +78,17 @@
     "quoteTotal": "原报价含税总额",
     "finalTotal": "完整项目含税总额",
     "residualPayable": "剩余应收",
-    "modes": { "UNSET": "选择结算模式", "DIRECT_INVOICE": "直接开票", "RECEIPT_ONLY": "仅收据定金", "FORMAL_ADVANCE": "正式预付款和最终结算" },
-    "artifactReasons": { "DOWNLOAD": "已下载", "SEND": "已通过邮件发送", "UPLOAD": "已上传原件" },
+    "modes": {
+      "UNSET": "选择结算模式",
+      "DIRECT_INVOICE": "直接开票",
+      "RECEIPT_ONLY": "仅收据定金",
+      "FORMAL_ADVANCE": "正式预付款和最终结算"
+    },
+    "artifactReasons": {
+      "DOWNLOAD": "已下载",
+      "SEND": "已通过邮件发送",
+      "UPLOAD": "已上传原件"
+    },
     "upload": {
       "permanentWarning": "此原始 PDF 在 JAI 中永久保留：无法删除或替换。",
       "fileLabel": "历史原始 PDF",
@@ -98,11 +107,55 @@
       "confirmTitle": "确认永久上传原始文档",
       "confirm": "永久上传",
       "confirmBody": "要将 {filename} 上传为发票 {invoice} 的原始文档吗？JAI 不提供删除或替换操作。",
-      "status": { "MATCH": "匹配", "MISMATCH": "不匹配", "NOT_FOUND": "未找到", "WARNING": "警告", "INCONCLUSIVE": "无法确定" },
-      "fields": { "DOCUMENT_NUMBER": "单据编号", "DOCUMENT_KIND": "单据类型", "DOCUMENT_DATE": "单据日期", "SUPPLY_OR_ADVANCE_DATE": "供货或预付款日期", "SELLER": "销售方", "BUYER": "购买方", "CURRENCY": "货币", "TOTAL_EXCL_VAT": "未含 VAT 总额", "VAT_TOTAL": "VAT 总额", "TOTAL_INCL_VAT": "含 VAT 总额" }
+      "status": {
+        "MATCH": "匹配",
+        "MISMATCH": "不匹配",
+        "NOT_FOUND": "未找到",
+        "WARNING": "警告",
+        "INCONCLUSIVE": "无法确定"
+      },
+      "fields": {
+        "DOCUMENT_NUMBER": "单据编号",
+        "DOCUMENT_KIND": "单据类型",
+        "DOCUMENT_DATE": "单据日期",
+        "SUPPLY_OR_ADVANCE_DATE": "供货或预付款日期",
+        "SELLER": "销售方",
+        "BUYER": "购买方",
+        "CURRENCY": "货币",
+        "TOTAL_EXCL_VAT": "未含 VAT 总额",
+        "VAT_TOTAL": "VAT 总额",
+        "TOTAL_INCL_VAT": "含 VAT 总额"
+      }
     },
-    "relations": { "QUOTE_TO_INVOICE": "报价已转换为发票", "QUOTE_TO_PAYMENT": "报价收款", "INVOICE_TO_PAYMENT": "发票收款", "CREDIT_NOTE_TO_REFUND": "贷项退款", "INVOICE_TO_CREDIT_NOTE": "来源单据的贷项", "REPLACEMENT_OF": "贷项替换", "COMPENSATES_CREDIT": "补偿贷项" },
-    "events": { "MODE_LOCKED": "结算模式已锁定", "INVOICE_CREATED": "已创建单据草稿", "QUOTE_PAYMENT_CREATED": "已登记报价收款", "QUOTE_PAYMENT_UPDATED": "已更新报价收款", "QUOTE_PAYMENT_DELETED": "已删除报价收款", "INVOICE_DELETED": "已删除单据", "INVOICE_UPDATED": "已更新单据", "INVOICE_ISSUED": "已开具单据", "INVOICE_STATUS_CHANGED": "单据状态已变化", "INVOICE_PAYMENT_CREATED": "已登记发票收款", "INVOICE_PAYMENT_UPDATED": "已更新发票收款", "INVOICE_PAYMENT_DELETED": "已删除发票收款", "REFUND_CREATED": "已登记退款", "REFUND_UPDATED": "已更新退款", "REFUND_DELETED": "已删除退款", "REPLACEMENT_CREATED": "已创建替换草稿", "COMPENSATING_INVOICE_CREATED": "已创建补偿草稿", "PROJECT_CANCELLATION_CREDIT_CREATED": "已创建取消贷项草稿" },
+    "relations": {
+      "QUOTE_TO_INVOICE": "报价已转换为发票",
+      "QUOTE_TO_PAYMENT": "报价收款",
+      "INVOICE_TO_PAYMENT": "发票收款",
+      "CREDIT_NOTE_TO_REFUND": "贷项退款",
+      "INVOICE_TO_CREDIT_NOTE": "来源单据的贷项",
+      "REPLACEMENT_OF": "贷项替换",
+      "COMPENSATES_CREDIT": "补偿贷项"
+    },
+    "events": {
+      "MODE_LOCKED": "结算模式已锁定",
+      "INVOICE_CREATED": "已创建单据草稿",
+      "QUOTE_PAYMENT_CREATED": "已登记报价收款",
+      "QUOTE_PAYMENT_UPDATED": "已更新报价收款",
+      "QUOTE_PAYMENT_DELETED": "已删除报价收款",
+      "INVOICE_DELETED": "已删除单据",
+      "INVOICE_UPDATED": "已更新单据",
+      "INVOICE_ISSUED": "已开具单据",
+      "INVOICE_STATUS_CHANGED": "单据状态已变化",
+      "INVOICE_PAYMENT_CREATED": "已登记发票收款",
+      "INVOICE_PAYMENT_UPDATED": "已更新发票收款",
+      "INVOICE_PAYMENT_DELETED": "已删除发票收款",
+      "REFUND_CREATED": "已登记退款",
+      "REFUND_UPDATED": "已更新退款",
+      "REFUND_DELETED": "已删除退款",
+      "REPLACEMENT_CREATED": "已创建替换草稿",
+      "COMPENSATING_INVOICE_CREATED": "已创建补偿草稿",
+      "PROJECT_CANCELLATION_CREDIT_CREATED": "已创建取消贷项草稿"
+    },
     "errors": {
       "UNKNOWN": "操作未能完成，请刷新后重试。",
       "INVALID_ARTIFACT_FILE": "请选择有效的 PDF 文件后重试。",
@@ -169,7 +222,8 @@
     "expenses": "开支",
     "recurring": "周期开支",
     "reports": "报表",
-    "openMenu": "打开导航菜单"
+    "openMenu": "打开导航菜单",
+    "receiptInbox": "票据收件箱"
   },
   "health": {
     "backend": "后端：{status}",
@@ -1542,5 +1596,57 @@
       "empty": "此日期区间内无已确认开支。",
       "uncategorised": "未分类"
     }
+  },
+  "receiptInbox": {
+    "title": "票据收件箱",
+    "back": "返回收件箱",
+    "pending": "待处理",
+    "processed": "已处理",
+    "providerNotice": "启用 AI 提取时，票据内容会发送给你配置的 AI 提供商。",
+    "chooseFiles": "选择票据文件",
+    "upload": "上传票据",
+    "uploading": "正在上传…",
+    "empty": "收件箱暂无项目。",
+    "unnamed": "票据",
+    "file": "个文件",
+    "files": "个文件",
+    "ai": {
+      "NOT_RUN": "尚未运行 AI 提取",
+      "RUNNING": "AI 正在提取",
+      "READY": "建议已就绪，请审核",
+      "UNAVAILABLE": "AI 提取不可用",
+      "FAILED": "AI 提取失败"
+    },
+    "errors": {
+      "AI_DISABLED": "AI 提取已关闭",
+      "AI_NOT_CONFIGURED": "尚未配置 AI 提供商",
+      "AI_TIMEOUT": "AI 提供商响应超时",
+      "AI_PROVIDER_ERROR": "AI 提供商请求失败",
+      "AI_INVALID_RESPONSE": "AI 返回的数据不完整或无效",
+      "INBOX_NOT_PENDING": "此项目已不在待处理状态",
+      "FILE_LIMIT_REACHED": "每个项目最多包含五个文件",
+      "LAST_FILE": "至少保留一个文件；如需全部移除，请丢弃项目",
+      "ALREADY_CONFIRMED": "此项目已确认"
+    },
+    "missingFields": "部分票据字段缺失或不确定。确认前请逐项审核。",
+    "retry": "重试提取",
+    "retrying": "正在重试…",
+    "discard": "丢弃项目",
+    "receiptPreview": "票据预览",
+    "removing": "正在移除…",
+    "addFiles": "选择更多文件",
+    "append": "添加文件",
+    "reviewTitle": "审核并确认开支",
+    "confirm": "确认开支",
+    "confirming": "正在确认…",
+    "confirmed": "开支已确认。",
+    "validation": "请选择分类、VAT 处理类别和税率，并填写两项金额。",
+    "alreadyConfirmed": "此票据已确认。请通过下方链接打开已有开支。",
+    "conflict": "项目状态已改变。请重新加载并审核当前内容。",
+    "openExpense": "打开开支",
+    "expenseUnavailable": "关联的开支不可用（可能已删除）。",
+    "previousPage": "上一页",
+    "nextPage": "下一页",
+    "pageRange": "第 {start}–{end} 项，共 {total} 项"
   }
 }
