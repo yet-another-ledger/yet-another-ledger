@@ -40,7 +40,7 @@ class TestDefaults:
         assert Settings.model_fields["static_dir"].default is None
 
     def test_app_version_default(self) -> None:
-        assert Settings.model_fields["app_version"].default == "0.6.1"
+        assert Settings.model_fields["app_version"].default == "0.7.0"
 
     def test_artifact_upload_limit_is_independent_from_receipt_limit(self) -> None:
         assert Settings.model_fields["max_artifact_bytes"].default == 10 * 1024 * 1024

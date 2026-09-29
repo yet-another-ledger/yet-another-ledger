@@ -6,7 +6,7 @@ Self-hosted invoicing and small-business administration for freelancers and smal
 
 Built with **FastAPI + Vue 3 + PostgreSQL**.
 
-> **Status — pre-1.0 (`v0.6.1`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and possible breaking changes before `v1.0`.
+> **Status — pre-1.0 (`v0.7.0`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and possible breaking changes before `v1.0`.
 
 ## Features
 
@@ -14,7 +14,7 @@ Built with **FastAPI + Vue 3 + PostgreSQL**.
 - **Quotes** — reusable content blocks/templates, auto-expiry, and an immutable choice between direct invoicing, receipt-only deposits, or formal staged Advance/Final invoicing.
 - **Cost estimation → quote** — internal margin-based costing that never leaks cost/margin to the customer.
 - **Payments & refunds** — partial payments, Quote deposits, automatic settlement states, Credit-linked Refunds, and Refund Confirmations.
-- **Expenses** — AI receipt extraction, recurring expenses, bookkeeping fields (paid-by / business-use % / depreciation years).
+- **Expenses** — receipt inbox for review before posting, AI extraction from image/PDF originals, recurring expenses, bookkeeping fields (paid-by / business-use % / depreciation years).
 - **Customers & catalog** — addresses, VAT IDs, per-customer currency & document language; product/material catalog.
 - **Documents** — EN/ZH PDFs and email for invoices, quotes, receipts and Refund Confirmations, with issue-time party snapshots, exact downloaded/sent artifact retention, and immutable historical Invoice PDF backfill with optional advisory AI comparison.
 - **Reports** — Profit & Loss, **Dutch BTW VAT-return summary**, ICP listing, expense report, and an ECharts dashboard, including exactly-once Advance/Final/Credit projections.
@@ -55,7 +55,7 @@ Open **http://localhost:8000**, register the first (owner) account, and set up T
 
 To stop: `docker compose down` (add `-v` to also drop the database volume).
 
-> `:latest` tracks the newest non-prerelease release; pin this release by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.6.1` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
+> `:latest` tracks the newest non-prerelease release; pin this release by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.7.0` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
 
 ## Configuration
 
@@ -85,7 +85,7 @@ Backend lives in `backend/` (`uv run ...`), frontend in `frontend/` (`npm run ..
 
 ## Roadmap
 
-Milestones M0–M13 are complete. M13 adds immutable historical PDF backfill for issued formal Invoices with no retained artifact, optional advisory AI comparison, and exact canonical reuse by ordinary Download/Send actions. See [`docs/plan/milestones/M13.md`](docs/plan/milestones/M13.md) and [`docs/plan/roadmap.md`](docs/plan/roadmap.md).
+Milestones M0–M14 are complete. M14 adds a receipt inbox: upload originals before creating an Expense, review AI-filled fields, then explicitly confirm the accounting entry. See [`docs/plan/milestones/M14.md`](docs/plan/milestones/M14.md) and [`docs/plan/roadmap.md`](docs/plan/roadmap.md).
 
 ## Documentation
 

@@ -6,7 +6,7 @@
 
 技术栈 **FastAPI + Vue 3 + PostgreSQL**。
 
-> **状态——1.0 前版本（`v0.6.1`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
+> **状态——1.0 前版本（`v0.7.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
 
 ## 功能
 
@@ -14,7 +14,7 @@
 - **报价** —— 可复用内容块/模板、到期自动失效，并可不可变地选择直接开票、仅收据定金或正式分阶段 Advance/Final 开票。
 - **成本核算 → 报价** —— 内部按 margin 反推卖价，成本/毛利绝不泄漏给客户。
 - **收付款与退款** —— 分次收款、Quote 定金、自动结算状态、关联 Credit 的 Refund，以及 Refund Confirmation。
-- **开支** —— AI 票据识别填单、周期性开支、记账字段（付款来源 / 业务使用 % / 折旧年限）。
+- **开支** —— 先审阅后入账的票据收件箱、图片／PDF 原件的 AI 提取、周期性开支、记账字段（付款来源 / 业务使用 % / 折旧年限）。
 - **客户与目录** —— 地址、VAT 号、每客户默认币种与单据语言；产品/材料目录。
 - **单据** —— 发票、报价、收据和 Refund Confirmation 的中英 PDF/邮件，包含发出时交易方快照、实际下载/发送成品的精确留存，以及可选 AI 建议性比对的不可变历史 Invoice PDF 补传。
 - **报表** —— 盈亏（P/L）、**荷兰 BTW 申报汇总**、ICP 清单、开支报表和 ECharts 仪表盘，包含 Advance/Final/Credit 只计一次的投影。
@@ -54,7 +54,7 @@ docker compose up -d
 
 停止：`docker compose down`（加 `-v` 同时删除数据库卷）。
 
-> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.6.1`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
+> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.7.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
 
 ## 配置
 
@@ -84,7 +84,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 路线图
 
-M0–M13 里程碑均已完成。M13 为尚无留存 artifact 的已开具正式 Invoice 增加不可变历史 PDF 补传、可选的 AI 建议性比对，以及普通 Download/Send 对该原件的精确规范复用。详见 [`docs/plan/milestones/M13_zh.md`](docs/plan/milestones/M13_zh.md) 和 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md)。
+M0–M14 里程碑均已完成。M14 增加票据收件箱：先上传原件、审阅 AI 填入的字段，再显式确认入账。详见 [`docs/plan/milestones/M14_zh.md`](docs/plan/milestones/M14_zh.md) 和 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md)。
 
 ## 文档
 
