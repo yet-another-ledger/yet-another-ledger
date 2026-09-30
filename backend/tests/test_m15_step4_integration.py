@@ -23,7 +23,6 @@ import jai.services.ai as ai_service
 import jai.services.receipt_inbox as receipt_inbox_service
 from jai.config import Settings
 from jai.db import set_rls_company
-from jai.main import app
 from jai.models.agent_operation import AgentOperation
 from jai.models.agent_token import AgentToken
 from jai.models.company import Company
@@ -150,6 +149,8 @@ async def test_mcp_receipt_submit_replay_status_and_per_request_bearer(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    from test_agent_business_integration import _fresh_mcp_wire_app
+
     (
         company_id,
         other_company_id,
@@ -210,9 +211,10 @@ async def test_mcp_receipt_submit_replay_status_and_per_request_bearer(
         "files": encoded_files,
     }
 
+    transport_app = _fresh_mcp_wire_app()
     async with mcp_module.server.session_manager.run():
         async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://localhost"
+            transport=ASGITransport(app=transport_app), base_url="http://localhost"
         ) as client:
             session_id = await _initialize(client, secret1)
             listed = await client.post(
@@ -240,6 +242,10 @@ async def test_mcp_receipt_submit_replay_status_and_per_request_bearer(
                 "create_quote_draft",
                 "get_quote",
                 "update_quote_draft",
+                "preview_invoice",
+                "create_invoice_draft",
+                "get_invoice",
+                "update_invoice_draft",
             }
 
             bad_envelope_secret = "SENSITIVE_BASE64_ENVELOPE_AQIDBAUG"
@@ -524,7 +530,7 @@ async def test_mcp_receipt_submit_replay_status_and_per_request_bearer(
                 agent_receipts, "run_agent_mutation", wait_for_both_first_deliveries
             )
             async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://localhost"
+                transport=ASGITransport(app=transport_app), base_url="http://localhost"
             ) as second_client:
                 second_session_id = await _initialize(second_client, secret1)
                 first_delivery, second_delivery = await asyncio.gather(

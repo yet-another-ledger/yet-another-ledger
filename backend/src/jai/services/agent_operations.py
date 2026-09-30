@@ -23,7 +23,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jai.db import set_rls_company
 from jai.models.agent_operation import AgentOperation
 from jai.models.agent_token import AgentToken
-from jai.schemas.agent_tools import AgentSource, QuoteToolSnapshot, ReceiptSubmissionSnapshot
+from jai.schemas.agent_tools import (
+    AgentSource,
+    InvoiceToolSnapshot,
+    QuoteToolSnapshot,
+    ReceiptSubmissionSnapshot,
+)
 from jai.schemas.customer import CustomerRead
 from jai.schemas.invoice import InvoiceRead
 from jai.schemas.quote import QuoteRead
@@ -34,7 +39,7 @@ _SNAPSHOT_MODELS: dict[str, tuple[type[BaseModel], ...]] = {
     # Quote tool responses add the original BASE_URL-derived browser link.
     # Both explicit quote response shapes retain the business target type.
     "quote": (QuoteRead, QuoteToolSnapshot),
-    "invoice": (InvoiceRead,),
+    "invoice": (InvoiceRead, InvoiceToolSnapshot),
     # Explicit allowlist for safe receipt submission result fields. The
     # operation envelope (operation ID/status/target ID) is stored separately.
     "receipt": (ReceiptSubmissionSnapshot,),
@@ -219,6 +224,8 @@ def _assert_target_id_matches(target_type: str, target_id: uuid.UUID, result: Ba
     result_id = None
     if target_type == "quote" and isinstance(result, QuoteToolSnapshot):
         result_id = result.quote.id
+    elif target_type == "invoice" and isinstance(result, InvoiceToolSnapshot):
+        result_id = result.invoice.id
     elif id_field is not None and not isinstance(result, QuoteToolSnapshot):
         result_id = getattr(result, id_field, None)
     if result_id != target_id:

@@ -22,19 +22,26 @@ from jai.schemas.agent_tools import (
     CatalogListOutput,
     CreateCustomerInput,
     CreateCustomerOutput,
+    CreateInvoiceDraftInput,
     CreateQuoteDraftInput,
     CustomerListOutput,
     CustomerOutput,
     DocumentPreviewOutput,
     DocumentTemplateListOutput,
+    InvoiceOutput,
+    InvoiceToolSnapshot,
+    InvoiceWriteOutput,
+    PreviewInvoiceInput,
     PreviewQuoteInput,
     QuoteOutput,
     QuoteToolSnapshot,
     QuoteWriteOutput,
+    UpdateInvoiceDraftInput,
     UpdateQuoteDraftInput,
     VatOptionsOutput,
 )
 from jai.schemas.customer import CustomerRead
+from jai.schemas.invoice import InvoiceCalculationRequest, InvoiceWrite
 from jai.schemas.quote import QuoteCalculationRequest, QuoteRead, QuoteWrite
 from jai.services.agent_operations import (
     AgentOperationFailure,
@@ -50,8 +57,16 @@ from jai.services.customer import (
     get_customer,
     list_customers,
 )
-from jai.services.invoice import list_invoice_product_options
-from jai.services.pricing import calculate_quote
+from jai.services.invoice import (
+    _validate_line_fks as _validate_invoice_line_fks,
+)
+from jai.services.invoice import (
+    create_invoice,
+    get_invoice,
+    list_invoice_product_options,
+    update_invoice,
+)
+from jai.services.pricing import calculate_invoice, calculate_quote
 from jai.services.quote import (
     _validate_line_fks,
     create_quote_in_transaction,
@@ -63,6 +78,10 @@ from jai.services.vat import list_vat_rates, list_vat_treatments
 
 def _quote_web_url(quote_id: uuid.UUID) -> str:
     return f"{get_settings().base_url.rstrip('/')}/quotes/{quote_id}/edit"
+
+
+def _invoice_web_url(invoice_id: uuid.UUID) -> str:
+    return f"{get_settings().base_url.rstrip('/')}/invoices/{invoice_id}/edit"
 
 
 def _quote_calculation_request(body: QuoteWrite) -> QuoteCalculationRequest:
@@ -254,6 +273,187 @@ async def update_quote_draft(
     snapshot = QuoteToolSnapshot.model_validate(response.result_snapshot)
     return QuoteWriteOutput(
         quote=snapshot.quote,
+        operation=AgentWriteResult(
+            operation_id=response.operation_id,
+            status=cast(Literal["created", "replayed"], response.status),
+            target_id=response.target_id,
+            web_url=snapshot.web_url,
+        ),
+    )
+
+
+def _invoice_calculation_request(body: InvoiceWrite) -> InvoiceCalculationRequest:
+    return InvoiceCalculationRequest(
+        customer_id=body.customer_id,
+        invoice_date=body.invoice_date,
+        due_date=body.due_date,
+        currency=body.currency,
+        tax_mode=body.tax_mode,
+        amounts_include_vat=body.amounts_include_vat,
+        vat_treatment_id=body.vat_treatment_id,
+        document_vat_rate_id=body.document_vat_rate_id,
+        discount=body.discount,
+        lines=body.lines,
+    )
+
+
+async def preview_invoice(
+    session_maker: async_sessionmaker[AsyncSession],
+    principal: AgentPrincipal,
+    request: PreviewInvoiceInput,
+) -> DocumentPreviewOutput:
+    async with session_maker() as session, session.begin():
+        await set_rls_company(session, principal.company_id)
+        await _validate_invoice_line_fks(session, principal.company_id, request.invoice)
+        calculation = await calculate_invoice(
+            session,
+            company_id=principal.company_id,
+            request=_invoice_calculation_request(request.invoice),
+        )
+        return DocumentPreviewOutput(
+            subtotal=calculation.subtotal_excl_vat,
+            tax_total=calculation.vat_total,
+            total=calculation.total_incl_vat,
+            currency=request.invoice.currency
+            or await _company_currency(session, principal.company_id),
+        )
+
+
+async def _company_currency(session: AsyncSession, company_id: uuid.UUID) -> str:
+    currency = await session.scalar(select(Company.base_currency).where(Company.id == company_id))
+    if currency is None:
+        raise AgentOperationFailure("MCP_VALIDATION_FAILED")
+    return currency
+
+
+async def read_invoice(
+    session_maker: async_sessionmaker[AsyncSession],
+    principal: AgentPrincipal,
+    invoice_id: uuid.UUID,
+) -> InvoiceOutput | None:
+    async with session_maker() as session, session.begin():
+        await set_rls_company(session, principal.company_id)
+        invoice = await get_invoice(session, invoice_id, principal.company_id)
+        if invoice is None:
+            return None
+        if invoice.document_kind.value != "STANDARD":
+            raise AgentOperationFailure("MCP_VALIDATION_FAILED")
+        return InvoiceOutput(invoice=invoice, web_url=_invoice_web_url(invoice.id))
+
+
+async def create_invoice_draft(
+    session_maker: async_sessionmaker[AsyncSession],
+    principal: AgentPrincipal,
+    request: CreateInvoiceDraftInput,
+) -> InvoiceWriteOutput:
+    async def mutate(session: AsyncSession) -> AgentOperationValue:
+        try:
+            creator_id = await _quote_creator_id(session, principal)
+            company = await session.scalar(
+                select(Company).where(Company.id == principal.company_id)
+            )
+            if company is None:
+                raise AgentOperationFailure("MCP_VALIDATION_FAILED")
+            invoice = await create_invoice(
+                session,
+                request.invoice,
+                principal.company_id,
+                company.base_currency,
+                creator_id,
+                commit=False,
+            )
+        except ValueError:
+            raise AgentOperationFailure("MCP_VALIDATION_FAILED") from None
+        if invoice.document_kind.value != "STANDARD":
+            raise AgentOperationFailure("MCP_VALIDATION_FAILED")
+        return AgentOperationValue(
+            "invoice",
+            invoice.id,
+            InvoiceToolSnapshot(invoice=invoice, web_url=_invoice_web_url(invoice.id)),
+        )
+
+    async with session_maker() as session:
+        response = await run_agent_mutation(
+            session,
+            principal,
+            request_id=str(request.request_id),
+            operation="create_invoice_draft",
+            arguments={"invoice": request.invoice.model_dump(mode="python")},
+            source=request.source.model_dump(mode="python") if request.source else None,
+            mutate=mutate,
+        )
+    if response.outcome != "succeeded" or response.target_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": response.error_code or "MCP_VALIDATION_FAILED"},
+        )
+    snapshot = InvoiceToolSnapshot.model_validate(response.result_snapshot)
+    return InvoiceWriteOutput(
+        invoice=snapshot.invoice,
+        operation=AgentWriteResult(
+            operation_id=response.operation_id,
+            status=cast(Literal["created", "replayed"], response.status),
+            target_id=response.target_id,
+            web_url=snapshot.web_url,
+        ),
+    )
+
+
+async def update_invoice_draft(
+    session_maker: async_sessionmaker[AsyncSession],
+    principal: AgentPrincipal,
+    request: UpdateInvoiceDraftInput,
+) -> InvoiceWriteOutput:
+    async def mutate(session: AsyncSession) -> AgentOperationValue:
+        company = await session.scalar(
+            select(Company).where(Company.id == principal.company_id)
+        )
+        if company is None:
+            raise AgentOperationFailure("MCP_VALIDATION_FAILED")
+        try:
+            invoice = await update_invoice(
+                session,
+                request.invoice_id,
+                request.invoice,
+                principal.company_id,
+                company.base_currency,
+                actor_user_id=await _quote_creator_id(session, principal),
+                commit=False,
+                require_standard_draft=True,
+            )
+        except ValueError as exc:
+            if str(exc) == "MCP_DRAFT_REQUIRED":
+                raise AgentOperationFailure("MCP_DRAFT_REQUIRED") from None
+            raise AgentOperationFailure("MCP_VALIDATION_FAILED") from None
+        if invoice is None:
+            raise AgentOperationFailure("MCP_TARGET_NOT_FOUND")
+        return AgentOperationValue(
+            "invoice",
+            invoice.id,
+            InvoiceToolSnapshot(invoice=invoice, web_url=_invoice_web_url(invoice.id)),
+        )
+
+    async with session_maker() as session:
+        response = await run_agent_mutation(
+            session,
+            principal,
+            request_id=str(request.request_id),
+            operation="update_invoice_draft",
+            arguments={
+                "invoice_id": request.invoice_id,
+                "invoice": request.invoice.model_dump(mode="python"),
+            },
+            source=request.source.model_dump(mode="python") if request.source else None,
+            mutate=mutate,
+        )
+    if response.outcome != "succeeded" or response.target_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": response.error_code or "MCP_VALIDATION_FAILED"},
+        )
+    snapshot = InvoiceToolSnapshot.model_validate(response.result_snapshot)
+    return InvoiceWriteOutput(
+        invoice=snapshot.invoice,
         operation=AgentWriteResult(
             operation_id=response.operation_id,
             status=cast(Literal["created", "replayed"], response.status),

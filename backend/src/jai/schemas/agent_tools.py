@@ -260,8 +260,18 @@ class QuoteToolSnapshot(BaseModel):
 
 class InvoiceOutput(BaseModel):
     invoice: InvoiceRead
+    web_url: str
 
 
 class InvoiceWriteOutput(BaseModel):
     invoice: InvoiceRead
     operation: AgentWriteResult
+
+
+class InvoiceToolSnapshot(BaseModel):
+    """Immutable invoice-tool result and original browser URL for replay."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    invoice: InvoiceRead
+    web_url: str

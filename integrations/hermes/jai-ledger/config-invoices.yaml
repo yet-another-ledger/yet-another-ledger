@@ -1,0 +1,18 @@
+# Optional MCP tool allowlist for M15 Step 8 Standard Invoice preparation.
+# The bearer token needs invoice:read, invoice:write_draft, customer:read,
+# and catalog:read. Merge this separately from receipt-only and quote configs.
+mcp_servers:
+  jai:
+    tools:
+      include:
+        - search_customers
+        - get_customer
+        - search_catalog
+        - list_document_templates
+        - list_vat_options
+        - preview_invoice
+        - create_invoice_draft
+        - get_invoice
+        - update_invoice_draft
+      prompts: false
+      resources: false

@@ -24,6 +24,7 @@ from jai.schemas.agent_tools import (
     CatalogListOutput,
     CreateCustomerInput,
     CreateCustomerOutput,
+    CreateInvoiceDraftInput,
     CreateQuoteDraftInput,
     CustomerListOutput,
     CustomerOutput,
@@ -31,9 +32,13 @@ from jai.schemas.agent_tools import (
     DocumentTemplateListOutput,
     EmptyInput,
     GetCustomerInput,
+    GetInvoiceInput,
     GetQuoteInput,
     GetReceiptStatusInput,
+    InvoiceOutput,
+    InvoiceWriteOutput,
     NonEmpty,
+    PreviewInvoiceInput,
     PreviewQuoteInput,
     QuoteOutput,
     QuoteWriteOutput,
@@ -43,18 +48,24 @@ from jai.schemas.agent_tools import (
     SearchCustomersInput,
     SubmitReceiptInput,
     SubmitReceiptOutput,
+    UpdateInvoiceDraftInput,
     UpdateQuoteDraftInput,
     VatOptionsOutput,
 )
 from jai.schemas.customer import CustomerWrite
+from jai.schemas.invoice import InvoiceWrite
 from jai.schemas.quote import QuoteWrite
 from jai.services.agent_business import (
     create_customer_idempotently,
+    create_invoice_draft,
     create_quote_draft,
     get_customer_detail,
     list_templates,
+    preview_invoice,
     preview_quote,
+    read_invoice,
     read_quote,
+    update_invoice_draft,
     update_quote_draft,
 )
 from jai.services.agent_business import (
@@ -346,6 +357,10 @@ _TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "create_quote_draft": CreateQuoteDraftInput,
     "get_quote": GetQuoteInput,
     "update_quote_draft": UpdateQuoteDraftInput,
+    "preview_invoice": PreviewInvoiceInput,
+    "create_invoice_draft": CreateInvoiceDraftInput,
+    "get_invoice": GetInvoiceInput,
+    "update_invoice_draft": UpdateInvoiceDraftInput,
 }
 
 
@@ -639,6 +654,101 @@ async def update_quote_draft_tool(
             quote=quote,
         )
         return await update_quote_draft(get_session_maker(), principal, request)
+    except HTTPException as exc:
+        detail = exc.detail
+        code = detail.get("code") if isinstance(detail, dict) else None
+        if isinstance(code, str) and code in _SAFE_TOOL_ERRORS:
+            raise _tool_error(code) from None
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+    except Exception as exc:
+        if isinstance(exc, ToolError):
+            raise
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="preview_invoice",
+    description="Calculate a complete Standard Invoice using JAI pricing rules without saving it.",
+    structured_output=True,
+)
+async def preview_invoice_tool(invoice: InvoiceWrite) -> DocumentPreviewOutput:
+    principal = _authorized_principal(AgentTokenScope.INVOICE_READ)
+    try:
+        request = PreviewInvoiceInput(invoice=invoice)
+        return await preview_invoice(get_session_maker(), principal, request)
+    except Exception as exc:
+        if isinstance(exc, ToolError):
+            raise
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="create_invoice_draft",
+    description="Create a fully specified unnumbered Standard Invoice DRAFT for web review.",
+    structured_output=True,
+)
+async def create_invoice_draft_tool(
+    request_id: uuid.UUID,
+    invoice: InvoiceWrite,
+    source: AgentSource | None = None,
+) -> InvoiceWriteOutput:
+    principal = _authorized_principal(AgentTokenScope.INVOICE_WRITE_DRAFT)
+    try:
+        request = CreateInvoiceDraftInput(
+            request_id=request_id, source=source, invoice=invoice
+        )
+        return await create_invoice_draft(get_session_maker(), principal, request)
+    except HTTPException as exc:
+        detail = exc.detail
+        code = detail.get("code") if isinstance(detail, dict) else None
+        if isinstance(code, str) and code in _SAFE_TOOL_ERRORS:
+            raise _tool_error(code) from None
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+    except Exception as exc:
+        if isinstance(exc, ToolError):
+            raise
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="get_invoice",
+    description="Read a Standard Invoice and its current status and totals.",
+    structured_output=True,
+)
+async def get_invoice_tool(invoice_id: uuid.UUID) -> InvoiceOutput:
+    principal = _authorized_principal(AgentTokenScope.INVOICE_READ)
+    try:
+        request = GetInvoiceInput(invoice_id=invoice_id)
+        result = await read_invoice(get_session_maker(), principal, request.invoice_id)
+    except Exception as exc:
+        if isinstance(exc, ToolError):
+            raise
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+    if result is None:
+        raise _tool_error("MCP_TARGET_NOT_FOUND")
+    return result
+
+
+@server.tool(
+    name="update_invoice_draft",
+    description="Update a complete Standard Invoice DRAFT; lifecycle states cannot be changed.",
+    structured_output=True,
+)
+async def update_invoice_draft_tool(
+    request_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    invoice: InvoiceWrite,
+    source: AgentSource | None = None,
+) -> InvoiceWriteOutput:
+    principal = _authorized_principal(AgentTokenScope.INVOICE_WRITE_DRAFT)
+    try:
+        request = UpdateInvoiceDraftInput(
+            request_id=request_id,
+            source=source,
+            invoice_id=invoice_id,
+            invoice=invoice,
+        )
+        return await update_invoice_draft(get_session_maker(), principal, request)
     except HTTPException as exc:
         detail = exc.detail
         code = detail.get("code") if isinstance(detail, dict) else None

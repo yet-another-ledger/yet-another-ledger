@@ -1324,6 +1324,8 @@ async def create_invoice(
     company_id: uuid.UUID,
     company_currency: str,
     creator_id: uuid.UUID | None,
+    *,
+    commit: bool = True,
 ) -> InvoiceRead:
     """Create a new invoice as an unnumbered DRAFT: calculate + persist.
 
@@ -1366,14 +1368,15 @@ async def create_invoice(
         metadata={"document_kind": InvoiceDocumentKind(inv.document_kind).value},
     )
 
-    try:
-        await session.commit()
-    except IntegrityError as exc:
-        await session.rollback()
-        raise ValueError("Invoice number already exists (concurrent creation).") from exc
-
-    await session.refresh(inv)
-    return _invoice_to_read(inv)
+    if commit:
+        try:
+            await session.commit()
+        except IntegrityError as exc:
+            await session.rollback()
+            raise ValueError("Invoice number already exists (concurrent creation).") from exc
+        await session.refresh(inv)
+        return _invoice_to_read(inv)
+    return await _load_invoice_read(session, inv)
 
 
 async def get_invoice(
@@ -1402,6 +1405,8 @@ async def update_invoice(
     company_currency: str,
     *,
     actor_user_id: uuid.UUID | None = None,
+    commit: bool = True,
+    require_standard_draft: bool = False,
 ) -> InvoiceRead | None:
     """Update an existing invoice: preserve number, recalculate, replace sub-tables."""
     from jai.services.document_chain import append_document_chain_event
@@ -1478,6 +1483,14 @@ async def update_invoice(
             "Invoice changed while acquiring its Quote lock prefix."
         )
 
+    # Agent edits use the same Quote -> Invoice lock prefix and document-chain
+    # validation as web updates, then narrow authority to Standard DRAFT only.
+    if require_standard_draft and (
+        InvoiceDocumentKind(inv.document_kind) != InvoiceDocumentKind.STANDARD
+        or inv.status != InvoiceStatus.DRAFT
+    ):
+        raise ValueError("MCP_DRAFT_REQUIRED")
+
     if InvoiceDocumentKind(inv.document_kind) == InvoiceDocumentKind.FINAL:
         from jai.services.final import update_final_draft
 
@@ -1509,7 +1522,8 @@ async def update_invoice(
             )
             await session.flush()
         read = await _load_invoice_read(session, updated)
-        await session.commit()
+        if commit:
+            await session.commit()
         return read
     if InvoiceDocumentKind(inv.document_kind) != InvoiceDocumentKind.STANDARD:
         if InvoiceDocumentKind(inv.document_kind) == InvoiceDocumentKind.ADVANCE:
@@ -1618,9 +1632,11 @@ async def update_invoice(
         metadata={"document_kind": InvoiceDocumentKind(updated.document_kind).value},
     )
 
-    await session.commit()
-    await session.refresh(updated)
-    return _invoice_to_read(updated)
+    if commit:
+        await session.commit()
+        await session.refresh(updated)
+        return _invoice_to_read(updated)
+    return await _load_invoice_read(session, updated)
 
 
 async def delete_invoice(
