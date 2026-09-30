@@ -2978,6 +2978,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Agent Tokens
+         * @description List token metadata; the plaintext secret is never part of this schema.
+         */
+        get: operations["list_agent_tokens_api_v1_agent_tokens_get"];
+        put?: never;
+        /**
+         * Create Agent Token
+         * @description Issue one token and return its secret once after Step 2 is implemented.
+         */
+        post: operations["create_agent_token_api_v1_agent_tokens_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-tokens/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke Agent Token
+         * @description Revoke a token; the final route shape is reserved for Step 2.
+         */
+        delete: operations["revoke_agent_token_api_v1_agent_tokens__token_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3153,6 +3197,90 @@ export interface components {
             /** Gross Amount */
             gross_amount: string;
         };
+        /**
+         * AgentTokenCreate
+         * @description Create a named token with a non-empty set of allowed capabilities.
+         */
+        AgentTokenCreate: {
+            /** Name */
+            name: string;
+            /** Scopes */
+            scopes: components["schemas"]["AgentTokenScope"][];
+        };
+        /**
+         * AgentTokenCreated
+         * @description One-time creation response; `token` is never returned by list routes.
+         */
+        AgentTokenCreated: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Scopes */
+            scopes: components["schemas"]["AgentTokenScope"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Token */
+            token: string;
+        };
+        /** AgentTokenListResponse */
+        AgentTokenListResponse: {
+            /** Items */
+            items: components["schemas"]["AgentTokenRead"][];
+        };
+        /**
+         * AgentTokenRead
+         * @description Non-secret token metadata returned by list and creation endpoints.
+         */
+        AgentTokenRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Scopes */
+            scopes: components["schemas"]["AgentTokenScope"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+        };
+        /** AgentTokenRevoked */
+        AgentTokenRevoked: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Revoked At
+             * Format: date-time
+             */
+            revoked_at: string;
+        };
+        /**
+         * AgentTokenScope
+         * @description Capabilities a token may receive.
+         * @enum {string}
+         */
+        AgentTokenScope: "receipt:intake" | "customer:read" | "customer:create" | "catalog:read" | "quote:read" | "quote:write_draft" | "invoice:read" | "invoice:write_draft";
         /**
          * AiSettingsRead
          * @description AI settings as returned by the API – ``api_key`` is desensitised.
@@ -16113,6 +16241,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReceiptInboxConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_agent_tokens_api_v1_agent_tokens_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTokenListResponse"];
+                };
+            };
+        };
+    };
+    create_agent_token_api_v1_agent_tokens_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentTokenCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTokenCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_agent_token_api_v1_agent_tokens__token_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTokenRevoked"];
                 };
             };
             /** @description Validation Error */

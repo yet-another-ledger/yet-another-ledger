@@ -9,6 +9,7 @@ description = "Yet Another Ledger – self-hosted invoicing for Dutch freelancer
 requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]>=0.115.0",
+    "mcp>=2.0,<3",
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30.0",
     "alembic>=1.14.0",

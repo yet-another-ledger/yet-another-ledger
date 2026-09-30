@@ -395,6 +395,6 @@ docs/
 | M12 | Advance/Final Invoices and Credit Notes | 🟢 Done (2026-09-02; orchestrated Steps 1–11 and blind reviews converged; Ruff/mypy/default 1125/integration 1065, migrations, codegen, frontend Node/Vitest 122 + build + EN/ZH 1423, Docker/CJK PDF all green; risk-based author walkthrough plus final read-only test-data audit passed; five walkthrough refinements fixed) |
 | M13 | Document Artifact Backfill | 🟢 Done (2026-09-05; orchestrated Steps 1–4 and blind reviews converged; AI output-budget walkthrough fix re-reviewed with no findings; Ruff/mypy/default 1243/integration 1074, migrations, codegen, frontend 148 + build + EN/ZH 1458, Docker/CJK PDF all green; author Standard-Invoice Happy Path passed, remaining manual paths accepted on automated evidence) |
 | M14 | Receipt inbox and review | 🟢 Done (2026-09-29; author PDF walkthrough accepted; browser concurrency and images accepted on automated evidence; non-blocking carryovers in `milestones/M14.md`) |
-| M15 | Agent receipt intake and business drafts (MCP; Hermes/Telegram first) | ⬜ Design agreed (2026-09-30); implementation not started; see `milestones/M15.md` |
+| M15 | Agent receipt intake and business drafts (MCP; Hermes/Telegram first) | 🟡 Implementation in progress (2026-09-30); author walkthrough and acceptance pending; see `milestones/M15.md` |
 
 > Legend: ⬜ Not started | 🟡 In progress | 🟢 Done (deployment smoke test passed)

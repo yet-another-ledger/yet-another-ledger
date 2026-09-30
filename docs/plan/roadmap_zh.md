@@ -395,6 +395,6 @@ docs/
 | M12 | Advance/Final Invoice 与 Credit Note | 🟢 完成（2026-09-02；编排 Step 1–11 与盲审均收敛；Ruff/mypy/默认 1125/integration 1065、迁移、codegen、前端 Node/Vitest 122 + build + EN/ZH 1423、Docker/CJK PDF 全绿；作者风险导向 walkthrough 与最终测试数据只读审计通过；5 项 walkthrough refinement 已修复） |
 | M13 | Document Artifact 历史补传 | 🟢 完成（2026-09-05；编排 Step 1–4 与盲审均收敛；AI 输出预算 walkthrough 修正复审零 finding；Ruff/mypy/默认 1243/integration 1074、迁移、codegen、前端 148 + build + EN/ZH 1458、Docker/CJK PDF 全绿；作者 Standard Invoice Happy Path 通过，其余人工路径以自动化证据验收） |
 | M14 | 收据收件箱与审阅 | 🟢 完成（2026-09-29；作者 PDF 走查验收；浏览器并发与图片路径以自动化证据验收；非阻断遗留见 `milestones/M14_zh.md`） |
-| M15 | Agent 收据接入与业务草稿（MCP；Hermes/Telegram 优先） | ⬜ 设计已商定（2026-09-30）；实现未开始；见 `milestones/M15_zh.md` |
+| M15 | Agent 收据接入与业务草稿（MCP；Hermes/Telegram 优先） | 🟡 正在实现（2026-09-30）；作者走查与验收待完成；见 `milestones/M15_zh.md` |
 
 > 图例：⬜ 未开始 ｜ 🟡 进行中 ｜ 🟢 完成（已过部署自测点）

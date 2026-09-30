@@ -2,7 +2,7 @@
 
 > 🌐 [English](M15.md) · **中文**
 
-> **状态**：⬜ 设计于 2026-09-30 商定；实现与部署走查尚未开始。本文是 M15 范围、契约及原子步骤的权威文档。M14 已完成并验收。
+> **状态**：🟡 2026-09-30 已开始实现；部署走查与作者验收待完成。本文是 M15 范围、契约及原子步骤的权威文档。M14 已完成并验收。
 
 ## 执行模式
 
@@ -69,6 +69,13 @@
 | `search_catalog` / `list_document_templates` / `list_vat_options` | 用于组装单据明细的有界、按公司隔离选项 | `catalog:read`；不臆造价格／税率或修改记录。 |
 | `preview_quote` / `create_quote_draft` / `get_quote` / `update_quote_draft` | 现有报价计算／`QuoteWrite` 与 UUID → 后端合计、状态和网页 URL | 报价读／写权限；锁定后只改 `DRAFT`；不变更状态。 |
 | `preview_invoice` / `create_invoice_draft` / `get_invoice` / `update_invoice_draft` | 现有发票计算／`InvoiceWrite` 与 UUID → 后端合计、状态和网页 URL | 发票读／写权限；仅 Standard；锁定后只改 `DRAFT`；不签发／发送。 |
+
+
+MCP 工具的准确名称为 `submit_receipt`、`get_receipt_status`、`search_customers`、`get_customer`、`create_customer`、`search_catalog`、`list_document_templates`、`list_vat_options`、`preview_quote`、`create_quote_draft`、`get_quote`、`update_quote_draft`、`preview_invoice`、`create_invoice_draft`、`get_invoice` 和 `update_invoice_draft`。工具输入和输出均为类型化 Pydantic 契约；MCP 服务端不暴露额外的通用或管理工具。
+
+稳定的机器错误码为：`MCP_UNAUTHENTICATED`（Bearer 令牌缺失、无效或已撤销）、`MCP_INSUFFICIENT_SCOPE`（令牌缺少所需权限）、`MCP_VALIDATION_FAILED`（结构化参数无效或文件不受支持）、`MCP_TARGET_NOT_FOUND`、`MCP_TARGET_AMBIGUOUS`、`MCP_DRAFT_REQUIRED`（目标不是可编辑草稿）以及 `MCP_REQUEST_ID_CONFLICT`（相同请求键对应不同操作或规范化参数）。传输边界使用 `MCP_HOST_REJECTED`（Host 不在 localhost／回环地址范围内）和 `MCP_ORIGIN_REJECTED`（Origin 不在 localhost／回环地址范围内）。响应绝不包含令牌内容或文件字节。第 2 步之前，所有 MCP 协议请求（包括初始化／发现和工具调用）均返回 `401 MCP_UNAUTHENTICATED`；不安全的 Host 和 Origin 会优先被拒绝。
+
+**第 5 步远程传输备用路径门禁**：如果真实 Hermes 图片或 PDF 中任一文件无法通过远程 MCP 工具可靠传递且保持原始字节完整，并返回可靠工具结果，则第 5 步必须使用本机 stdio 适配器和受保护的流式上传路由。模拟成功不能通过门禁。不得提前安装适配器；第 5 步必须实测两种真实文件，并在任一种失败时启用备用路径。
 
 可选备用路径新增 `POST /api/v1/agent/receipt-inbox`：令牌认证的 multipart 文件，加相同的 `request_id`、来源和语言，返回与主工具相同的提交结果。Hermes 侧适配器暴露接收原始缓存路径并转发文件流的本机 MCP 工具；只有第 5 步远程传输门禁失败时才安装。不得接收任意远程文件 URL，也不得让 JAI 抓取用户提供的 URL。
 

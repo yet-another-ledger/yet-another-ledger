@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -14,9 +14,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
+from starlette.routing import Route
 from starlette.types import Scope
 
 import jai.config as _cfg
+from jai.api.agent_tokens import router as agent_tokens_router
 from jai.api.attachments import router as attachments_router
 from jai.api.auth import router as auth_router
 from jai.api.auth import users_router
@@ -28,6 +30,10 @@ from jai.api.estimates import router as estimates_router
 from jai.api.expenses import router as expenses_router
 from jai.api.health import router as health_router
 from jai.api.invoices import router as invoices_router
+from jai.api.mcp import ClosedMCPBoundary
+from jai.api.mcp import app as mcp_app
+from jai.api.mcp import exact_app as mcp_exact_app
+from jai.api.mcp import server as mcp_server
 from jai.api.mileage import router as mileage_router
 from jai.api.payments import router as payments_router
 from jai.api.pdf import router as pdf_router
@@ -179,7 +185,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             settings.scheduler_recurring_expenses_hour,
         )
 
-    yield
+    async with AsyncExitStack() as stack:
+        await stack.enter_async_context(mcp_server.session_manager.run())
+        yield
 
     # -- Shutdown: stop scheduler cleanly ------------------------------------
     if scheduler is not None:
@@ -248,6 +256,11 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
         )
 
+    # Install after CORS so this path-selective boundary wraps it. CORS
+    # answers browser preflights before routing; MCP must still validate Host,
+    # Origin, and Bearer on every method before that response can be emitted.
+    app.add_middleware(ClosedMCPBoundary)
+
     # -- API routes ---------------------------------------------------------
     app.include_router(health_router)
     app.include_router(auth_router)
@@ -270,6 +283,21 @@ def create_app() -> FastAPI:
     app.include_router(content_router)
     app.include_router(reports_router)
     app.include_router(receipt_inbox_router)
+    app.include_router(agent_tokens_router)
+    # Starlette Mount matches the prefix only with a slash and otherwise
+    # redirects. Streamable HTTP clients use the canonical no-slash URL.
+    app.router.routes.append(
+        Route(
+            "/api/v1/mcp",
+            mcp_exact_app,
+            name="mcp-exact",
+            include_in_schema=False,
+        )
+    )
+    # The MCP mount precedes the catch-all SPA route. The closed boundary
+    # enforces loopback Host/Origin checks and rejects all requests until M15
+    # Step 2 installs token verification.
+    app.mount("/api/v1/mcp", mcp_app, name="mcp")
 
     # -- Static files + SPA fallback (deployment mode) ----------------------
     if settings.static_dir is not None:
