@@ -673,6 +673,27 @@ async def create_quote(
     creator_id: uuid.UUID | None,
 ) -> QuoteRead:
     """Create a new quote: allocate number, calculate, persist."""
+    q = await create_quote_in_transaction(
+        session, body, company_id, company_currency, creator_id
+    )
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ValueError("Quote number already exists (concurrent creation).") from exc
+
+    await session.refresh(q)
+    return _quote_to_read(q)
+
+
+async def create_quote_in_transaction(
+    session: AsyncSession,
+    body: QuoteWrite,
+    company_id: uuid.UUID,
+    company_currency: str,
+    creator_id: uuid.UUID | None,
+) -> Quote:
+    """Create and flush a quote without committing the caller's transaction."""
     cust_stmt = select(Customer).where(
         Customer.id == body.customer_id,
         Customer.company_id == company_id,
@@ -703,21 +724,15 @@ async def create_quote(
         vat_rates=vat_rates,
         valid_until_default=valid_until_default,
     )
-
-    try:
-        await session.commit()
-    except IntegrityError as exc:
-        await session.rollback()
-        raise ValueError("Quote number already exists (concurrent creation).") from exc
-
-    await session.refresh(q)
-    return _quote_to_read(q)
+    return q
 
 
 async def get_quote(
     session: AsyncSession,
     quote_id: uuid.UUID,
     company_id: uuid.UUID,
+    *,
+    apply_expiry: bool = True,
 ) -> QuoteRead | None:
     """Return a full QuoteRead, or None if not found / wrong company.
 
@@ -735,7 +750,7 @@ async def get_quote(
     if q is None:
         return None
     chain_totals = await _quote_chain_totals(session, q)
-    if _apply_expiry_in_memory(q):
+    if apply_expiry and _apply_expiry_in_memory(q):
         q.status = QuoteStatus.EXPIRED
         # Build read model before commit (avoids post-commit attribute expiry)
         read = _quote_to_read(q, chain_totals=chain_totals)
@@ -756,16 +771,50 @@ async def update_quote(
 
     ACCEPTED quotes cannot be edited (409 raised as ValueError).
     """
+    q = await update_quote_draft_in_transaction(
+        session,
+        quote_id,
+        body,
+        company_id,
+        company_currency,
+        require_draft=False,
+    )
+    if q is None:
+        return None
+    await session.commit()
+    await session.refresh(q)
+    return _quote_to_read(q)
+
+
+async def update_quote_draft_in_transaction(
+    session: AsyncSession,
+    quote_id: uuid.UUID,
+    body: QuoteWrite,
+    company_id: uuid.UUID,
+    company_currency: str,
+    *,
+    require_draft: bool = True,
+) -> Quote | None:
+    """Update and flush a quote without committing the caller's transaction.
+
+    Agent calls request a row lock and the strict DRAFT-only gate. Web calls
+    retain their existing ACCEPTED-only restriction and transaction behavior.
+    """
     stmt = select(Quote).where(
         Quote.id == quote_id,
         Quote.company_id == company_id,
     )
+    if require_draft:
+        stmt = stmt.with_for_update()
     result = await session.execute(stmt)
     q = result.scalar_one_or_none()
     if q is None:
         return None
 
-    if q.status == QuoteStatus.ACCEPTED:
+    if require_draft and q.status != QuoteStatus.DRAFT:
+        raise ValueError("MCP_DRAFT_REQUIRED")
+
+    if not require_draft and q.status == QuoteStatus.ACCEPTED:
         raise ValueError(
             "Cannot edit an ACCEPTED quote. "
             "Reactivate it first or edit the converted invoice directly."
@@ -799,9 +848,7 @@ async def update_quote(
         existing_quote=q,
     )
 
-    await session.commit()
-    await session.refresh(updated)
-    return _quote_to_read(updated)
+    return updated
 
 
 async def delete_quote(

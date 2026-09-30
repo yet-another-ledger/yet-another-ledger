@@ -1,0 +1,19 @@
+# Optional MCP tool allowlist for M15 Step 7 quote preparation.
+# The bearer token needs quote:read, quote:write_draft, customer:read, and catalog:read.
+# Add customer:create only when Hermes is allowed to create customers after clarification.
+# Merge this separately from receipt-only config.yaml and business-context config.
+mcp_servers:
+  jai:
+    tools:
+      include:
+        - search_customers
+        - get_customer
+        - search_catalog
+        - list_document_templates
+        - list_vat_options
+        - preview_quote
+        - create_quote_draft
+        - get_quote
+        - update_quote_draft
+      prompts: false
+      resources: false

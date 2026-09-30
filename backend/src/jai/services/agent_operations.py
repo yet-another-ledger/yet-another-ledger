@@ -15,7 +15,7 @@ from enum import Enum
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import event, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,19 +23,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jai.db import set_rls_company
 from jai.models.agent_operation import AgentOperation
 from jai.models.agent_token import AgentToken
-from jai.schemas.agent_tools import AgentSource, ReceiptSubmissionSnapshot
+from jai.schemas.agent_tools import AgentSource, QuoteToolSnapshot, ReceiptSubmissionSnapshot
 from jai.schemas.customer import CustomerRead
 from jai.schemas.invoice import InvoiceRead
 from jai.schemas.quote import QuoteRead
 from jai.services.agent_tokens import AgentPrincipal
 
-_SNAPSHOT_MODELS: dict[str, type[BaseModel]] = {
-    "customer": CustomerRead,
-    "quote": QuoteRead,
-    "invoice": InvoiceRead,
+_SNAPSHOT_MODELS: dict[str, tuple[type[BaseModel], ...]] = {
+    "customer": (CustomerRead,),
+    # Quote tool responses add the original BASE_URL-derived browser link.
+    # Both explicit quote response shapes retain the business target type.
+    "quote": (QuoteRead, QuoteToolSnapshot),
+    "invoice": (InvoiceRead,),
     # Explicit allowlist for safe receipt submission result fields. The
     # operation envelope (operation ID/status/target ID) is stored separately.
-    "receipt": ReceiptSubmissionSnapshot,
+    "receipt": (ReceiptSubmissionSnapshot,),
 }
 _ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _BEARER_VALUE = re.compile(r"\bbearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
@@ -195,7 +197,10 @@ def _typed_snapshot(target_type: str, result: BaseModel) -> dict[str, Any]:
     """Serialize only the explicit typed response payload allowed for this target."""
 
     expected = _SNAPSHOT_MODELS.get(target_type)
-    if expected is None or type(result) is not expected:
+    if expected is None:
+        raise ValueError("Agent result must use its target's allowlisted response schema.")
+    allowed_models = expected if isinstance(expected, tuple) else (expected,)
+    if type(result) not in allowed_models:
         raise ValueError("Agent result must use its target's allowlisted response schema.")
     snapshot = result.model_dump(mode="json")
     _reject_forbidden_snapshot_material(snapshot)
@@ -211,7 +216,12 @@ def _assert_target_id_matches(target_type: str, target_id: uuid.UUID, result: Ba
         "invoice": "id",
         "receipt": "inbox_id",
     }.get(target_type)
-    if id_field is None or getattr(result, id_field, None) != target_id:
+    result_id = None
+    if target_type == "quote" and isinstance(result, QuoteToolSnapshot):
+        result_id = result.quote.id
+    elif id_field is not None and not isinstance(result, QuoteToolSnapshot):
+        result_id = getattr(result, id_field, None)
+    if result_id != target_id:
         raise ValueError("Agent result ID must match its operation target ID.")
 
 
@@ -431,10 +441,18 @@ async def run_agent_mutation(
 def _response(row: AgentOperation, *, status: str) -> AgentOperationResponse:
     snapshot = dict(row.result_snapshot)
     if row.outcome == "succeeded":
-        model = _SNAPSHOT_MODELS.get(row.target_type or "")
-        if model is None:
+        models = _SNAPSHOT_MODELS.get(row.target_type or "")
+        if models is None:
             raise RuntimeError("Saved Agent operation has an unknown result schema.")
-        snapshot = model.model_validate(snapshot).model_dump(mode="json")
+        allowed_models = models if isinstance(models, tuple) else (models,)
+        for model in allowed_models:
+            try:
+                snapshot = model.model_validate(snapshot).model_dump(mode="json")
+                break
+            except ValidationError:
+                continue
+        else:
+            raise RuntimeError("Saved Agent operation has an invalid result snapshot.")
         _reject_forbidden_snapshot_material(snapshot)
     return AgentOperationResponse(
         operation_id=row.id,

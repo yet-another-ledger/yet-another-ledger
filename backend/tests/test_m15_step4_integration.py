@@ -236,6 +236,10 @@ async def test_mcp_receipt_submit_replay_status_and_per_request_bearer(
                 "search_catalog",
                 "list_document_templates",
                 "list_vat_options",
+                "preview_quote",
+                "create_quote_draft",
+                "get_quote",
+                "update_quote_draft",
             }
 
             bad_envelope_secret = "SENSITIVE_BASE64_ENVELOPE_AQIDBAUG"

@@ -373,6 +373,10 @@ async def test_parent_lifespan_runs_real_mcp_session_manager(monkeypatch) -> Non
                 "search_catalog",
                 "list_document_templates",
                 "list_vat_options",
+                "preview_quote",
+                "create_quote_draft",
+                "get_quote",
+                "update_quote_draft",
             }
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://localhost"

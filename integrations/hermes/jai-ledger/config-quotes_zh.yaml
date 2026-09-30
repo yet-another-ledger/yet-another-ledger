@@ -1,0 +1,19 @@
+# M15 第 7 步报价准备的可选 MCP 工具白名单。
+# Bearer token 需要 quote:read、quote:write_draft、customer:read 和 catalog:read。
+# 仅当允许 Hermes 在澄清后创建客户时，才添加 customer:create。
+# 与仅凭证 config.yaml 和业务上下文配置分开合并。
+mcp_servers:
+  jai:
+    tools:
+      include:
+        - search_customers
+        - get_customer
+        - search_catalog
+        - list_document_templates
+        - list_vat_options
+        - preview_quote
+        - create_quote_draft
+        - get_quote
+        - update_quote_draft
+      prompts: false
+      resources: false

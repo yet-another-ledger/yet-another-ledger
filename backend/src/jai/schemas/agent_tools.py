@@ -181,6 +181,8 @@ class VatOptionsOutput(BaseModel):
 
 
 class PreviewQuoteInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     quote: QuoteWrite
 
 
@@ -239,11 +241,21 @@ class DocumentPreviewOutput(BaseModel):
 
 class QuoteOutput(BaseModel):
     quote: QuoteRead
+    web_url: str
 
 
 class QuoteWriteOutput(BaseModel):
     quote: QuoteRead
     operation: AgentWriteResult
+
+
+class QuoteToolSnapshot(BaseModel):
+    """Immutable quote-tool result retained for exact mutation replay."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    quote: QuoteRead
+    web_url: str
 
 
 class InvoiceOutput(BaseModel):

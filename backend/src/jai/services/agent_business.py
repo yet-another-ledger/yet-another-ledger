@@ -9,21 +9,38 @@ from __future__ import annotations
 import uuid
 from typing import Literal, cast
 
+from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from jai.config import get_settings
 from jai.db import set_rls_company
+from jai.models.agent_token import AgentToken
+from jai.models.company import Company
 from jai.schemas.agent_tools import (
     AgentWriteResult,
     CatalogListOutput,
     CreateCustomerInput,
     CreateCustomerOutput,
+    CreateQuoteDraftInput,
     CustomerListOutput,
     CustomerOutput,
+    DocumentPreviewOutput,
     DocumentTemplateListOutput,
+    PreviewQuoteInput,
+    QuoteOutput,
+    QuoteToolSnapshot,
+    QuoteWriteOutput,
+    UpdateQuoteDraftInput,
     VatOptionsOutput,
 )
 from jai.schemas.customer import CustomerRead
-from jai.services.agent_operations import AgentOperationValue, run_agent_mutation
+from jai.schemas.quote import QuoteCalculationRequest, QuoteRead, QuoteWrite
+from jai.services.agent_operations import (
+    AgentOperationFailure,
+    AgentOperationValue,
+    run_agent_mutation,
+)
 from jai.services.agent_tokens import AgentPrincipal
 from jai.services.content import list_document_templates
 from jai.services.customer import (
@@ -34,7 +51,216 @@ from jai.services.customer import (
     list_customers,
 )
 from jai.services.invoice import list_invoice_product_options
+from jai.services.pricing import calculate_quote
+from jai.services.quote import (
+    _validate_line_fks,
+    create_quote_in_transaction,
+    get_quote,
+    update_quote_draft_in_transaction,
+)
 from jai.services.vat import list_vat_rates, list_vat_treatments
+
+
+def _quote_web_url(quote_id: uuid.UUID) -> str:
+    return f"{get_settings().base_url.rstrip('/')}/quotes/{quote_id}/edit"
+
+
+def _quote_calculation_request(body: QuoteWrite) -> QuoteCalculationRequest:
+    # QuoteWrite is the frozen complete input contract. Only the fields used by
+    # the shared pricing request cross into the calculation service.
+    return QuoteCalculationRequest(
+        customer_id=body.customer_id,
+        quote_date=body.quote_date,
+        valid_until=body.valid_until,
+        currency=body.currency,
+        tax_mode=body.tax_mode,
+        amounts_include_vat=body.amounts_include_vat,
+        vat_treatment_id=body.vat_treatment_id,
+        document_vat_rate_id=body.document_vat_rate_id,
+        discount=body.discount,
+        lines=body.lines,
+    )
+
+
+async def preview_quote(
+    session_maker: async_sessionmaker[AsyncSession],
+    principal: AgentPrincipal,
+    request: PreviewQuoteInput,
+) -> DocumentPreviewOutput:
+    async with session_maker() as session, session.begin():
+        await set_rls_company(session, principal.company_id)
+        await _validate_line_fks(session, principal.company_id, request.quote)
+        calculation = await calculate_quote(
+            session,
+            company_id=principal.company_id,
+            request=_quote_calculation_request(request.quote),
+        )
+        company = await session.scalar(
+            select(Company).where(Company.id == principal.company_id)
+        )
+        if company is None:
+            raise ValueError("Company not found.")
+        return DocumentPreviewOutput(
+            subtotal=calculation.subtotal_excl_vat,
+            tax_total=calculation.vat_total,
+            total=calculation.total_incl_vat,
+            currency=request.quote.currency or company.base_currency,
+        )
+
+
+async def read_quote(
+    session_maker: async_sessionmaker[AsyncSession],
+    principal: AgentPrincipal,
+    quote_id: uuid.UUID,
+) -> QuoteOutput | None:
+    async with session_maker() as session, session.begin():
+        await set_rls_company(session, principal.company_id)
+        quote = await get_quote(
+            session, quote_id, principal.company_id, apply_expiry=False
+        )
+        if quote is None:
+            return None
+        return QuoteOutput(quote=quote, web_url=_quote_web_url(quote.id))
+
+
+async def _quote_creator_id(session: AsyncSession, principal: AgentPrincipal) -> uuid.UUID:
+    creator_id = await session.scalar(
+        select(AgentToken.creator_id)
+        .where(AgentToken.id == principal.token_id)
+        .with_for_update(read=True)
+    )
+    if creator_id is None:
+        raise AgentOperationFailure("MCP_UNAUTHENTICATED")
+    return creator_id
+
+
+async def _quote_result(
+    session: AsyncSession, quote_id: uuid.UUID, company_id: uuid.UUID
+) -> QuoteRead:
+    result = await get_quote(session, quote_id, company_id, apply_expiry=False)
+    if result is None:
+        raise AgentOperationFailure("MCP_TARGET_NOT_FOUND")
+    return result
+
+
+async def create_quote_draft(
+    session_maker: async_sessionmaker[AsyncSession],
+    principal: AgentPrincipal,
+    request: CreateQuoteDraftInput,
+) -> QuoteWriteOutput:
+    async def mutate(session: AsyncSession) -> AgentOperationValue:
+        try:
+            creator_id = await _quote_creator_id(session, principal)
+            company = await session.scalar(
+                select(Company).where(Company.id == principal.company_id)
+            )
+            if company is None:
+                raise AgentOperationFailure("MCP_VALIDATION_FAILED")
+            quote_row = await create_quote_in_transaction(
+                session,
+                request.quote,
+                principal.company_id,
+                company.base_currency,
+                creator_id,
+            )
+        except ValueError:
+            raise AgentOperationFailure("MCP_VALIDATION_FAILED") from None
+        quote = await _quote_result(session, quote_row.id, principal.company_id)
+        return AgentOperationValue(
+            "quote",
+            quote.id,
+            QuoteToolSnapshot(quote=quote, web_url=_quote_web_url(quote.id)),
+        )
+
+    async with session_maker() as session:
+        try:
+            response = await run_agent_mutation(
+                session,
+                principal,
+                request_id=str(request.request_id),
+                operation="create_quote_draft",
+                arguments={"quote": request.quote.model_dump(mode="python")},
+                source=request.source.model_dump(mode="python") if request.source else None,
+                mutate=mutate,
+            )
+        except HTTPException:
+            raise
+    if response.outcome != "succeeded" or response.target_id is None:
+        code = response.error_code or "MCP_VALIDATION_FAILED"
+        raise HTTPException(status_code=422, detail={"code": code})
+    snapshot = QuoteToolSnapshot.model_validate(response.result_snapshot)
+    return QuoteWriteOutput(
+        quote=snapshot.quote,
+        operation=AgentWriteResult(
+            operation_id=response.operation_id,
+            status=cast(Literal["created", "replayed"], response.status),
+            target_id=response.target_id,
+            web_url=snapshot.web_url,
+        ),
+    )
+
+
+async def update_quote_draft(
+    session_maker: async_sessionmaker[AsyncSession],
+    principal: AgentPrincipal,
+    request: UpdateQuoteDraftInput,
+) -> QuoteWriteOutput:
+    async def mutate(session: AsyncSession) -> AgentOperationValue:
+        company = await session.scalar(
+            select(Company).where(Company.id == principal.company_id)
+        )
+        if company is None:
+            raise AgentOperationFailure("MCP_VALIDATION_FAILED")
+        try:
+            quote_row = await update_quote_draft_in_transaction(
+                session,
+                request.quote_id,
+                request.quote,
+                principal.company_id,
+                company.base_currency,
+            )
+        except ValueError as exc:
+            if str(exc) == "MCP_DRAFT_REQUIRED":
+                raise AgentOperationFailure("MCP_DRAFT_REQUIRED") from None
+            raise AgentOperationFailure("MCP_VALIDATION_FAILED") from None
+        if quote_row is None:
+            raise AgentOperationFailure("MCP_TARGET_NOT_FOUND")
+        quote = await _quote_result(session, quote_row.id, principal.company_id)
+        return AgentOperationValue(
+            "quote",
+            quote.id,
+            QuoteToolSnapshot(quote=quote, web_url=_quote_web_url(quote.id)),
+        )
+
+    async with session_maker() as session:
+        try:
+            response = await run_agent_mutation(
+                session,
+                principal,
+                request_id=str(request.request_id),
+                operation="update_quote_draft",
+                arguments={
+                    "quote_id": request.quote_id,
+                    "quote": request.quote.model_dump(mode="python"),
+                },
+                source=request.source.model_dump(mode="python") if request.source else None,
+                mutate=mutate,
+            )
+        except HTTPException:
+            raise
+    if response.outcome != "succeeded" or response.target_id is None:
+        code = response.error_code or "MCP_VALIDATION_FAILED"
+        raise HTTPException(status_code=422, detail={"code": code})
+    snapshot = QuoteToolSnapshot.model_validate(response.result_snapshot)
+    return QuoteWriteOutput(
+        quote=snapshot.quote,
+        operation=AgentWriteResult(
+            operation_id=response.operation_id,
+            status=cast(Literal["created", "replayed"], response.status),
+            target_id=response.target_id,
+            web_url=snapshot.web_url,
+        ),
+    )
 
 
 async def search_customers(

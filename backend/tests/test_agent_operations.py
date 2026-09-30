@@ -12,7 +12,7 @@ from pydantic import BaseModel, ValidationError
 from pydantic.fields import PydanticUndefined
 
 from jai.models._enums import DiscountType, InvoiceStatus, InvoiceTaxMode, QuoteStatus
-from jai.schemas.agent_tools import ReceiptSubmissionSnapshot
+from jai.schemas.agent_tools import QuoteToolSnapshot, ReceiptSubmissionSnapshot
 from jai.schemas.customer import CustomerRead
 from jai.schemas.invoice import InvoiceLineInput, InvoiceRead, InvoiceWrite
 from jai.schemas.quote import QuoteRead, QuoteWrite
@@ -518,3 +518,35 @@ def test_document_typed_snapshots_preserve_notes_and_authoritative_totals(
     assert replayed.model_dump(mode="json") == snapshot
     assert snapshot["notes"] == "retain this note for replay"
     assert snapshot["total_incl_vat"] == "148.140"
+
+
+def test_quote_tool_snapshot_retains_original_url_under_quote_target() -> None:
+    quote_id = uuid.uuid4()
+    payload = _required_payload(QuoteRead)
+    payload["id"] = quote_id
+    quote = QuoteRead.model_validate(payload)
+    result = QuoteToolSnapshot(
+        quote=quote,
+        web_url=f"https://jai.example.test/quotes/{quote_id}/edit",
+    )
+
+    snapshot = _typed_snapshot("quote", result)
+    _assert_target_id_matches("quote", quote_id, result)
+    assert snapshot["web_url"] == f"https://jai.example.test/quotes/{quote_id}/edit"
+    assert QuoteToolSnapshot.model_validate(snapshot).quote.id == quote_id
+
+
+def test_quote_tool_snapshot_still_rejects_file_and_credential_material() -> None:
+    quote_id = uuid.uuid4()
+    payload = _required_payload(QuoteRead)
+    payload["id"] = quote_id
+    quote = QuoteRead.model_validate(payload)
+
+    with pytest.raises(ValueError, match="receipt-file content"):
+        _typed_snapshot(
+            "quote",
+            QuoteToolSnapshot(
+                quote=quote,
+                web_url="https://jai.example.test/?next=data:application/pdf;base64,JVBERi0xLjQK",
+            ),
+        )

@@ -24,26 +24,38 @@ from jai.schemas.agent_tools import (
     CatalogListOutput,
     CreateCustomerInput,
     CreateCustomerOutput,
+    CreateQuoteDraftInput,
     CustomerListOutput,
     CustomerOutput,
+    DocumentPreviewOutput,
     DocumentTemplateListOutput,
     EmptyInput,
     GetCustomerInput,
+    GetQuoteInput,
     GetReceiptStatusInput,
     NonEmpty,
+    PreviewQuoteInput,
+    QuoteOutput,
+    QuoteWriteOutput,
     ReceiptFileInput,
     ReceiptStatusOutput,
     SearchCatalogInput,
     SearchCustomersInput,
     SubmitReceiptInput,
     SubmitReceiptOutput,
+    UpdateQuoteDraftInput,
     VatOptionsOutput,
 )
 from jai.schemas.customer import CustomerWrite
+from jai.schemas.quote import QuoteWrite
 from jai.services.agent_business import (
     create_customer_idempotently,
+    create_quote_draft,
     get_customer_detail,
     list_templates,
+    preview_quote,
+    read_quote,
+    update_quote_draft,
 )
 from jai.services.agent_business import (
     list_vat_options as list_vat_options_service,
@@ -330,6 +342,10 @@ _TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "search_catalog": SearchCatalogInput,
     "list_document_templates": EmptyInput,
     "list_vat_options": EmptyInput,
+    "preview_quote": PreviewQuoteInput,
+    "create_quote_draft": CreateQuoteDraftInput,
+    "get_quote": GetQuoteInput,
+    "update_quote_draft": UpdateQuoteDraftInput,
 }
 
 
@@ -536,4 +552,100 @@ async def list_vat_options() -> VatOptionsOutput:
     try:
         return await list_vat_options_service(get_session_maker(), principal)
     except Exception:
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="preview_quote",
+    description="Calculate a complete quote using JAI pricing rules without saving it.",
+    structured_output=True,
+)
+async def preview_quote_tool(quote: QuoteWrite) -> DocumentPreviewOutput:
+    principal = _authorized_principal(AgentTokenScope.QUOTE_READ)
+    try:
+        return await preview_quote(
+            get_session_maker(), principal, PreviewQuoteInput(quote=quote)
+        )
+    except Exception as exc:
+        if isinstance(exc, ToolError):
+            raise
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="create_quote_draft",
+    description="Create a fully specified numbered DRAFT quote for web review.",
+    structured_output=True,
+)
+async def create_quote_draft_tool(
+    request_id: uuid.UUID,
+    quote: QuoteWrite,
+    source: AgentSource | None = None,
+) -> QuoteWriteOutput:
+    principal = _authorized_principal(AgentTokenScope.QUOTE_WRITE_DRAFT)
+    try:
+        request = CreateQuoteDraftInput(
+            request_id=request_id, source=source, quote=quote
+        )
+        return await create_quote_draft(get_session_maker(), principal, request)
+    except HTTPException as exc:
+        detail = exc.detail
+        code = detail.get("code") if isinstance(detail, dict) else None
+        if isinstance(code, str) and code in _SAFE_TOOL_ERRORS:
+            raise _tool_error(code) from None
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+    except Exception as exc:
+        if isinstance(exc, ToolError):
+            raise
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="get_quote",
+    description="Read a quote and its current DRAFT or lifecycle status.",
+    structured_output=True,
+)
+async def get_quote_tool(quote_id: uuid.UUID) -> QuoteOutput:
+    principal = _authorized_principal(AgentTokenScope.QUOTE_READ)
+    try:
+        request = GetQuoteInput(quote_id=quote_id)
+        result = await read_quote(get_session_maker(), principal, request.quote_id)
+    except Exception as exc:
+        if isinstance(exc, ToolError):
+            raise
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+    if result is None:
+        raise _tool_error("MCP_TARGET_NOT_FOUND")
+    return result
+
+
+@server.tool(
+    name="update_quote_draft",
+    description="Update a complete DRAFT quote; lifecycle states cannot be changed.",
+    structured_output=True,
+)
+async def update_quote_draft_tool(
+    request_id: uuid.UUID,
+    quote_id: uuid.UUID,
+    quote: QuoteWrite,
+    source: AgentSource | None = None,
+) -> QuoteWriteOutput:
+    principal = _authorized_principal(AgentTokenScope.QUOTE_WRITE_DRAFT)
+    try:
+        request = UpdateQuoteDraftInput(
+            request_id=request_id,
+            source=source,
+            quote_id=quote_id,
+            quote=quote,
+        )
+        return await update_quote_draft(get_session_maker(), principal, request)
+    except HTTPException as exc:
+        detail = exc.detail
+        code = detail.get("code") if isinstance(detail, dict) else None
+        if isinstance(code, str) and code in _SAFE_TOOL_ERRORS:
+            raise _tool_error(code) from None
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+    except Exception as exc:
+        if isinstance(exc, ToolError):
+            raise
         raise _tool_error("MCP_VALIDATION_FAILED") from None
