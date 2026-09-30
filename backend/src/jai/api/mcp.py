@@ -3,18 +3,50 @@
 from __future__ import annotations
 
 import json
+import uuid
+from collections.abc import MutableMapping
 from contextvars import ContextVar
+from typing import Annotated, Any, Literal
 
+from fastapi import HTTPException
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import jsonrpc_message_adapter
+from pydantic import BaseModel, Field, ValidationError
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from jai.config import get_settings
 from jai.db import get_session_maker
 from jai.schemas.agent_token import AgentTokenScope
-from jai.services.agent_tokens import AgentPrincipal, authenticate_token
+from jai.schemas.agent_tools import (
+    AgentSource,
+    GetReceiptStatusInput,
+    ReceiptFileInput,
+    ReceiptStatusOutput,
+    SubmitReceiptInput,
+    SubmitReceiptOutput,
+)
+from jai.services.agent_receipts import (
+    AgentReceiptError,
+)
+from jai.services.agent_receipts import (
+    get_receipt_status as get_receipt_status_service,
+)
+from jai.services.agent_receipts import (
+    submit_receipt as submit_receipt_service,
+)
+from jai.services.agent_tokens import AgentPrincipal, authenticate_token, require_agent_scope
+from jai.services.storage import get_storage
 
 _ALLOWED_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
 agent_principal: ContextVar[AgentPrincipal | None] = ContextVar("agent_principal", default=None)
+
+
+def _body_limit() -> int:
+    """Bound the complete JSON body before the MCP SDK parses it."""
+    max_decoded = get_settings().max_receipt_bytes * 5
+    return (max_decoded * 4 + 2) // 3 + 16 * 1024
 
 
 def require_scope(scope: AgentTokenScope) -> None:
@@ -172,6 +204,64 @@ class ClosedMCPBoundary:
         if principal is None:
             await _reject(send, 401, "MCP_UNAUTHENTICATED", "A valid Bearer token is required.")
             return
+        if scope.get("method") == "POST":
+            body_limit = _body_limit()
+            content_lengths = header_values.get(b"content-length", [])
+            if len(content_lengths) > 1 or (
+                content_lengths
+                and (
+                    len(content_lengths[0]) > 12
+                    or not content_lengths[0].isascii()
+                    or not content_lengths[0].isdigit()
+                    or int(content_lengths[0]) > body_limit
+                )
+            ):
+                await _reject(send, 413, "MCP_VALIDATION_FAILED", "MCP request body is too large.")
+                return
+            chunks: list[bytes] = []
+            received = 0
+            while True:
+                message = await receive()
+                if message["type"] == "http.disconnect":
+                    return
+                chunk = message.get("body", b"")
+                received += len(chunk)
+                if received > body_limit:
+                    await _reject(
+                        send,
+                        413,
+                        "MCP_VALIDATION_FAILED",
+                        "MCP request body is too large.",
+                    )
+                    return
+                chunks.append(chunk)
+                if not message.get("more_body", False):
+                    break
+            body = b"".join(chunks)
+            try:
+                jsonrpc_message_adapter.validate_python(json.loads(body), by_name=False)
+            except Exception:
+                # The SDK's own envelope error includes Pydantic input_value
+                # details. Reject here, while the bounded raw body is still at
+                # the authenticated transport boundary, without echo or log.
+                await _reject(
+                    send,
+                    400,
+                    "MCP_VALIDATION_FAILED",
+                    "MCP request envelope is invalid.",
+                )
+                return
+            original_receive = receive
+            sent = False
+
+            async def replay_receive() -> MutableMapping[str, Any]:
+                nonlocal sent
+                if sent:
+                    return await original_receive()
+                sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+
+            receive = replay_receive
         token = agent_principal.set(principal)
         try:
             await self.app(scope, receive, send)
@@ -193,7 +283,48 @@ class ExactMCPEntry:
         await self.app(child_scope, receive, send)
 
 
-server = MCPServer("Yet Another Ledger")
+_SAFE_TOOL_ERRORS = frozenset(
+    {
+        "MCP_UNAUTHENTICATED",
+        "MCP_INSUFFICIENT_SCOPE",
+        "MCP_VALIDATION_FAILED",
+        "MCP_TARGET_NOT_FOUND",
+        "MCP_TARGET_AMBIGUOUS",
+        "MCP_DRAFT_REQUIRED",
+        "MCP_REQUEST_ID_CONFLICT",
+    }
+)
+_TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
+    "submit_receipt": SubmitReceiptInput,
+    "get_receipt_status": GetReceiptStatusInput,
+}
+
+
+class SafeMCPServer(MCPServer):
+    """Map SDK argument validation text to a fixed error before it can echo input."""
+
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any], context: Any = None
+    ) -> Any:
+        input_model = _TOOL_INPUT_MODELS.get(name)
+        if input_model is not None:
+            try:
+                # Enforce the frozen root model (including extra='forbid')
+                # before the SDK's function argument model can ignore extras.
+                input_model.model_validate(arguments)
+            except ValidationError:
+                raise ToolError("MCP_VALIDATION_FAILED") from None
+        try:
+            return await super().call_tool(name, arguments, context)
+        except ToolError as exc:
+            cause = exc.__cause__
+            safe_code = str(cause) if isinstance(cause, ToolError) else None
+            if safe_code in _SAFE_TOOL_ERRORS:
+                raise ToolError(safe_code) from None
+            raise ToolError("MCP_VALIDATION_FAILED") from None
+
+
+server = SafeMCPServer("Yet Another Ledger")
 _sdk_app = server.streamable_http_app(
     streamable_http_path="/",
     # The parent app's path-selective ClosedMCPBoundary is the one Host/Origin
@@ -203,3 +334,65 @@ _sdk_app = server.streamable_http_app(
 )
 app = _sdk_app
 exact_app = ExactMCPEntry(app)
+
+
+def _tool_error(code: str) -> ToolError:
+    return ToolError(code)
+
+
+def _authorized_principal(scope: AgentTokenScope) -> AgentPrincipal:
+    principal = agent_principal.get()
+    try:
+        require_agent_scope(scope, principal)
+    except HTTPException as exc:
+        detail = exc.detail
+        code = detail.get("code") if isinstance(detail, dict) else None
+        raise _tool_error(code or "MCP_UNAUTHENTICATED") from exc
+    if principal is None:
+        raise _tool_error("MCP_UNAUTHENTICATED")
+    return principal
+
+
+@server.tool(
+    name="submit_receipt",
+    description="Submit 1–5 original receipt files for web review.",
+    structured_output=True,
+)
+async def submit_receipt(
+    request_id: uuid.UUID,
+    source: AgentSource,
+    files: Annotated[list[ReceiptFileInput], Field(min_length=1, max_length=5)],
+    language: Literal["en", "zh"] = "en",
+) -> SubmitReceiptOutput:
+    """Validate and durably add an original receipt batch to the M14 inbox."""
+    principal = _authorized_principal(AgentTokenScope.RECEIPT_INTAKE)
+    try:
+        request = SubmitReceiptInput(
+            request_id=request_id,
+            source=source,
+            files=files,
+            language=language,
+        )
+    except Exception:
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+    try:
+        return await submit_receipt_service(
+            get_session_maker(), principal, request, get_storage()
+        )
+    except AgentReceiptError as exc:
+        raise _tool_error(exc.code) from None
+
+
+@server.tool(
+    name="get_receipt_status",
+    description="Read the current status of an inbox receipt.",
+    structured_output=True,
+)
+async def get_receipt_status(inbox_id: uuid.UUID) -> ReceiptStatusOutput:
+    principal = _authorized_principal(AgentTokenScope.RECEIPT_INTAKE)
+    try:
+        return await get_receipt_status_service(
+            get_session_maker(), principal, inbox_id
+        )
+    except AgentReceiptError as exc:
+        raise _tool_error(exc.code) from None

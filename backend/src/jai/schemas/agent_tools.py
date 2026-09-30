@@ -103,6 +103,8 @@ class ReceiptSubmissionSnapshot(BaseModel):
 
 
 class GetReceiptStatusInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     inbox_id: uuid.UUID
 
 

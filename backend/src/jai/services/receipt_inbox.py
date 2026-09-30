@@ -173,8 +173,9 @@ async def _persist_files(
     creator_id: uuid.UUID,
     parts: list[tuple[bytes, str, str | None]],
     storage: Storage,
+    written_keys: list[str] | None = None,
 ) -> list[str]:
-    written: list[str] = []
+    written = written_keys if written_keys is not None else []
     try:
         for data, mime, filename in parts:
             file_id = uuid.uuid4()
@@ -199,13 +200,20 @@ async def _persist_files(
             )
         await session.flush()
         return written
-    except Exception:
-        for key in written:
-            try:
-                storage.delete(key)
-            except Exception:
-                logger.exception("Failed to compensate inbox upload storage write")
+    except BaseException:
+        _compensate_storage(storage, written, "Failed to compensate inbox upload storage write")
         raise
+
+
+def _compensate_storage(storage: Storage, keys: list[str], message: str) -> None:
+    remaining: list[str] = []
+    for key in keys:
+        try:
+            storage.delete(key)
+        except Exception:
+            logger.exception(message)
+            remaining.append(key)
+    keys[:] = remaining
 
 
 async def create_item(
@@ -216,30 +224,62 @@ async def create_item(
     max_bytes: int,
     storage: Storage,
 ) -> ReceiptInboxRead:
-    parts = _validate(parts, max_bytes)
-    await set_rls_company(session, company_id)
-    item = ReceiptInbox(
-        company_id=company_id,
-        creator_id=creator_id,
-        status="PENDING",
-        ai_state="NOT_RUN",
-        file_revision=1,
-    )
-    session.add(item)
-    await session.flush()
     keys: list[str] = []
     try:
-        keys = await _persist_files(session, item, company_id, creator_id, parts, storage)
+        read, _ = await create_item_in_transaction(
+            session, company_id, creator_id, parts, max_bytes, storage, keys
+        )
         await session.commit()
-    except Exception:
-        await session.rollback()
-        for key in keys:
-            try:
-                storage.delete(key)
-            except Exception:
-                logger.exception("Failed to compensate inbox transaction")
+    except BaseException:
+        try:
+            await session.rollback()
+        except BaseException:
+            logger.warning("Failed to roll back inbox transaction")
+        _compensate_storage(storage, keys, "Failed to compensate inbox transaction")
         raise
-    return await get_item(session, item.id, company_id)
+    return await get_item(session, read.id, company_id)
+
+
+async def create_item_in_transaction(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    creator_id: uuid.UUID,
+    parts: list[tuple[bytes, str, str | None]],
+    max_bytes: int,
+    storage: Storage,
+    written_keys: list[str] | None = None,
+) -> tuple[ReceiptInboxRead, list[str]]:
+    """Create the inbox row and files without committing the caller's transaction.
+
+    M14's web endpoint owns its ordinary commit boundary through ``create_item``.
+    Agent mutations use this primitive inside ``run_agent_mutation`` so the
+    inbox and idempotency snapshot commit together. The returned storage keys
+    let that caller compensate if its enclosing database commit fails.
+    """
+    parts = _validate(parts, max_bytes)
+    keys = written_keys if written_keys is not None else []
+    try:
+        await set_rls_company(session, company_id)
+        item = ReceiptInbox(
+            company_id=company_id,
+            creator_id=creator_id,
+            status="PENDING",
+            ai_state="NOT_RUN",
+            file_revision=1,
+        )
+        session.add(item)
+        await session.flush()
+        await _persist_files(
+            session, item, company_id, creator_id, parts, storage, keys
+        )
+        read = _read(item, await _files(session, item.id))
+        return read, keys
+    except BaseException:
+        # Keep cleanup local as well as registering the same keys with the
+        # outer owner: failures after storage succeeds but before this helper
+        # returns must not strand files when the caller never receives keys.
+        _compensate_storage(storage, keys, "Failed to compensate incomplete inbox intake")
+        raise
 
 
 async def extract_item(
@@ -420,19 +460,20 @@ async def append_files(
             raise InboxConflict("INBOX_NOT_PENDING")
         if len(existing) + len(parts) > MAX_FILES:
             raise InboxConflict("FILE_LIMIT_REACHED")
-        written = await _persist_files(session, item, company_id, creator_id, parts, storage)
+        written = await _persist_files(
+            session, item, company_id, creator_id, parts, storage, written
+        )
         item.file_revision += 1
         item.ai_suggestion = None
         item.ai_error_code = None
         item.ai_state = "NOT_RUN"
         await session.commit()
-    except Exception:
-        await session.rollback()
-        for key in written:
-            try:
-                storage.delete(key)
-            except Exception:
-                logger.exception("Failed to compensate inbox append")
+    except BaseException:
+        try:
+            await session.rollback()
+        except BaseException:
+            logger.warning("Failed to roll back inbox append")
+        _compensate_storage(storage, written, "Failed to compensate inbox append")
         raise
     return await get_item(session, inbox_id, company_id)
 

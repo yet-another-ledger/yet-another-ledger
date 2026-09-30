@@ -364,7 +364,10 @@ async def test_parent_lifespan_runs_real_mcp_session_manager(monkeypatch) -> Non
             )
             assert discovery.status_code == 200
             payload = json.loads(discovery.text.split("data: ", 1)[1])
-            assert payload["result"]["tools"] == []
+            assert {tool["name"] for tool in payload["result"]["tools"]} == {
+                "submit_receipt",
+                "get_receipt_status",
+            }
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://localhost"
         ) as public_client:
