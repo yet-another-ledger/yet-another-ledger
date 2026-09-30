@@ -76,6 +76,8 @@ MCP 工具的准确名称为 `submit_receipt`、`get_receipt_status`、`search_c
 
 稳定的机器错误码为：`MCP_UNAUTHENTICATED`（Bearer 令牌缺失、无效或已撤销）、`MCP_INSUFFICIENT_SCOPE`（令牌缺少所需权限）、`MCP_VALIDATION_FAILED`（结构化参数无效或文件不受支持）、`MCP_TARGET_NOT_FOUND`、`MCP_TARGET_AMBIGUOUS`、`MCP_DRAFT_REQUIRED`（目标不是可编辑草稿）以及 `MCP_REQUEST_ID_CONFLICT`（相同请求键对应不同操作或规范化参数）。传输边界使用 `MCP_HOST_REJECTED`（Host 不在 localhost／回环地址范围内）和 `MCP_ORIGIN_REJECTED`（Origin 不在 localhost／回环地址范围内）。响应绝不包含令牌内容或文件字节。第 2 步之前，所有 MCP 协议请求（包括初始化／发现和工具调用）均返回 `401 MCP_UNAUTHENTICATED`；不安全的 Host 和 Origin 会优先被拒绝。
 
+**作者批准的门禁时序（2026-09-30）**：作者在实现期间不值守，明确将真实 Hermes／Telegram 图片与 PDF 传输、原件哈希、发送者／聊天拒绝和手机链接检查推迟到里程碑走查。第 5 步配置与自动化验证完成后可继续第 6 步；真实门禁仍待验证，作者验收前 M15 保持进行中。真实远程传输检查失败时，验收前须补做已规定的第 5 步适配器／上传路由修复。模拟或自动化协议测试不能算作真实传输成功。不得调用当前运行的 Hermes，也不得复用其现用 bot／profile。
+
 **第 5 步远程传输备用路径门禁**：如果真实 Hermes 图片或 PDF 中任一文件无法通过远程 MCP 工具可靠传递且保持原始字节完整，并返回可靠工具结果，则第 5 步必须使用本机 stdio 适配器和受保护的流式上传路由。模拟成功不能通过门禁。不得提前安装适配器；第 5 步必须实测两种真实文件，并在任一种失败时启用备用路径。
 
 可选备用路径新增 `POST /api/v1/agent/receipt-inbox`：令牌认证的 multipart 文件，加相同的 `request_id`、来源和语言，返回与主工具相同的提交结果。Hermes 侧适配器暴露接收原始缓存路径并转发文件流的本机 MCP 工具；只有第 5 步远程传输门禁失败时才安装。不得接收任意远程文件 URL，也不得让 JAI 抓取用户提供的 URL。
@@ -108,9 +110,10 @@ MCP 工具的准确名称为 `submit_receipt`、`get_receipt_status`、`search_c
 
 ### Step 5 · 真实 Hermes/Telegram 附件路径
 
+- **配置指南**：[Hermes 与 Telegram 部署配置](M15-hermes-telegram_zh.md)。
 - **交付**：可部署的 Hermes MCP 配置和 Telegram 数字发送者／聊天白名单说明；稳定消息／媒体组请求 ID；含 AI 状态与网页链接的回复文案。实际发送 Telegram 图片与 PDF。若任一文件无法可靠地通过远程 MCP 工具传递原始字节及结果，本步实现已规定的本机 stdio MCP 适配器和令牌保护的流式上传路由，并提供安装说明。
 - **验证**：图片和 PDF 原始哈希、一笔采购对应一条收件项、重投不重复、未授权发送者／聊天被 Hermes 拒绝、停用／撤销令牌被 JAI 拒绝、手机可打开审阅链接、AI 失败仍产生待审核项。盲审检查适配器不能读取任意主机路径，也不能绕过令牌权限或 M14 校验。
-- **DoD**：roadmap §5；写 `review-notes/M15-step5-impl.md`。不得只凭 mock 关闭本步。
+- **DoD**：roadmap §5；写 `review-notes/M15-step5-impl.md`。依上方作者批准的时序例外，可推进自动化实现；真实传输验收仍待完成，不得只凭模拟测试关闭。
 
 ### Step 6 · 客户与只读业务上下文
 

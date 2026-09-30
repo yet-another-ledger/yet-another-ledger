@@ -1,0 +1,14 @@
+# Merge this server entry into the fresh jai-ledger profile's config.yaml.
+# The JAI endpoint must be reachable from the Hermes host on loopback.
+mcp_servers:
+  jai:
+    url: "http://127.0.0.1:8000/api/v1/mcp"
+    headers:
+      Authorization: "Bearer ${JAI_MCP_TOKEN}"
+    tools:
+      include:
+        - submit_receipt
+        - get_receipt_status
+      prompts: false
+      resources: false
+
