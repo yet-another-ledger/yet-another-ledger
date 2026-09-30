@@ -367,6 +367,12 @@ async def test_parent_lifespan_runs_real_mcp_session_manager(monkeypatch) -> Non
             assert {tool["name"] for tool in payload["result"]["tools"]} == {
                 "submit_receipt",
                 "get_receipt_status",
+                "search_customers",
+                "get_customer",
+                "create_customer",
+                "search_catalog",
+                "list_document_templates",
+                "list_vat_options",
             }
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://localhost"

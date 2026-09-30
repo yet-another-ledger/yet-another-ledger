@@ -117,11 +117,15 @@ class ReceiptStatusOutput(BaseModel):
 
 
 class SearchCustomersInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     query: NonEmpty
     limit: int = Field(default=20, ge=1, le=100)
 
 
 class GetCustomerInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     customer_id: uuid.UUID
 
 
@@ -147,6 +151,8 @@ class CreateCustomerOutput(BaseModel):
 
 
 class SearchCatalogInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     query: str = ""
     limit: int = Field(default=50, ge=1, le=100)
 

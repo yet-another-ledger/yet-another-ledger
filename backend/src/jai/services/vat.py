@@ -200,12 +200,16 @@ async def _check_treatment_unique(
 async def list_vat_rates(
     session: AsyncSession,
     company_id: uuid.UUID,
+    *,
+    limit: int | None = None,
 ) -> VatRateListResponse:
     stmt = (
         select(VatRate)
         .where(VatRate.company_id == company_id)
         .order_by(VatRate.percent.desc(), VatRate.label)
     )
+    if limit is not None:
+        stmt = stmt.limit(limit)
     result = await session.execute(stmt)
     rows = result.scalars().all()
     return VatRateListResponse(items=[_rate_to_read(r) for r in rows])
@@ -282,6 +286,8 @@ async def list_vat_treatments(
     session: AsyncSession,
     company_id: uuid.UUID,
     side: VatTreatmentSide | None = None,
+    *,
+    limit: int | None = None,
 ) -> VatTreatmentListResponse:
     stmt = (
         select(VatTreatment)
@@ -290,6 +296,8 @@ async def list_vat_treatments(
     )
     if side is not None:
         stmt = stmt.where(VatTreatment.side == side)
+    if limit is not None:
+        stmt = stmt.limit(limit)
     result = await session.execute(stmt)
     rows = result.scalars().all()
     return VatTreatmentListResponse(items=[_treatment_to_read(t) for t in rows])

@@ -21,11 +21,38 @@ from jai.db import get_session_maker
 from jai.schemas.agent_token import AgentTokenScope
 from jai.schemas.agent_tools import (
     AgentSource,
+    CatalogListOutput,
+    CreateCustomerInput,
+    CreateCustomerOutput,
+    CustomerListOutput,
+    CustomerOutput,
+    DocumentTemplateListOutput,
+    EmptyInput,
+    GetCustomerInput,
     GetReceiptStatusInput,
+    NonEmpty,
     ReceiptFileInput,
     ReceiptStatusOutput,
+    SearchCatalogInput,
+    SearchCustomersInput,
     SubmitReceiptInput,
     SubmitReceiptOutput,
+    VatOptionsOutput,
+)
+from jai.schemas.customer import CustomerWrite
+from jai.services.agent_business import (
+    create_customer_idempotently,
+    get_customer_detail,
+    list_templates,
+)
+from jai.services.agent_business import (
+    list_vat_options as list_vat_options_service,
+)
+from jai.services.agent_business import (
+    search_catalog as search_catalog_service,
+)
+from jai.services.agent_business import (
+    search_customers as search_customers_service,
 )
 from jai.services.agent_receipts import (
     AgentReceiptError,
@@ -297,6 +324,12 @@ _SAFE_TOOL_ERRORS = frozenset(
 _TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "submit_receipt": SubmitReceiptInput,
     "get_receipt_status": GetReceiptStatusInput,
+    "search_customers": SearchCustomersInput,
+    "get_customer": GetCustomerInput,
+    "create_customer": CreateCustomerInput,
+    "search_catalog": SearchCatalogInput,
+    "list_document_templates": EmptyInput,
+    "list_vat_options": EmptyInput,
 }
 
 
@@ -396,3 +429,111 @@ async def get_receipt_status(inbox_id: uuid.UUID) -> ReceiptStatusOutput:
         )
     except AgentReceiptError as exc:
         raise _tool_error(exc.code) from None
+
+
+@server.tool(
+    name="search_customers",
+    description="Search company customers by name, email, or legal name.",
+    structured_output=True,
+)
+async def search_customers(
+    query: NonEmpty,
+    limit: Annotated[int, Field(ge=1, le=100)] = 20,
+) -> CustomerListOutput:
+    principal = _authorized_principal(AgentTokenScope.CUSTOMER_READ)
+    try:
+        request = SearchCustomersInput(query=query, limit=limit)
+        return await search_customers_service(
+            get_session_maker(), principal, request.query, request.limit
+        )
+    except Exception:
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="get_customer",
+    description="Read one company customer and its saved addresses.",
+    structured_output=True,
+)
+async def get_customer(customer_id: uuid.UUID) -> CustomerOutput:
+    principal = _authorized_principal(AgentTokenScope.CUSTOMER_READ)
+    try:
+        request = GetCustomerInput(customer_id=customer_id)
+        result = await get_customer_detail(get_session_maker(), principal, request.customer_id)
+    except Exception:
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+    if result is None:
+        raise _tool_error("MCP_TARGET_NOT_FOUND")
+    return result
+
+
+@server.tool(
+    name="create_customer",
+    description="Create a customer after checking candidates with the user.",
+    structured_output=True,
+)
+async def create_customer(
+    request_id: uuid.UUID,
+    customer: CustomerWrite,
+    source: AgentSource | None = None,
+) -> CreateCustomerOutput:
+    principal = _authorized_principal(AgentTokenScope.CUSTOMER_CREATE)
+    try:
+        request = CreateCustomerInput(request_id=request_id, customer=customer, source=source)
+    except ValidationError:
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+    try:
+        return await create_customer_idempotently(get_session_maker(), principal, request)
+    except HTTPException as exc:
+        detail = exc.detail
+        code = detail.get("code") if isinstance(detail, dict) else None
+        if isinstance(code, str) and code in _SAFE_TOOL_ERRORS:
+            raise _tool_error(code) from None
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+    except Exception:
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="search_catalog",
+    description="Search saved active product options for document lines.",
+    structured_output=True,
+)
+async def search_catalog(
+    query: str = "",
+    limit: Annotated[int, Field(ge=1, le=100)] = 50,
+) -> CatalogListOutput:
+    principal = _authorized_principal(AgentTokenScope.CATALOG_READ)
+    try:
+        request = SearchCatalogInput(query=query, limit=limit)
+        return await search_catalog_service(
+            get_session_maker(), principal, request.query, request.limit
+        )
+    except Exception:
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="list_document_templates",
+    description="List saved document line templates.",
+    structured_output=True,
+)
+async def list_document_templates() -> DocumentTemplateListOutput:
+    principal = _authorized_principal(AgentTokenScope.CATALOG_READ)
+    try:
+        return await list_templates(get_session_maker(), principal)
+    except Exception:
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="list_vat_options",
+    description="List saved VAT rates and treatments for this company.",
+    structured_output=True,
+)
+async def list_vat_options() -> VatOptionsOutput:
+    principal = _authorized_principal(AgentTokenScope.CATALOG_READ)
+    try:
+        return await list_vat_options_service(get_session_maker(), principal)
+    except Exception:
+        raise _tool_error("MCP_VALIDATION_FAILED") from None

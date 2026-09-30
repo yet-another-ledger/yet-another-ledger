@@ -248,8 +248,9 @@ async def list_document_templates(
     company_id: uuid.UUID,
     *,
     applies_to: DocumentTemplateScope | None = None,
+    limit: int | None = None,
 ) -> list[DocumentTemplateRead]:
-    """Return all document templates for the company, optionally filtered."""
+    """Return company templates, optionally filtered and bounded."""
     stmt = (
         select(DocumentTemplate)
         .where(DocumentTemplate.company_id == company_id)
@@ -261,6 +262,8 @@ async def list_document_templates(
             (DocumentTemplate.applies_to == applies_to)
             | (DocumentTemplate.applies_to == DocumentTemplateScope.BOTH)
         )
+    if limit is not None:
+        stmt = stmt.limit(limit)
     result = await session.execute(stmt)
     rows = result.scalars().all()
     return [_template_to_read(tpl) for tpl in rows]

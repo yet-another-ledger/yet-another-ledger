@@ -1,0 +1,17 @@
+# Optional MCP tool allowlist for M15 Step 6 business context.
+# The bearer token needs customer:read, customer:create, and catalog:read.
+# Merge these tools into a profile only when those capabilities are intended.
+# Pair with the separately invoked SKILL-business-context.md workflow.
+# 仅在计划启用这些能力时合并；令牌需具备对应 scope，并配套业务上下文技能。
+mcp_servers:
+  jai:
+    tools:
+      include:
+        - search_customers
+        - get_customer
+        - create_customer
+        - search_catalog
+        - list_document_templates
+        - list_vat_options
+      prompts: false
+      resources: false

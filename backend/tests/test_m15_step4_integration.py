@@ -230,6 +230,12 @@ async def test_mcp_receipt_submit_replay_status_and_per_request_bearer(
             assert {tool["name"] for tool in listed_result["tools"]} == {
                 "submit_receipt",
                 "get_receipt_status",
+                "search_customers",
+                "get_customer",
+                "create_customer",
+                "search_catalog",
+                "list_document_templates",
+                "list_vat_options",
             }
 
             bad_envelope_secret = "SENSITIVE_BASE64_ENVELOPE_AQIDBAUG"
