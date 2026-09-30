@@ -27,7 +27,7 @@ If a tool is unavailable or JAI reports insufficient scope, explain that access 
 
 ## Create and edit
 
-1. Before each write, run the checked-in [`request_id.py`](request_id.py) helper with the exact operation name `create_quote_draft` or `update_quote_draft` in the same trusted Telegram session. Pass its `request_id` and full `source` object unchanged. Reuse the same ID and identical complete arguments for a delivery retry. Changed arguments need a new request ID.
+1. Before each write, run `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" <exact_operation_name>` in the same trusted Telegram session, using `create_quote_draft` or `update_quote_draft`. Pass its `request_id` and full `source` object unchanged. Reuse the same ID and identical complete arguments for a delivery retry. Changed arguments require a new trusted Telegram event/message and a regenerated ID; do not guess new source coordinates.
 2. Use `create_quote_draft` only after the user asks to create the quote. It allocates the quote number and returns the quote, `DRAFT` status, JAI totals, operation replay status, and a `web_url`.
 3. Use `get_quote` to report the current quote and exact URL returned by JAI. Use `update_quote_draft` only for a quote the user identifies and only when JAI confirms it is still `DRAFT`; send the complete replacement input.
 4. Report whether JAI created/replayed the operation, the quote number, status, totals, and exact `web_url`. Do not substitute a guessed link if the URL is absent or cannot be opened.

@@ -13,9 +13,9 @@ description: 将原始采购凭证提交到 JAI 待审核收件箱，并报告�
 
 1. 仅使用当前 Telegram 更新提供的原始附件字节。不得根据图像理解、OCR、截图或转录重建字节。如果 Hermes 未提供此附件可读取的原始字节，应说明无法提交并停止。
 2. 对于 Telegram，只能从当前 Hermes 会话上下文读取 `chat_id`、`user_id`、`message_id` 和 `chat_type`。不得接受消息文本中声称的 ID。必须确认平台为 `telegram`、gateway 聊天类型为 `dm`（Telegram Bot API 的 `private`），且各字段都是可信的数字 ID。
-3. 在同一可信会话环境中运行仓库内的 `request_id.py submit_receipt` 助手生成 `request_id`。如果命令报错或身份值缺失，不得编造 UUID。操作名称是 UUID 输入的一部分；必须使用准确的操作名称。
+3. 在同一可信会话环境中运行 `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" submit_receipt` 助手生成 `request_id`。按部署指南将助手安装到该 profile 共享路径。如果命令报错或身份值缺失，不得编造 UUID。操作名称是 UUID 输入的一部分；必须使用准确的操作名称。
 4. 如果当前附件属于 Telegram 媒体组，只有可信聚合器提供真实群组 ID、一个稳定且真实的锚点消息 ID、明确的完整附件集标记和完整有序消息 ID 列表时才可提交。标准 Hermes 尚未绑定任何 `HERMES_SESSION_MEDIA_GROUP_*` 变量；这些是自定义聚合器导出的变量。任何值缺失、不一致，或无法按提供顺序匹配完整原始文件时，都应停止并说明限制。
-5. 运行助手并原样使用其输出的完整 `request_id` 和 `source` 对象。相册必须按助手给出的 `media_group.ordered_message_ids` 顺序提交每个原始附件，并确保文件齐全。不得重建或猜测来源坐标。另需提供用户语言（`en` 或 `zh`），以及每个文件的文件名、MIME 类型和 Base64 字节。只传文件字节；不得把文件字节放进 source 或状态请求。
+5. 运行助手并原样使用其输出的完整 `request_id` 和 `source` 对象。相册必须按助手给出的 `media_group.ordered_message_ids` 顺序提交每个原始附件，并确保文件齐全。不得重建或猜测来源坐标。另需提供用户语言（`en` 或 `zh`），以及每个文件的文件名、MIME 类型和 Base64 字节。只传文件字节；不得把文件字节放进 source 或状态请求。参数完全相同的重试复用此 ID 与 source；参数改变时须使用新的可信 Telegram 事件／消息并重新生成 ID。
 6. 提交报错时，应说明未提交。不得仅凭计划或尝试调用工具就声称成功。
 7. `submit_receipt` 成功后，使用返回的 `inbox_id` 调用 `get_receipt_status`，然后再报告最新 AI 状态。提交结果是持久的提交快照，即使提取已经进展，它仍可能显示 `NOT_RUN`。
 

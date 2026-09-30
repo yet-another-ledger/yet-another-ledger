@@ -265,10 +265,11 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 - **🟢 部署自测点**：作者验收了 PDF 上传、AI 预填／重试、手工修改与确认、下载、丢弃，以及删除 Expense 后的已处理历史。浏览器端重复／并发确认和图片上传未手测；并发确认和图片路径有自动化覆盖。多页扫描件作为单个 PDF 文件处理。非阻断观察与运维清理顺延见 `milestones/M14_zh.md`。
 
 ### M15 · Agent 收据接入与业务草稿｜依赖 M14
-- **状态**：⬜ 设计于 2026-09-30 商定，实现尚未开始。权威契约、冻结决策、九个原子步骤及验收走查见 `milestones/M15_zh.md`。
+- **状态**：🟡 自动化实现与收尾已于 2026-10-01 完成；作者部署走查与验收待进行。真实 Hermes／Telegram 文件传输、哈希、手机链接和授权拒绝门禁仍待完成。权威契约、冻结决策、九个原子步骤及验收走查见 `milestones/M15_zh.md`；部署说明见 `milestones/M15-hermes-telegram_zh.md`。
 - **目标**：让获授权的 Agent（首个场景为通过 Telegram 交互的 Hermes）把采购单据提交到 M14 收件箱，匹配或创建客户，并通过小范围、可供其他 MCP Agent 使用的接口准备可编辑的 `DRAFT` 报价与普通销售发票。
 - **关键内容 / 边界**：同服务器内网 Streamable HTTP MCP、由 owner 管理的可撤销限权应用令牌、Hermes 发送者／聊天白名单、原件传输（远程 MCP 未通过真实图片／PDF 门禁时必须补流式适配器）、持久写入幂等及追踪。共用现有收件、主数据与后端定价服务；信息缺失或有歧义时先追问。收据入账确认与单据发送／签发仅在网页操作。不直接访问数据库、不自动计入 Expense/VAT，也不让 Agent 操作其他发票类型。
-- **🟢 部署自测点**：Telegram 图片与 PDF 各产生一条待审核项和手机可打开的链接；重复投递不重复建档。使用已有和新建客户创建草稿报价，再创建／修改未编号的普通发票草稿；后端合计与网页一致。撤销令牌并测试未授权发送者／权限请求；它们均不能确认 Expense 或发送／签发单据。完整走查见 `milestones/M15_zh.md`。
+- **🟢 部署自测点**：等待作者验收。Telegram 图片和 PDF 各产生一条待审核项，且通过原始字节 SHA-256 比对并带有手机可打开的审阅链接；重复投递不重复建档。使用已有和新建客户创建草稿报价，再创建／修改未编号的普通发票草稿；后端合计与网页一致。撤销令牌并测试未授权发送者／权限请求；它们均不能确认 Expense 或发送／签发单据。完整走查见 `milestones/M15_zh.md`。
+- **自动化收尾**：后端／前端全量门禁和隔离 Docker build 证据记录在本机忽略文件 `review-notes/M15-report.md`；作者完成真实 Telegram 门禁与走查前，不得将 M15 标记为验收完成。
 
 ---
 
@@ -395,6 +396,6 @@ docs/
 | M12 | Advance/Final Invoice 与 Credit Note | 🟢 完成（2026-09-02；编排 Step 1–11 与盲审均收敛；Ruff/mypy/默认 1125/integration 1065、迁移、codegen、前端 Node/Vitest 122 + build + EN/ZH 1423、Docker/CJK PDF 全绿；作者风险导向 walkthrough 与最终测试数据只读审计通过；5 项 walkthrough refinement 已修复） |
 | M13 | Document Artifact 历史补传 | 🟢 完成（2026-09-05；编排 Step 1–4 与盲审均收敛；AI 输出预算 walkthrough 修正复审零 finding；Ruff/mypy/默认 1243/integration 1074、迁移、codegen、前端 148 + build + EN/ZH 1458、Docker/CJK PDF 全绿；作者 Standard Invoice Happy Path 通过，其余人工路径以自动化证据验收） |
 | M14 | 收据收件箱与审阅 | 🟢 完成（2026-09-29；作者 PDF 走查验收；浏览器并发与图片路径以自动化证据验收；非阻断遗留见 `milestones/M14_zh.md`） |
-| M15 | Agent 收据接入与业务草稿（MCP；Hermes/Telegram 优先） | 🟡 正在实现（2026-09-30）；作者走查与验收待完成；见 `milestones/M15_zh.md` |
+| M15 | Agent 收据接入与业务草稿（MCP；Hermes/Telegram 优先） | 🟡 自动化实现完成（2026-10-01）；作者走查与验收待完成，包括真实 Telegram 附件门禁；见 `milestones/M15_zh.md` |
 
 > 图例：⬜ 未开始 ｜ 🟡 进行中 ｜ 🟢 完成（已过部署自测点）

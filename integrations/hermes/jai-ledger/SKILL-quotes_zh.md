@@ -27,7 +27,7 @@ description: 在 JAI 中准备、预览和编辑完整报价草稿，以便在�
 
 ## 创建和编辑
 
-1. 每次写入前，都应在同一可信 Telegram 会话环境中运行仓库内的 [`request_id.py`](request_id.py) 助手，并使用准确的操作名称 `create_quote_draft` 或 `update_quote_draft`。原样传递其 `request_id` 和完整 `source` 对象。投递重试时，应复用相同 ID 和完全相同的完整参数。参数变更时必须使用新的 request ID。
+1. 每次写入前，都应在同一可信 Telegram 会话环境中运行 `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" <准确操作名>`，操作名称使用 `create_quote_draft` 或 `update_quote_draft`。原样传递其 `request_id` 和完整 `source` 对象。投递重试时，应复用相同 ID 和完全相同的完整参数。参数改变时，必须使用新的可信 Telegram 事件／消息重新生成；不得猜测新的来源坐标。
 2. 仅当用户要求创建报价时才调用 `create_quote_draft`。该操作会分配报价编号，并返回报价、`DRAFT` 状态、JAI 金额、操作是新建还是重放，以及 `web_url`。
 3. 使用 `get_quote` 报告当前报价及 JAI 返回的准确链接。只有用户明确指定的报价且 JAI 确认其仍为 `DRAFT` 时，才使用 `update_quote_draft`；并发送完整替换输入。
 4. 报告 JAI 新建或重放了该操作、报价编号、状态、金额及准确的 `web_url`。若链接缺失或无法打开，不得猜测并替换链接。

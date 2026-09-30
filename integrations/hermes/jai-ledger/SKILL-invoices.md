@@ -26,7 +26,7 @@ If a tool is unavailable or JAI reports insufficient scope, explain that access 
 
 ## Create and edit
 
-1. Before each write, run the checked-in [`request_id.py`](request_id.py) helper with the exact operation name `create_invoice_draft` or `update_invoice_draft` in the same trusted Telegram session. Pass its `request_id` and full `source` object unchanged. Reuse the same ID and identical complete arguments for a delivery retry. Changed arguments need a new request ID.
+1. Before each write, run `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" <exact_operation_name>` in the same trusted Telegram session, using `create_invoice_draft` or `update_invoice_draft`. Pass its `request_id` and full `source` object unchanged. Reuse the same ID and identical complete arguments for a delivery retry. Changed arguments require a new trusted Telegram event/message and a regenerated ID; do not guess new source coordinates.
 2. Use `create_invoice_draft` only after the user asks to create the invoice. JAI creates an unnumbered `DRAFT` Standard Invoice and returns its backend totals, replay status, and `web_url`. The legal invoice number is assigned only when the owner issues it in JAI.
 3. Use `get_invoice` to report the current invoice and exact URL returned by JAI. Use `update_invoice_draft` only for a Standard Invoice the user identifies and only while JAI confirms it is `DRAFT`; send the complete replacement input.
 4. Report whether JAI created or replayed the operation, the status, totals, and exact `web_url`. Do not substitute a guessed link if the URL is absent or cannot be opened.

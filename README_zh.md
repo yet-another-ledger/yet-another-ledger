@@ -84,7 +84,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 路线图
 
-M0–M14 里程碑均已完成。M14 增加票据收件箱：先上传原件、审阅 AI 填入的字段，再显式确认入账。详见 [`docs/plan/milestones/M14_zh.md`](docs/plan/milestones/M14_zh.md) 和 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md)。
+M0–M14 已完成。M15 自动化实现已完成，作者部署走查与验收待进行。它增加了具备 scope 的 MCP 工具，用于收据收件以及客户、报价和普通发票草稿工作流。详见 [M15 设计与验收清单](docs/plan/milestones/M15_zh.md)、[Hermes／Telegram 部署指南](docs/plan/milestones/M15-hermes-telegram_zh.md)和[路线图](docs/plan/roadmap_zh.md)。M14 增加票据收件箱：先上传原件、审阅 AI 填入的字段，再显式确认入账。详见 [`docs/plan/milestones/M14_zh.md`](docs/plan/milestones/M14_zh.md)。
 
 ## 文档
 

@@ -85,7 +85,7 @@ Backend lives in `backend/` (`uv run ...`), frontend in `frontend/` (`npm run ..
 
 ## Roadmap
 
-Milestones M0–M14 are complete. M14 adds a receipt inbox: upload originals before creating an Expense, review AI-filled fields, then explicitly confirm the accounting entry. See [`docs/plan/milestones/M14.md`](docs/plan/milestones/M14.md) and [`docs/plan/roadmap.md`](docs/plan/roadmap.md).
+M0–M14 are complete. M15's automated implementation is complete, with the author deployment walkthrough and acceptance pending. It adds scoped MCP tools for receipt intake and customer, quote, and Standard Invoice draft workflows. See the [M15 design and acceptance checklist](docs/plan/milestones/M15.md), [Hermes/Telegram deployment guide](docs/plan/milestones/M15-hermes-telegram.md), and [roadmap](docs/plan/roadmap.md). M14 adds a receipt inbox: upload originals before creating an Expense, review AI-filled fields, then explicitly confirm the accounting entry. See [`docs/plan/milestones/M14.md`](docs/plan/milestones/M14.md).
 
 ## Documentation
 

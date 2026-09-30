@@ -2993,7 +2993,7 @@ export interface paths {
         put?: never;
         /**
          * Create Agent Token
-         * @description Issue one token and return its secret once after Step 2 is implemented.
+         * @description Issue one token and return its secret only in this response.
          */
         post: operations["create_agent_token_api_v1_agent_tokens_post"];
         delete?: never;
@@ -3014,7 +3014,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke Agent Token
-         * @description Revoke a token; the final route shape is reserved for Step 2.
+         * @description Revoke a company token immediately and idempotently.
          */
         delete: operations["revoke_agent_token_api_v1_agent_tokens__token_id__delete"];
         options?: never;
