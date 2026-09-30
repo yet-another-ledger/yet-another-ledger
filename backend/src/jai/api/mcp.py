@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 import json
+from contextvars import ContextVar
 
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from jai.db import get_session_maker
+from jai.schemas.agent_token import AgentTokenScope
+from jai.services.agent_tokens import AgentPrincipal, authenticate_token
+
 _ALLOWED_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+agent_principal: ContextVar[AgentPrincipal | None] = ContextVar("agent_principal", default=None)
+
+
+def require_scope(scope: AgentTokenScope) -> None:
+    """Authorize a registered MCP handler against the current HTTP request."""
+    from jai.services.agent_tokens import require_agent_scope
+
+    require_agent_scope(scope, agent_principal.get())
 
 
 def _valid_authority_port(value: str) -> bool:
@@ -66,8 +79,8 @@ async def _reject(send: Send, status_code: int, code: str, message: str) -> None
 class ClosedMCPBoundary:
     """Protect MCP paths before parent middleware can answer the request.
 
-    Step 2 replaces the unconditional 401 with token authentication and scope
-    checks. No cookie or protocol discovery exception is admitted here. This
+    Every MCP HTTP request must authenticate a Bearer token. No cookie or
+    protocol discovery exception is admitted here. This
     middleware is installed once on the parent app, outside development CORS.
     """
 
@@ -136,9 +149,34 @@ class ClosedMCPBoundary:
             ):
                 await _reject(send, 403, "MCP_ORIGIN_REJECTED", "MCP Origin is not allowed.")
                 return
-        # Step 1 intentionally rejects even initialize/discovery and ignores
-        # browser cookies. Step 2 installs the verifier at this boundary.
-        await _reject(send, 401, "MCP_UNAUTHENTICATED", "A valid Bearer token is required.")
+        auth_values = header_values.get(b"authorization", [])
+        if len(auth_values) != 1:
+            await _reject(send, 401, "MCP_UNAUTHENTICATED", "A valid Bearer token is required.")
+            return
+        scheme, separator, token_value = auth_values[0].partition(" ")
+        if (
+            scheme.lower() != "bearer"
+            or not separator
+            or not token_value
+            or token_value.strip() != token_value
+        ):
+            await _reject(send, 401, "MCP_UNAUTHENTICATED", "A valid Bearer token is required.")
+            return
+        try:
+            async with get_session_maker()() as session:
+                principal = await authenticate_token(session, token_value)
+        except Exception:
+            # Fail closed without logging request credentials or database details.
+            await _reject(send, 401, "MCP_UNAUTHENTICATED", "A valid Bearer token is required.")
+            return
+        if principal is None:
+            await _reject(send, 401, "MCP_UNAUTHENTICATED", "A valid Bearer token is required.")
+            return
+        token = agent_principal.set(principal)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            agent_principal.reset(token)
 
 
 class ExactMCPEntry:

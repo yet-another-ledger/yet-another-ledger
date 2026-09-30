@@ -428,7 +428,27 @@
       "categoryMileage": "里程",
       "comingSoon": "敬请期待",
       "categoryDocumentDefaults": "文档默认",
-      "categoryEmailTemplates": "邮件模板"
+      "categoryEmailTemplates": "邮件模板",
+      "categoryAgentTokens": "Agent 访问"
+    },
+    "agentTokens": {
+      "title": "Agent 访问令牌",
+      "description": "为可信的 Agent 集成创建受限凭据。密钥只显示一次。",
+      "name": "令牌名称",
+      "scopes": "允许的能力",
+      "create": "创建令牌",
+      "oneTimeWarning": "请立即复制此密钥。JAI 无法再次显示。",
+      "copyOnce": "复制密钥并隐藏",
+      "copied": "密钥已复制并隐藏。",
+      "copyFailed": "无法访问剪贴板。请先显示上方密钥，再选中并手动复制；成功复制前密钥会继续显示。",
+      "existing": "现有令牌",
+      "empty": "暂无 Agent 令牌。",
+      "active": "有效",
+      "revoked": "已撤销",
+      "revoke": "撤销",
+      "loadFailed": "无法加载 Agent 令牌。",
+      "createFailed": "无法创建令牌。",
+      "revokeFailed": "无法撤销令牌。"
     },
     "ai": {
       "title": "AI 设置",

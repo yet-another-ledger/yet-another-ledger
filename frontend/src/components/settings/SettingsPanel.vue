@@ -20,6 +20,7 @@ import {
   DocumentOutline,
   CreateOutline,
   CarOutline,
+  KeyOutline,
 } from '@vicons/ionicons5'
 import { useSettingsPanel, type SettingsCategory } from '../../composables/useSettingsPanel'
 import PreferenceSettings from './PreferenceSettings.vue'
@@ -30,6 +31,7 @@ import AiSettingsForm from './AiSettingsForm.vue'
 import DocumentDefaultsSettings from './DocumentDefaultsSettings.vue'
 import EmailTemplatesSettings from './EmailTemplatesSettings.vue'
 import MileageSettings from './MileageSettings.vue'
+import AgentTokensSettings from './AgentTokensSettings.vue'
 
 const { t } = useI18n()
 const { isOpen, activeCategory, close } = useSettingsPanel()
@@ -79,6 +81,11 @@ const menuOptions = computed<MenuOption[]>(() => [
     key: 'email-templates',
     icon: renderIcon(CreateOutline),
   },
+  {
+    label: t('settings.panel.categoryAgentTokens'),
+    key: 'agent-tokens',
+    icon: renderIcon(KeyOutline),
+  },
 ])
 
 // n-modal expects a writable boolean; close() on dismiss.
@@ -120,6 +127,7 @@ function onMenuUpdate(key: string) {
         <AiSettingsForm v-else-if="activeCategory === 'ai'" />
         <DocumentDefaultsSettings v-else-if="activeCategory === 'document-defaults'" />
         <EmailTemplatesSettings v-else-if="activeCategory === 'email-templates'" />
+        <AgentTokensSettings v-else-if="activeCategory === 'agent-tokens'" />
       </div>
     </div>
   </n-modal>

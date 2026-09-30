@@ -10,7 +10,7 @@
 
 import { ref } from 'vue'
 
-export type SettingsCategory = 'preference' | 'smtp' | 'theme' | 'dictionary' | 'mileage' | 'ai' | 'document-defaults' | 'email-templates'
+export type SettingsCategory = 'preference' | 'smtp' | 'theme' | 'dictionary' | 'mileage' | 'ai' | 'document-defaults' | 'email-templates' | 'agent-tokens'
 
 // Module-level shared state — every useSettingsPanel() caller sees the same refs.
 const isOpen = ref(false)

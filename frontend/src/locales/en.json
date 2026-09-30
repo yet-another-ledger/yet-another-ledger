@@ -428,7 +428,27 @@
       "categoryMileage": "Mileage",
       "comingSoon": "Coming soon",
       "categoryDocumentDefaults": "Document defaults",
-      "categoryEmailTemplates": "Email templates"
+      "categoryEmailTemplates": "Email templates",
+      "categoryAgentTokens": "Agent access"
+    },
+    "agentTokens": {
+      "title": "Agent access tokens",
+      "description": "Create limited credentials for trusted Agent integrations. A secret is shown only once.",
+      "name": "Token name",
+      "scopes": "Allowed capabilities",
+      "create": "Create token",
+      "oneTimeWarning": "Copy this secret now. JAI cannot show it again.",
+      "copyOnce": "Copy secret and hide",
+      "copied": "Secret copied and hidden.",
+      "copyFailed": "Clipboard access failed. Reveal the secret above, then select and copy it manually; it will stay visible until copying succeeds.",
+      "existing": "Existing tokens",
+      "empty": "No Agent tokens yet.",
+      "active": "Active",
+      "revoked": "Revoked",
+      "revoke": "Revoke",
+      "loadFailed": "Could not load Agent tokens.",
+      "createFailed": "Could not create the token.",
+      "revokeFailed": "Could not revoke the token."
     },
     "ai": {
       "title": "AI Settings",

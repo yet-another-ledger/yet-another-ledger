@@ -12,6 +12,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AddressFieldsForm: typeof import('./components/AddressFieldsForm.vue')['default']
+    AgentTokensSettings: typeof import('./components/settings/AgentTokensSettings.vue')['default']
     AiSettingsForm: typeof import('./components/settings/AiSettingsForm.vue')['default']
     AppLayout: typeof import('./components/AppLayout.vue')['default']
     DictionarySettings: typeof import('./components/settings/DictionarySettings.vue')['default']
@@ -26,6 +27,7 @@ declare module 'vue' {
     NButton: typeof import('naive-ui')['NButton']
     NCard: typeof import('naive-ui')['NCard']
     NCheckbox: typeof import('naive-ui')['NCheckbox']
+    NCheckboxGroup: typeof import('naive-ui')['NCheckboxGroup']
     NCollapse: typeof import('naive-ui')['NCollapse']
     NCollapseItem: typeof import('naive-ui')['NCollapseItem']
     NConfigProvider: typeof import('naive-ui')['NConfigProvider']
