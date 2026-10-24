@@ -13,11 +13,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.routing import Route
 from starlette.types import Scope
 
 import jai.config as _cfg
+from jai.api.agent_receipts import router as agent_receipts_router
 from jai.api.agent_tokens import router as agent_tokens_router
 from jai.api.attachments import router as attachments_router
 from jai.api.auth import router as auth_router
@@ -30,7 +32,7 @@ from jai.api.estimates import router as estimates_router
 from jai.api.expenses import router as expenses_router
 from jai.api.health import router as health_router
 from jai.api.invoices import router as invoices_router
-from jai.api.mcp import ClosedMCPBoundary
+from jai.api.mcp import AGENT_RECEIPT_UPLOAD_PATH, ClosedMCPBoundary
 from jai.api.mcp import app as mcp_app
 from jai.api.mcp import exact_app as mcp_exact_app
 from jai.api.mcp import server as mcp_server
@@ -130,6 +132,7 @@ async def _generate_recurring_expenses_job() -> None:
             await session.rollback()
             logger.exception("APScheduler: error in generate_recurring_expenses job")
 
+
 # index.html is the SPA entry point: it is NOT content-hashed, so it must never
 # be served from the browser cache without revalidation — otherwise a cached
 # index.html keeps pointing at stale (deleted) chunk hashes after a redeploy,
@@ -216,6 +219,10 @@ def create_app() -> FastAPI:
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         """Keep the locked Step 7 refund error body machine-readable."""
+        if request.url.path.rstrip("/") == AGENT_RECEIPT_UPLOAD_PATH:
+            return JSONResponse(
+                status_code=422, content={"detail": {"code": "MCP_VALIDATION_FAILED"}}
+            )
         code = _m12_refund_validation_code(request)
         if code is not None:
             return JSONResponse(
@@ -242,6 +249,26 @@ def create_app() -> FastAPI:
         from fastapi.exception_handlers import request_validation_exception_handler
 
         return await request_validation_exception_handler(request, exc)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> Response:
+        if request.url.path.rstrip("/") == AGENT_RECEIPT_UPLOAD_PATH:
+            code = "MCP_VALIDATION_FAILED"
+            if isinstance(exc.detail, dict) and exc.detail.get("code") in {
+                "MCP_UNAUTHENTICATED",
+                "MCP_INSUFFICIENT_SCOPE",
+                "MCP_REQUEST_ID_CONFLICT",
+            }:
+                code = exc.detail["code"]
+            status = (
+                413
+                if getattr(request.state, "agent_upload_too_large", False)
+                else (exc.status_code)
+            )
+            return JSONResponse(status_code=status, content={"detail": {"code": code}})
+        from fastapi.exception_handlers import http_exception_handler as default_handler
+
+        return await default_handler(request, exc)
 
     # -- Dev CORS -----------------------------------------------------------
     # Allow the Vite dev server (port 5173) to call the API.
@@ -284,6 +311,7 @@ def create_app() -> FastAPI:
     app.include_router(reports_router)
     app.include_router(receipt_inbox_router)
     app.include_router(agent_tokens_router)
+    app.include_router(agent_receipts_router)
     # Starlette Mount matches the prefix only with a slash and otherwise
     # redirects. Streamable HTTP clients use the canonical no-slash URL.
     app.router.routes.append(

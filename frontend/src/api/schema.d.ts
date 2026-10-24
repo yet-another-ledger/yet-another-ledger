@@ -3022,6 +3022,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent/receipt-inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Receipt
+         * @description Stream originals into the same authenticated intake and replay service.
+         *
+         *     The parent transport boundary authenticates and checks receipt:intake
+         *     before multipart parsing, and bounds the body even without Content-Length.
+         */
+        post: operations["upload_receipt_api_v1_agent_receipt_inbox_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3375,6 +3398,19 @@ export interface components {
         Body_upload_logo_api_v1_company_logo_put: {
             /** File */
             file: string;
+        };
+        /** Body_upload_receipt_api_v1_agent_receipt_inbox_post */
+        Body_upload_receipt_api_v1_agent_receipt_inbox_post: {
+            /**
+             * Metadata
+             * @description ReceiptSubmissionMetadata JSON: request_id, source, language.
+             */
+            metadata: string;
+            /**
+             * Files
+             * @description One to five original receipt files.
+             */
+            files: string[];
         };
         /**
          * BootstrapResponse
@@ -8909,6 +8945,40 @@ export interface components {
              * @default false
              */
             use_ssl?: boolean;
+        };
+        /** SubmitReceiptOutput */
+        SubmitReceiptOutput: {
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "created" | "replayed";
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Web Url */
+            web_url?: string | null;
+            /**
+             * Inbox Id
+             * Format: uuid
+             */
+            inbox_id: string;
+            /**
+             * Ai State
+             * @enum {string}
+             */
+            ai_state: "NOT_RUN" | "RUNNING" | "READY" | "UNAVAILABLE" | "FAILED";
+            /** Ai Error Code */
+            ai_error_code?: ("AI_DISABLED" | "AI_NOT_CONFIGURED" | "AI_TIMEOUT" | "AI_PROVIDER_ERROR" | "AI_INVALID_RESPONSE") | null;
+            /** Review Url */
+            review_url: string;
         };
         /**
          * UnitListResponse
@@ -16325,6 +16395,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentTokenRevoked"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_receipt_api_v1_agent_receipt_inbox_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_receipt_api_v1_agent_receipt_inbox_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmitReceiptOutput"];
                 };
             };
             /** @description Validation Error */

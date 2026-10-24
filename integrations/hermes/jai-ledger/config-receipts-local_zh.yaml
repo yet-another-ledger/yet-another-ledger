@@ -1,0 +1,24 @@
+# 真实远程收据传输门禁失败后使用。
+# 在 profile .env 设置 JAI_ADAPTER_SCRIPT、JAI_ATTACHMENT_CACHE_ROOT、JAI_BASE_URL。
+# JAI_MCP_TOKEN 保存在 .env；不得将 bearer token 写入本文件。
+mcp_servers:
+  jai:
+    url: "${JAI_BASE_URL}/api/v1/mcp"
+    headers:
+      Authorization: "Bearer ${JAI_MCP_TOKEN}"
+    tools:
+      include: [get_receipt_status]
+      prompts: false
+      resources: false
+  jai_receipts:
+    command: uv
+    args: [run, --script, "${JAI_ADAPTER_SCRIPT}"]
+    env:
+      JAI_MCP_TOKEN: "${JAI_MCP_TOKEN}"
+      JAI_BASE_URL: "${JAI_BASE_URL}"
+      JAI_ATTACHMENT_CACHE_ROOT: "${JAI_ATTACHMENT_CACHE_ROOT}"
+    timeout: 240
+    tools:
+      include: [submit_receipt]
+      prompts: false
+      resources: false

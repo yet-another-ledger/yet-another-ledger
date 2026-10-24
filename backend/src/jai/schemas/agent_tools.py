@@ -69,12 +69,17 @@ class ReceiptFileInput(BaseModel):
     data_base64: NonEmpty
 
 
-class SubmitReceiptInput(BaseModel):
+class ReceiptSubmissionMetadata(BaseModel):
+    """Shared metadata for remote Base64 and local multipart receipt intake."""
+
     model_config = ConfigDict(extra="forbid")
 
     request_id: RequestId
     source: AgentSource
     language: Literal["en", "zh"] = "en"
+
+
+class SubmitReceiptInput(ReceiptSubmissionMetadata):
     files: Annotated[list[ReceiptFileInput], Field(min_length=1, max_length=5)]
 
 

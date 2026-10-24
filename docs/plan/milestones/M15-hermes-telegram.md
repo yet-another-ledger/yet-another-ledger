@@ -2,7 +2,9 @@
 
 > 🌐 **English** · [中文](M15-hermes-telegram_zh.md)
 
-This guide deploys the receipt-only part of M15 Step 5 using a separate Hermes profile and a distinct Telegram bot. The real Telegram attachment, hash, authorization-denial, AI-failure, and phone-link walkthrough remains pending. This setup guide and automated checks do not count as those real checks.
+> **Status (2026-10-24)**: ⏸️ M15 remains in development and is paused at the author's request. Its implementation and this guide are preserved on `wip/m15-agent-accounting-paused`, outside `main`. The procedures below are for a future resume, not an instruction to deploy now. Parts of receipt intake have been walked through, but acceptance is incomplete; see the [M15 resume checkpoint](M15.md) for progress and author-skipped checks.
+
+This guide documents the receipt-only part of M15 Step 5 using a separate Hermes profile and a distinct Telegram bot. Receipt intake has been partly walked through; remaining checks, author exceptions and the paused resume point are recorded in the M15 checkpoint. The guide and automated checks alone do not constitute author acceptance.
 
 ## Supported setup boundary
 
@@ -193,4 +195,4 @@ The following checks remain outstanding and must be completed against the actual
 4. Test an unauthorized Telegram sender and a group attempt. Confirm the sender is denied and that BotFather disallows group joins; do not interpret a Hermes allowlist alone as enforcing sender/chat intersection.
 5. Revoke/disable the JAI token and verify MCP calls fail. Separately exercise an AI-disabled/error submission and confirm the receipt remains pending and the reply gives its current status and phone link. After confirming an item in the web app, replay its Telegram event and verify the reply reports `confirmed` rather than `pending`.
 
-If a real image or PDF cannot pass the remote MCP path with original bytes and a reliable result, the Step 5 fallback decision remains open: implement the milestone's local stdio adapter and token-protected streaming route then. No adapter or upload endpoint is installed in this implementation round.
+The author's real PDF transfer failed on 2026-10-01 because Hermes could not reliably pass the complete Base64 as tool arguments. The frozen Step 5 fallback has been implemented; see [local receipt adapter setup](M15-local-receipt-adapter.md). Re-test both real image and PDF, hashes, replay and phone links after installation. The author uses the `accountant` walkthrough profile and confirmed development port 8000.

@@ -1,0 +1,24 @@
+# Use after the real remote receipt-transfer gate fails.
+# Set JAI_ADAPTER_SCRIPT, JAI_ATTACHMENT_CACHE_ROOT, JAI_BASE_URL in the profile .env.
+# Keep JAI_MCP_TOKEN there; never copy a bearer token into this file.
+mcp_servers:
+  jai:
+    url: "${JAI_BASE_URL}/api/v1/mcp"
+    headers:
+      Authorization: "Bearer ${JAI_MCP_TOKEN}"
+    tools:
+      include: [get_receipt_status]
+      prompts: false
+      resources: false
+  jai_receipts:
+    command: uv
+    args: [run, --script, "${JAI_ADAPTER_SCRIPT}"]
+    env:
+      JAI_MCP_TOKEN: "${JAI_MCP_TOKEN}"
+      JAI_BASE_URL: "${JAI_BASE_URL}"
+      JAI_ATTACHMENT_CACHE_ROOT: "${JAI_ATTACHMENT_CACHE_ROOT}"
+    timeout: 240
+    tools:
+      include: [submit_receipt]
+      prompts: false
+      resources: false

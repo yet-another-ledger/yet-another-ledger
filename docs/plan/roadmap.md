@@ -2,6 +2,8 @@
 
 > 🌐 **English** · [中文](roadmap_zh.md)
 
+> **Current scheduling (2026-10-24)**: M15 remains in development but is paused, with its work preserved on `wip/m15-agent-accounting-paused`, outside `main`. No milestone is currently active; the author chooses the next work. Do not continue M15 automatically.
+
 > **What this is**: A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the planned receipt-inbox and agent-accounting follow-ons **M14–M15**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
 >
 > **What this is not**: A line-by-line construction guide. This document stays at the level of "milestones + methodology + constraints"; the **atomic step list** for each milestone is written out JIT in `docs/plan/milestones/M<x>.md` (template: `milestones/_TEMPLATE.md`).
@@ -265,11 +267,12 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **🟢 Deployment smoke test**: The author accepted PDF upload, AI prefill/retry, manual correction and confirmation, download, discard and processed history after deleting an Expense. Browser-only repeat/concurrent confirmation and image upload were not manually exercised; concurrent confirmation and image paths have automated coverage. Multi-page scans are handled as single PDF files. See `milestones/M14.md` for non-blocking observations and operational cleanup carryover.
 
 ### M15 · Agent receipt intake and business drafts | depends on M14
-- **Status**: 🟡 Automated implementation and closure completed on 2026-10-01; author deployment walkthrough and acceptance pending. Real Hermes/Telegram file-transfer, hash, phone-link and authorization-denial gates remain pending. The authoritative contract, frozen decisions, nine atomic steps and acceptance walkthrough are in `milestones/M15.md`; deployment instructions are in `milestones/M15-hermes-telegram.md`.
+- **Status**: ⏸️ In development, paused by the author on 2026-10-24 to work on other features. The implementation, adapter and walkthrough fixes are preserved on `wip/m15-agent-accounting-paused`, outside `main`; automated implementation is complete but author acceptance is not. The walkthrough stopped at 3/6, preparing the existing-customer quote test. Read the checkpoint in `milestones/M15.md` before resuming, and resume only at the author's explicit request.
 - **Goal**: Let an authorized agent, initially Hermes via Telegram, submit purchase documents to the M14 inbox, resolve or create customers, and prepare editable `DRAFT` quotes and Standard Invoices through a small MCP surface usable by other MCP-capable agents.
 - **Key content / boundary**: Same-host private-network Streamable HTTP MCP, owner-managed revocable/scoped application tokens, Hermes sender/chat allowlists, original attachment transfer with a mandatory streaming-adapter fallback if remote MCP fails the real image/PDF gate, durable write idempotency and traceability. Reuse existing intake, master-data and backend pricing services; missing or ambiguous facts trigger clarification. Receipt accounting confirmation and document send/issue remain web-only. No direct database access, automatic Expense/VAT posting, or Agent operations on other invoice kinds.
 - **🟢 Deployment smoke test**: Pending author acceptance. Telegram image/PDF each produce one pending inbox item with original-byte SHA-256 verified and a phone-openable review link; repeated delivery creates no duplicate. Use an existing and a new customer to create a draft quote, then create/edit an unnumbered Standard Invoice draft; backend totals match the web app. Revoke the token and try unauthorized sender/scope requests; none can confirm an Expense or send/issue a document. Full walkthrough in `milestones/M15.md`.
-- **Automated closure**: Backend/frontend full gates and isolated Docker build evidence are recorded locally in ignored `review-notes/M15-report.md`; do not mark M15 accepted until the author completes the real Telegram gate and walkthrough.
+- **Automated closure**: historical backend/frontend gates and isolated Docker build evidence remain in the local ignored `review-notes/M15-report.md`. The milestone is unaccepted and paused; check the resume checkpoint and author exceptions before continuing, without automatically repeating skipped manual checks.
+- **Walkthrough repair (2026-10-01)**: the real PDF remote-transfer failure triggered the frozen local adapter/upload route, which was implemented and installed. The author subsequently confirmed real PDF/valid-image intake, replay and the single-Expense path. Work is now paused; see the resume checkpoint in `milestones/M15.md` for remaining and author-skipped checks. Adapter instructions are preserved on the development branch.
 
 ---
 
@@ -396,6 +399,6 @@ docs/
 | M12 | Advance/Final Invoices and Credit Notes | 🟢 Done (2026-09-02; orchestrated Steps 1–11 and blind reviews converged; Ruff/mypy/default 1125/integration 1065, migrations, codegen, frontend Node/Vitest 122 + build + EN/ZH 1423, Docker/CJK PDF all green; risk-based author walkthrough plus final read-only test-data audit passed; five walkthrough refinements fixed) |
 | M13 | Document Artifact Backfill | 🟢 Done (2026-09-05; orchestrated Steps 1–4 and blind reviews converged; AI output-budget walkthrough fix re-reviewed with no findings; Ruff/mypy/default 1243/integration 1074, migrations, codegen, frontend 148 + build + EN/ZH 1458, Docker/CJK PDF all green; author Standard-Invoice Happy Path passed, remaining manual paths accepted on automated evidence) |
 | M14 | Receipt inbox and review | 🟢 Done (2026-09-29; author PDF walkthrough accepted; browser concurrency and images accepted on automated evidence; non-blocking carryovers in `milestones/M14.md`) |
-| M15 | Agent receipt intake and business drafts (MCP; Hermes/Telegram first) | 🟡 Automated implementation complete (2026-10-01); author walkthrough and acceptance pending, including real Telegram attachment gate; see `milestones/M15.md` |
+| M15 | Agent receipt intake and business drafts (MCP; Hermes/Telegram first) | ⏸️ In development, paused by the author on 2026-10-24; implementation preserved on `wip/m15-agent-accounting-paused`, outside main; walkthrough stopped at 3/6 preparation, not accepted; see `milestones/M15.md` |
 
-> Legend: ⬜ Not started | 🟡 In progress | 🟢 Done (deployment smoke test passed)
+> Legend: ⬜ Not started | 🟡 In progress | 🟢 Done (deployment smoke test passed) | ⏸️ In development but paused (not the active milestone)

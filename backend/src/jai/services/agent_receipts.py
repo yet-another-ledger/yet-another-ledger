@@ -20,6 +20,7 @@ from jai.schemas.agent_tools import (
     ReceiptAIErrorCode,
     ReceiptFileInput,
     ReceiptStatusOutput,
+    ReceiptSubmissionMetadata,
     ReceiptSubmissionSnapshot,
     SubmitReceiptInput,
     SubmitReceiptOutput,
@@ -66,7 +67,7 @@ def decode_receipt_files(
 
 
 def canonical_receipt_arguments(
-    request: SubmitReceiptInput,
+    request: ReceiptSubmissionMetadata,
     files: list[tuple[bytes, str, str | None]],
 ) -> dict[str, Any]:
     """Hash originals and retain only safe metadata in canonical arguments."""
@@ -147,6 +148,20 @@ async def submit_receipt(
     """Atomically persist inbox plus replay snapshot, then attempt M14 AI."""
     max_bytes = get_settings().max_receipt_bytes
     parts = decode_receipt_files(request.files, max_bytes)
+    return await submit_receipt_parts(session_maker, principal, request, parts, storage)
+
+
+async def submit_receipt_parts(
+    session_maker: async_sessionmaker[AsyncSession],
+    principal: AgentPrincipal,
+    request: ReceiptSubmissionMetadata,
+    parts: list[tuple[bytes, str, str | None]],
+    storage: Storage,
+) -> SubmitReceiptOutput:
+    """Shared bounded original-byte intake for MCP and the streaming adapter."""
+    max_bytes = get_settings().max_receipt_bytes
+    if not 1 <= len(parts) <= 5 or any(not data or len(data) > max_bytes for data, _, _ in parts):
+        raise AgentReceiptError("MCP_VALIDATION_FAILED")
     arguments = canonical_receipt_arguments(request, parts)
     written_keys: list[str] = []
     async with session_maker() as session:
@@ -237,9 +252,7 @@ async def get_receipt_status(
         status=item.status.value,
         ai_state=item.ai_state.value,
         ai_error_code=(
-            cast(ReceiptAIErrorCode, item.ai_error_code.value)
-            if item.ai_error_code
-            else None
+            cast(ReceiptAIErrorCode, item.ai_error_code.value) if item.ai_error_code else None
         ),
         review_url=_review_url(item.id),
     )

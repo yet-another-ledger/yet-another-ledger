@@ -14,6 +14,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import jsonrpc_message_adapter
 from pydantic import BaseModel, Field, ValidationError
+from starlette.formparsers import MultiPartException
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from jai.config import get_settings
@@ -90,6 +91,7 @@ from jai.services.agent_tokens import AgentPrincipal, authenticate_token, requir
 from jai.services.storage import get_storage
 
 _ALLOWED_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+AGENT_RECEIPT_UPLOAD_PATH = "/api/v1/agent/receipt-inbox"
 agent_principal: ContextVar[AgentPrincipal | None] = ContextVar("agent_principal", default=None)
 
 
@@ -171,8 +173,9 @@ class ClosedMCPBoundary:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         path = scope.get("path", "")
+        is_upload = path.rstrip("/") == AGENT_RECEIPT_UPLOAD_PATH
         if scope["type"] != "http" or not (
-            path == "/api/v1/mcp" or path.startswith("/api/v1/mcp/")
+            path == "/api/v1/mcp" or path.startswith("/api/v1/mcp/") or is_upload
         ):
             await self.app(scope, receive, send)
             return
@@ -254,8 +257,18 @@ class ClosedMCPBoundary:
         if principal is None:
             await _reject(send, 401, "MCP_UNAUTHENTICATED", "A valid Bearer token is required.")
             return
+        if is_upload:
+            try:
+                require_agent_scope(AgentTokenScope.RECEIPT_INTAKE, principal)
+            except HTTPException:
+                await _reject(
+                    send, 403, "MCP_INSUFFICIENT_SCOPE", "Receipt intake scope is required."
+                )
+                return
         if scope.get("method") == "POST":
-            body_limit = _body_limit()
+            body_limit = (
+                get_settings().max_receipt_bytes * 5 + 64 * 1024 if is_upload else _body_limit()
+            )
             content_lengths = header_values.get(b"content-length", [])
             if len(content_lengths) > 1 or (
                 content_lengths
@@ -267,6 +280,29 @@ class ClosedMCPBoundary:
                 )
             ):
                 await _reject(send, 413, "MCP_VALIDATION_FAILED", "MCP request body is too large.")
+                return
+            if is_upload:
+                # Leave multipart streaming to Starlette. Raising its parser
+                # exception makes it close already-spooled files on overflow.
+                # The parent app maps this fixed error to a safe 413 response.
+                original_upload_receive = receive
+                upload_received = 0
+
+                async def limited_upload_receive() -> MutableMapping[str, Any]:
+                    nonlocal upload_received
+                    message = await original_upload_receive()
+                    if message["type"] == "http.request":
+                        upload_received += len(message.get("body", b""))
+                        if upload_received > body_limit:
+                            scope.setdefault("state", {})["agent_upload_too_large"] = True
+                            raise MultiPartException("MCP_VALIDATION_FAILED")
+                    return message
+
+                token = agent_principal.set(principal)
+                try:
+                    await self.app(scope, limited_upload_receive, send)
+                finally:
+                    agent_principal.reset(token)
                 return
             chunks: list[bytes] = []
             received = 0
