@@ -2,7 +2,16 @@
 
 > 🌐 [English](M15.md) · **中文**
 
-> **状态**：⬜ 设计于 2026-09-30 商定；实现与部署走查尚未开始。本文是 M15 范围、契约及原子步骤的权威文档。M14 已完成并验收。
+> **状态**：⏸️ 开发中，作者于 2026-10-24 决定暂缓，优先开发其他内容。实现与走查修复保存在 `wip/m15-agent-accounting-paused`，不在 `main`。自动化实现已完成，作者验收尚未完成，走查停在 3/6 准备阶段。只有作者明确要求才恢复。本文仍保留 M15 的范围、契约及原子步骤；M14 已完成并验收。
+
+
+## 暂缓与恢复检查点（2026-10-24）
+
+- **保存位置**：`wip/m15-agent-accounting-paused`。保留九个实现提交，以及真实 PDF 走查触发的本地流式上传适配器、测试、配置指南和默认英文收据提取规则。`main` 仅保留暂停状态及设计文档，不包含 M15 实现。
+- **已确认**：真实 PDF 与有效图片进入待审核收件箱；新会话默认英文；同事件原样重试返回 `replayed` 且没有重复；网页确认只生成一笔 Expense，费用报表核对正确。原件哈希及手机链接由作者决定跳过；AI 不可用测试本轮暂缓，均不记为验证通过。
+- **暂停位置**：走查 **3/6——已有客户报价准备**。作者创建了含 `receipt:intake`、`customer:read`、`catalog:read`、`quote:read`、`quote:write_draft` 的开发 token，并写入 accountant 私有配置。MCP 报价工具清单更新尚未确认，报价 skill 尚未安装，真实报价／发票及授权拒绝测试未完成。凭据正文不进入 Git 或文档。
+- **恢复方式**：作者明确恢复后，切回保存分支并先合并届时最新主线；重新核实开发环境与 profile。接续确认工具清单、安装报价 skill 和验证权限，再继续 3/6，不自动重跑作者已跳过的项目。后续只走查新增或受影响的 Agent 链路。
+- **运行环境**：本次 Git 分支调整不修改、降级、重建或重启现有容器、数据库与 Hermes；Git checkout 不代表运行环境已切换版本。恢复或开展其他功能时，单独核实所用开发镜像及数据库迁移状态。
 
 ## 执行模式
 
@@ -44,14 +53,15 @@
 - [x] **D6 · 原子幂等**：在同一个数据库事务内占用操作键、完成业务变更并保存目标／结果。仅将受影响服务的提交边界重构为可嵌入事务的基础操作，保持现有网页 API 行为。崩溃或并发请求不得留下已提交但无法通过操作记录恢复的业务对象。AI 提取和 M14 一样，在收据事务持久提交后运行。
 - [x] **D7 · 原件传输**：远程 `submit_receipt` 以 Base64 内容接收 1–5 份 M14 支持的文件，持久保存前执行 M14 单文件限制和 `MAX_FILES × max_receipt_bytes` 的解码后总大小限制，并在解析前限制编码后的 HTTP 请求体。绝不记录字节日志。第 5 步必须用真实 Hermes 成功发送图片和 PDF。若 Hermes 无法提供工具可见的原始字节，或 MCP 大请求不可靠，同一步交付小型 Hermes 侧 stdio MCP 适配器。其工具接收本地附件路径，只读取获准的附件缓存根目录，并通过 multipart 流式上传至受 JAI 令牌保护的接口；该接口调用相同的收件／幂等服务。备用路径不能降低验收标准，也不创建第二套收据模型。
 - [x] **D8 · 草稿会计边界**：收据建议保持待审核，直到网页确认。报价和普通发票工具调用现有计算、校验服务；金额计算始终在 `services/`。创建结果为 `DRAFT`；修改时在锁定目标后检查状态。MCP 不暴露发送／签发／状态变更／确认工具。创建单据要求现有写入 schema 的完整输入；缺少事实时由 Hermes 追问，不增设不完整记录结构。
-- [x] **D9 · 安全的来源和审计数据**：保存令牌 ID、操作、请求 ID、来源平台／聊天／消息 ID、目标类型／ID、结果和安全错误码。审计行和日志均不保存收据字节、Base64、AI 原始响应、Bearer 令牌或完整敏感请求体。链接使用已配置的 `BASE_URL`；若手机走查得到无法访问的 localhost 链接，视为部署未通过。
+- [x] **D9 · 安全的来源和审计数据**：保存令牌 ID、操作、请求 ID、来源平台／聊天／消息 ID、目标类型／ID、结果和安全错误码。收件参数中的原件字节／Base64、M14 AI 服务的原始响应、认证边界的 Bearer 凭据及原始请求体不得复制到审计行或日志。**作者批准的重放例外（2026-09-30，选项 A + A1）**：`agent_operation` 还保存经校验、按工具类型限定的响应快照，使相同的已授权请求即使在目标被修改或删除后也能返回原完整结果。快照可能重复保存请求中的客户联系人／地址／`extra` 字段及报价／发票行项目、备注、金额；目标删除后快照仍保留。快照受公司 RLS 保护，没有通用列表 API，仅通过已认证且同一令牌的重放返回。类型化业务响应里的自由文本为了精确重放会保留，即使用户自行输入了类似 AI 输出的文字；系统无法仅凭任意文本推断其来源。快照应拒绝可识别的 Bearer／JAI 令牌格式、文件 data URI 或带文件签名的编码内容，但不能声称内容筛查能识别所有任意用户文字。收件和 AI 服务不得把原件字节、Base64 参数或服务商原始响应传给快照。链接使用已配置的 `BASE_URL`；若手机走查得到无法访问的 localhost 链接，视为部署未通过。
+- **D9 下的收据响应时序**：`submit_receipt` 在与收件箱条目相同的事务中快照持久提交结果（`ai_state=NOT_RUN`，无 AI 错误）。M14 AI 提取只在该提交完成后启动。后续状态通过 `get_receipt_status` 查询；Hermes 应在回复提取结果前查询状态。重放返回原始 `NOT_RUN` 提交快照，且不会重复收件或 AI 提取。
 
 ## 契约与数据变更
 
 ### Owner API 与数据
 
 - 新增 `agent_token`：UUID ID、`company_id` FK/RLS、owner 创建者 FK、名称、令牌摘要／选择器、类型化权限集合、创建／最近使用／撤销时间。只有创建响应返回明文。`GET /api/v1/agent-tokens` 列出元数据；`POST /api/v1/agent-tokens` 创建；`DELETE /api/v1/agent-tokens/{id}` 撤销。全部要求现有 MFA owner 会话。设置面板提供 EN/ZH 创建／一次性复制／列表／撤销 UI。
-- 新增 `agent_operation`：UUID ID、`company_id` FK/RLS、令牌 FK、唯一 `(company_id, token_id, request_id)`、操作名、规范化参数摘要、来源元数据、目标类型／ID、结果摘要、安全结果／错误和时间戳。这是持久的幂等与追踪记录。即使先前创建的目标后续被删除，原操作仍是已记录结果；重试不得创建替代对象。
+- 新增 `agent_operation`：UUID ID、`company_id` FK/RLS、令牌 FK、唯一 `(company_id, token_id, request_id)`、操作名、规范化参数摘要、来源元数据、目标类型／ID、经校验的工具响应快照、安全结果／错误和时间戳。这是持久的幂等与追踪记录。即使先前创建的目标后续被删除，原操作仍是已记录结果；已授权且内容相同的重试返回原响应快照，不得创建替代对象。刻意留存响应字段仅限上方 D9 的狭义例外，不允许存储原始参数或文件。
 - 定义 `receipt:intake`、`customer:read`、`customer:create`、`catalog:read`、`quote:read`、`quote:write_draft`、`invoice:read` 和 `invoice:write_draft` 类型化权限。读写工具要求对应权限；报价／发票的计算预览使用对应读取权限。创建令牌时拒绝空集合或未知权限。
 - 一次性令牌格式包含非机密公司选择器、令牌选择器及至少 256 位随机密钥。选择器为查询设置事务级 RLS 上下文；只有摘要核验通过才授予访问权。迁移同时包含运行时角色授权和原始 SQL RLS 测试。
 
@@ -70,7 +80,18 @@
 | `preview_quote` / `create_quote_draft` / `get_quote` / `update_quote_draft` | 现有报价计算／`QuoteWrite` 与 UUID → 后端合计、状态和网页 URL | 报价读／写权限；锁定后只改 `DRAFT`；不变更状态。 |
 | `preview_invoice` / `create_invoice_draft` / `get_invoice` / `update_invoice_draft` | 现有发票计算／`InvoiceWrite` 与 UUID → 后端合计、状态和网页 URL | 发票读／写权限；仅 Standard；锁定后只改 `DRAFT`；不签发／发送。 |
 
-可选备用路径新增 `POST /api/v1/agent/receipt-inbox`：令牌认证的 multipart 文件，加相同的 `request_id`、来源和语言，返回与主工具相同的提交结果。Hermes 侧适配器暴露接收原始缓存路径并转发文件流的本机 MCP 工具；只有第 5 步远程传输门禁失败时才安装。不得接收任意远程文件 URL，也不得让 JAI 抓取用户提供的 URL。
+
+MCP 工具的准确名称为 `submit_receipt`、`get_receipt_status`、`search_customers`、`get_customer`、`create_customer`、`search_catalog`、`list_document_templates`、`list_vat_options`、`preview_quote`、`create_quote_draft`、`get_quote`、`update_quote_draft`、`preview_invoice`、`create_invoice_draft`、`get_invoice` 和 `update_invoice_draft`。工具输入和输出均为类型化 Pydantic 契约；MCP 服务端不暴露额外的通用或管理工具。
+
+稳定的机器错误码为：`MCP_UNAUTHENTICATED`（Bearer 令牌缺失、无效或已撤销）、`MCP_INSUFFICIENT_SCOPE`（令牌缺少所需权限）、`MCP_VALIDATION_FAILED`（结构化参数无效或文件不受支持）、`MCP_TARGET_NOT_FOUND`、`MCP_TARGET_AMBIGUOUS`、`MCP_DRAFT_REQUIRED`（目标不是可编辑草稿）以及 `MCP_REQUEST_ID_CONFLICT`（相同请求键对应不同操作或规范化参数）。传输边界使用 `MCP_HOST_REJECTED`（Host 不在 localhost／回环地址范围内）和 `MCP_ORIGIN_REJECTED`（Origin 不在 localhost／回环地址范围内）。响应绝不包含令牌内容或文件字节。第 2 步之前，所有 MCP 协议请求（包括初始化／发现和工具调用）均返回 `401 MCP_UNAUTHENTICATED`；不安全的 Host 和 Origin 会优先被拒绝。
+
+**作者批准的门禁时序（2026-09-30）**：作者在实现期间不值守，明确将真实 Hermes／Telegram 图片与 PDF 传输、原件哈希、发送者／聊天拒绝和手机链接检查推迟到里程碑走查。第 5 步配置与自动化验证完成后可继续第 6 步；真实门禁仍待验证，作者验收前 M15 保持进行中。真实远程传输检查失败时，验收前须补做已规定的第 5 步适配器／上传路由修复。模拟或自动化协议测试不能算作真实传输成功。不得调用当前运行的 Hermes，也不得复用其现用 bot／profile。
+
+**第 5 步远程传输备用路径门禁**：如果真实 Hermes 图片或 PDF 中任一文件无法通过远程 MCP 工具可靠传递且保持原始字节完整，并返回可靠工具结果，则第 5 步必须使用本机 stdio 适配器和受保护的流式上传路由。模拟成功不能通过门禁。不得提前安装适配器；第 5 步必须实测两种真实文件，并在任一种失败时启用备用路径。
+
+可选备用路径新增 `POST /api/v1/agent/receipt-inbox`：令牌认证的 multipart `files`，加包含相同 `request_id`、来源和语言的 `metadata` JSON 表单字段，返回与主工具相同的提交结果。Hermes 侧适配器暴露接收原始缓存路径并转发文件流的本机 MCP 工具；只有第 5 步远程传输门禁失败时才安装。不得接收任意远程文件 URL，也不得让 JAI 抓取用户提供的 URL。
+
+**走查修复（2026-10-01）**：真实 PDF 无法可靠通过 Base64 参数传输，触发冻结的备用方案；本地 stdio 适配器、受保护流式上传路由及共享收件／重放路径已实现并安装，真实 PDF 与有效图片随后已成功提交。见[适配器指南](https://github.com/yet-another-ledger/yet-another-ledger/blob/wip/m15-agent-accounting-paused/docs/plan/milestones/M15-local-receipt-adapter_zh.md)。作者于 2026-10-24 暂缓 M15，剩余项目和已跳过项目以上方恢复检查点为准。
 
 ## 原子步骤
 
@@ -94,15 +115,16 @@
 
 ### Step 4 · 远程 MCP 收据提交和状态工具
 
-- **交付**：有界 Base64 解码、共用 M14 收件事务、持久提交后提取、`submit_receipt` 和 `get_receipt_status`、安全审阅 URL 及重放处理。现有网页收件箱端点行为保持不变。
+- **交付**：有界 Base64 解码、共用 M14 收件事务、持久提交后提取、`submit_receipt` 和 `get_receipt_status`、安全审阅 URL 及重放处理。不可变的提交／重放结果是持久化的 `NOT_RUN` 快照；当前 AI 结果通过状态查询读取，Hermes 应在回复前查询。现有网页收件箱端点行为保持不变。
 - **验证**：每种受支持 MIME、1–5 份混合文件、字节／哈希不变、伪造 MIME／文件名、单文件及总大小限制、AI 关闭／错误／超时、存储／数据库写入失败、跨公司查询和重复／并发投递。盲审检查不创建占位／已确认 Expense，不在审计或日志记录原始内容，也不另建一套收件实现。
 - **DoD**：roadmap §5；写 `review-notes/M15-step4-impl.md`。
 
 ### Step 5 · 真实 Hermes/Telegram 附件路径
 
+- **配置指南**：[Hermes 与 Telegram 部署配置](https://github.com/yet-another-ledger/yet-another-ledger/blob/wip/m15-agent-accounting-paused/docs/plan/milestones/M15-hermes-telegram_zh.md)。
 - **交付**：可部署的 Hermes MCP 配置和 Telegram 数字发送者／聊天白名单说明；稳定消息／媒体组请求 ID；含 AI 状态与网页链接的回复文案。实际发送 Telegram 图片与 PDF。若任一文件无法可靠地通过远程 MCP 工具传递原始字节及结果，本步实现已规定的本机 stdio MCP 适配器和令牌保护的流式上传路由，并提供安装说明。
 - **验证**：图片和 PDF 原始哈希、一笔采购对应一条收件项、重投不重复、未授权发送者／聊天被 Hermes 拒绝、停用／撤销令牌被 JAI 拒绝、手机可打开审阅链接、AI 失败仍产生待审核项。盲审检查适配器不能读取任意主机路径，也不能绕过令牌权限或 M14 校验。
-- **DoD**：roadmap §5；写 `review-notes/M15-step5-impl.md`。不得只凭 mock 关闭本步。
+- **DoD**：roadmap §5；写 `review-notes/M15-step5-impl.md`。依上方作者批准的时序例外，可推进自动化实现；真实传输验收仍待完成，不得只凭模拟测试关闭。
 
 ### Step 6 · 客户与只读业务上下文
 
@@ -141,7 +163,7 @@
 
 ## 验收结论（里程碑收尾时填写）
 
-- 完成日期：
-- 自动化门禁及真实 Hermes 附件路径：
-- 作者走查与验收：
-- 已知遗留／顺延事项：
+- 完成日期：尚未完成／验收。作者于 2026-10-24 暂缓；2026-10-01 的自动化实现收尾仅为历史进度。
+- 自动化门禁及真实 Hermes 附件路径：自动化证据保存在本机忽略目录 `review-notes/`。真实 PDF／有效图片提交、默认英文、重放及唯一费用链路已获作者确认；这不代表其余走查完成。
+- 作者走查与验收：暂缓，尚未验收；走查停在 3/6 已有客户报价准备。只有作者明确要求才恢复。
+- 已知遗留／推迟项：报价工具配置及 skill、已有／新客户报价、普通发票草稿、权限不足／撤销／未授权发送者检查仍未完成。原件哈希和手机链接按作者决定跳过，AI 不可用测试暂缓；不得把这些项目记为已测通过。相册仍要求可信聚合器提供完整元数据，否则停止。

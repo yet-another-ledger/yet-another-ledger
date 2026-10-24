@@ -84,7 +84,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 路线图
 
-M0–M14 里程碑均已完成。M14 增加票据收件箱：先上传原件、审阅 AI 填入的字段，再显式确认入账。详见 [`docs/plan/milestones/M14_zh.md`](docs/plan/milestones/M14_zh.md) 和 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md)。
+M0–M14 已完成。**M15 仍在开发中，作者于 2026-10-24 决定暂缓，优先开展其他工作**；尚未验收。实现与走查修复保存在 `wip/m15-agent-accounting-paused` 分支，不属于 `main` 的功能。M15 范围为具备 scope 的 Agent/MCP 收据接入及客户、报价、普通发票草稿工具；现有 M14 收件箱与 AI 提取保持独立。当前没有活动里程碑，后续工作由作者指定，不自动恢复 M15。详见 [M15 状态与恢复检查点](docs/plan/milestones/M15_zh.md)、[路线图](docs/plan/roadmap_zh.md)及 [M14](docs/plan/milestones/M14_zh.md)。
 
 ## 文档
 
