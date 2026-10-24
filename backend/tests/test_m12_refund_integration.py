@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -30,6 +30,7 @@ from test_quote_payment_integration import (
 )
 
 from jai.db import set_rls_company
+from jai.services import invoice as invoice_service
 from jai.services.reporting import dashboard as dashboard_service
 
 pytestmark = pytest.mark.integration
@@ -1185,7 +1186,13 @@ async def test_runtime_dashboard_and_vat_share_payment_tax_context_and_refunds_a
         def now(cls, tz: object | None = None) -> _FrozenAugustDatetime:
             return cls(2026, 8, 30, tzinfo=tz)
 
+    class _FrozenAugustDate(date):
+        @classmethod
+        def today(cls) -> _FrozenAugustDate:
+            return cls(2026, 8, 30)
+
     monkeypatch.setattr(dashboard_service, "datetime", _FrozenAugustDatetime)
+    monkeypatch.setattr(invoice_service, "date", _FrozenAugustDate)
     await _full_auth(db_client)
     seeds = await _setup_company(db_client)
     customer_id = await _create_customer(db_client)
@@ -1213,6 +1220,7 @@ async def test_runtime_dashboard_and_vat_share_payment_tax_context_and_refunds_a
     await _assert_report_equality("10.50")
     converted = await db_client.post(f"/api/v1/quotes/{quote['id']}/convert")
     assert converted.status_code == 201, converted.text
+    assert converted.json()["invoice_date"] == "2026-08-30"
     source = await db_client.post(
         f"/api/v1/invoices/{converted.json()['id']}/status", json={"status": "SENT"}
     )

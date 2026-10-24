@@ -896,8 +896,14 @@ class TestQuotePaymentReporting:
         assert Decimal(q2_after.json()["boxes"]["box_1a"]["vat"]) == Decimal("0")
 
     async def test_cross_quarter_final_invoice_recognises_only_remainder(
-        self, db_client: AsyncClient
+        self, db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        class _FrozenQ3Date(date):
+            @classmethod
+            def today(cls) -> _FrozenQ3Date:
+                return cls(2026, 9, 30)
+
+        monkeypatch.setattr(invoice_service, "date", _FrozenQ3Date)
         await _full_auth(db_client)
         seeds = await _setup_company(db_client)
         customer_id = await _create_customer(db_client)
@@ -914,6 +920,7 @@ class TestQuotePaymentReporting:
             json={"status": "SENT"},
         )
         assert issued.status_code == 200, issued.text
+        assert issued.json()["invoice_date"] == "2026-09-30"
 
         reports = []
         for quarter in (1, 2, 3):
