@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import logging
 import ssl
 import uuid
 from datetime import UTC, datetime
@@ -34,6 +36,63 @@ def client(folders=None):
     mock.starttls.return_value = ("OK", [])
     mock.append.return_value = ("OK", [])
     return mock
+
+
+@pytest.fixture
+def formatted_copy_log(monkeypatch):
+    output = io.StringIO()
+    handler = logging.StreamHandler(output)
+    handler.setFormatter(logging.Formatter())
+    emit = MagicMock(wraps=handler.emit)
+    monkeypatch.setattr(handler, "emit", emit)
+    # Scope capture to this logger, restoring all attributes after each test.
+    # Never install global logging configuration or alter pytest's handlers.
+    monkeypatch.setattr(sent_copy.logger, "handlers", [handler])
+    monkeypatch.setattr(sent_copy.logger, "propagate", False)
+    monkeypatch.setattr(sent_copy.logger, "level", logging.WARNING)
+    monkeypatch.setattr(sent_copy.logger, "disabled", False)
+    try:
+        yield output, emit
+    finally:
+        handler.close()
+
+
+@pytest.mark.parametrize("failure,code", [
+    ("configuration", "IMAP_CONFIGURATION_FAILED"),
+    ("protocol", "IMAP_AUTH_FAILED"),
+    ("timeout", "IMAP_TIMEOUT"),
+])
+def test_append_failure_code_visible_in_default_formatted_log(failure, code, formatted_copy_log):
+    cfg = config()
+    imap = client()
+    if failure == "configuration":
+        cfg.password = ""
+    elif failure == "protocol":
+        imap.login.return_value = ("NO", [b"secret-server-response"])
+    else:
+        imap.append.side_effect = TimeoutError("secret-exception")
+    with patch.object(sent_copy.imaplib, "IMAP4_SSL", return_value=imap):
+        result = sent_copy._append(cfg, b"secret-MIME token=SECRET", datetime.now(UTC))
+    output, emit = formatted_copy_log
+    assert output.getvalue() == f"Sent copy failed: {code}\n"
+    record = emit.call_args.args[0]
+    assert record.sent_copy_error_code == code and record.exc_info is None
+    assert result.sent_copy_status == "FAILED" and result.sent_copy_error_code == code
+
+
+@pytest.mark.asyncio
+async def test_dispatch_failure_code_visible_in_default_formatted_log(formatted_copy_log):
+    with patch(
+        "jai.services.sent_copy.asyncio.to_thread", side_effect=RuntimeError("secret-error")
+    ):
+        result = await sent_copy.save_sent_copy(
+            config(), b"secret-MIME token=SECRET", datetime.now(UTC)
+        )
+    output, emit = formatted_copy_log
+    assert output.getvalue() == "Sent copy failed: IMAP_COPY_FAILED\n"
+    record = emit.call_args.args[0]
+    assert record.sent_copy_error_code == "IMAP_COPY_FAILED" and record.exc_info is None
+    assert result.sent_copy_status == "FAILED" and result.sent_copy_error_code == "IMAP_COPY_FAILED"
 
 
 @pytest.mark.parametrize(

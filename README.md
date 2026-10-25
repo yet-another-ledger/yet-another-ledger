@@ -71,7 +71,17 @@ Compose reads `.env` automatically. The most useful variables:
 | `PUID` / `PGID` | `1000` | Host uid:gid the app runs as (owns the storage folder). |
 | `AUTH_SECRET` | auto | Auto-generated and persisted on first boot; set only to pin an external secret. |
 
-SMTP (for password-reset and sending invoices) is configured in-app under Settings after first login.
+### SMTP and server-side Sent copies
+
+Configure SMTP under Settings after first login for document mail, payment receipts, refund confirmations, test mail and password resets. Saved SMTP settings with a host take precedence; otherwise the existing `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, `SMTP_USE_TLS` and `SMTP_USE_SSL` environment fallback applies. Sent copying retains its saved settings when SMTP uses that fallback, and reuses the **effective SMTP username/password**; there is no separate IMAP login form. A provider may require an app password and permission for both SMTP and IMAP.
+
+Sent copying is off by default. Enable it in the SMTP panel, enter the provider's IMAP host, and choose **SSL/TLS, usually port 993**, or **STARTTLS, usually port 143**. Certificates are verified; plaintext is unavailable. Changing security does not change an explicitly entered port: set the correct port yourself.
+
+Use an existing folder's exact server name, including any hierarchy prefix, or leave Folder blank to discover the unique selectable special-use `\Sent` folder. If none is advertised, the app tries an existing selectable folder named `Sent`. Multiple special-use matches, no usable folder, or an incorrect explicit name require an explicit valid folder; the app never creates one or chooses arbitrarily. The copy stores the complete email **on the provider's server**, including body, To/CC and all attachments; verify it in webmail and download an attachment after the first test. If the provider already saves SMTP mail automatically, **leave the switch off** to avoid duplicate copies.
+
+SMTP and Sent-copy results are separate. SMTP acceptance remains a successful send even if copying fails: the test result/send warning and business Email log show the copy outcome independently. `SAVED` means the server acknowledged APPEND; `FAILED` includes uncertain outcomes; `NOT_ATTEMPTED` means copying was disabled or SMTP failed. Historical log rows show `NOT_ATTEMPTED`; this does not infer whether an old mail exists in the provider's Sent folder. Password-reset responses keep their existing behavior; copy failures appear only as safe runtime log codes, not business mail rows.
+
+For a copy failure, check the stable error code: `IMAP_CONFIGURATION_FAILED` means missing host/usable shared credentials; connection/TLS/timeout codes call for checking host, port, security, certificate and reachability; `IMAP_AUTH_FAILED` calls for checking IMAP access and the effective SMTP credentials; folder missing/ambiguous/invalid/failed codes call for checking the exact folder and discovery support; `IMAP_APPEND_FAILED` calls for checking write permission or quota. Other copy failures use `IMAP_COPY_FAILED`. Errors expose safe codes rather than raw provider responses, credentials or message content. There is **no retry or historical backfill**: restoring settings affects new mail only. Do not resend a delivered business email just to obtain a copy, as that sends another email to its recipients.
 
 ## Development
 

@@ -149,7 +149,7 @@ def _append(cfg: SmtpSettings, raw: bytes, date: datetime) -> SentCopyResult:
                 else stage
             )
         )
-        logger.warning("Sent copy failed", extra={"sent_copy_error_code": code})
+        logger.warning("Sent copy failed: %s", code, extra={"sent_copy_error_code": code})
         return SentCopyResult(sent_copy_status="FAILED", sent_copy_error_code=code)
     finally:
         if client is not None:
@@ -169,5 +169,9 @@ async def save_sent_copy(cfg: SmtpSettings, raw: bytes, date: datetime) -> SentC
     try:
         return await asyncio.to_thread(_append, cfg, raw, date)
     except Exception:
-        logger.warning("Sent copy failed", extra={"sent_copy_error_code": "IMAP_COPY_FAILED"})
+        logger.warning(
+            "Sent copy failed: %s",
+            "IMAP_COPY_FAILED",
+            extra={"sent_copy_error_code": "IMAP_COPY_FAILED"},
+        )
         return SentCopyResult(sent_copy_status="FAILED", sent_copy_error_code="IMAP_COPY_FAILED")

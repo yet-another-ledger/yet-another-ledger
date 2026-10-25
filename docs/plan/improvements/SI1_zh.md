@@ -1,7 +1,7 @@
 # SI1 · 单据排序、Quote 复制与发件副本
 > 🌐 [English](SI1.md) · **中文**
 
-> **状态**：2026-10-25 已确认设计，尚未开始实现。SI1 是小改进 issue，不是 Milestone；沿用 Milestone 实施计划格式，放在与 `milestones/` 并列的 `improvements/` 中。M15 保持暂停；SI1 不依赖、也不恢复其开发分支。
+> **状态**：2026-10-25 四个实施步骤、本地自动化门禁和独立盲审均已完成；作者验收仍待执行。SI1 是小改进 issue，不是 Milestone；沿用 Milestone 实施计划格式，放在与 `milestones/` 并列的 `improvements/` 中。M15 保持暂停；SI1 不依赖、也不恢复其开发分支。
 
 ## 目标与范围
 
@@ -151,9 +151,11 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 验收结论（收尾时填写）
 
-- 完成日期：尚未实现。
-- 自动化门禁：等待实施；本设计不是测试证据。
-- 作者走查：待验收。
+- 实现日期：2026-10-25。三项能力均已实现；作者验收前 SI1 保持进行中。
+- 自动化门禁：本地门禁全部通过：全量 PostgreSQL 集成（1112 passed，含迁移和运行角色隔离）、Ruff、strict mypy（122 个源文件）、默认 pytest（1370 passed）、前端 Node（7）和 Vitest（196）测试、前端 build、逐字节一致的 OpenAPI→TS 再生成、EN/ZH 键对称（1524 keys）及 `docker build -t jai-si1-step4-fix01:test .` 已通过。测试数据库／邮件替身均隔离，未使用真实供应商或生产数据。未触发远端 CI。
+- 审查：四个步骤均已通过独立盲审：Steps 1–2 无返工；Step 3 两轮返工后收敛，Step 4 一轮返工后收敛。本地忽略的实施简报、证据日志及整合后的 `review-notes/SI1-report.md` 供审查／作者走查使用。
+- 作者走查：六项验收均待执行，包括真实 webmail 与下载附件。Step 1 使用 API 替身的 Chromium 指针自动化仅属自动证据，未执行的供应商／浏览器人工走查不记为通过。
+- 运维说明：参见 [README SMTP 与服务器端 Sent 副本](../../../README_zh.md#smtp-与服务器端-sent-副本)，涵盖实际共享 SMTP 凭据／环境回退、TLS／端口、已有目录发现、独立结果与安全排障。
 - 已知顺延：产品手册 PDF 管理和附件勾选另开未来 Milestone；Sent 重试／回填及 Quote 版本管理仍不在范围内。M15 保持暂停。
 
 ## 协议参考
