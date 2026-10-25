@@ -2,13 +2,13 @@
 
 > 🌐 **English** · [中文](roadmap_zh.md)
 
-> **Current scheduling (2026-10-24)**: M15 remains in development but is paused, with its work preserved on `wip/m15-agent-accounting-paused`, outside `main`. No milestone is currently active; the author chooses the next work. Do not continue M15 automatically.
+> **Current scheduling (2026-10-25)**: M15 remains in development but is paused, with its work preserved on `wip/m15-agent-accounting-paused`, outside `main`. No milestone is currently active. The author has agreed the [SI1 small-improvement implementation plan](improvements/SI1.md); implementation has not started. SI1 is separately numbered, not a milestone, and does not resume M15.
 
 > **What this is**: A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the planned receipt-inbox and agent-accounting follow-ons **M14–M15**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
 >
 > **What this is not**: A line-by-line construction guide. This document stays at the level of "milestones + methodology + constraints"; the **atomic step list** for each milestone is written out JIT in `docs/plan/milestones/M<x>.md` (template: `milestones/_TEMPLATE.md`).
 >
-> **Authoritative sources**: Direction, scope, domain model, and decision records are governed by **this roadmap + each `milestones/M<x>.md` (frozen per-milestone decisions)**; Dutch VAT/BTW filing conventions are governed by `docs/insight/btw-aangifte-2026-guide.md` (structured guide to the official Tax Authority filing instructions). (Early upstream "analysis documents" were removed from the repository on 2026-06-15 — their content has been absorbed into the above documents; any remaining "analysis doc §x" references in older milestone files are historical artefacts only.)
+> **Authoritative sources**: Direction, scope, domain model, and decision records are governed by **this roadmap + each `milestones/M<x>.md` (frozen per-milestone decisions)**, with separately numbered small-improvement plans in **`improvements/SI<n>.md`**; Dutch VAT/BTW filing conventions are governed by `docs/insight/btw-aangifte-2026-guide.md` (structured guide to the official Tax Authority filing instructions). (Early upstream "analysis documents" were removed from the repository on 2026-06-15 — their content has been absorbed into the above documents; any remaining "analysis doc §x" references in older milestone files are historical artefacts only.)
 >
 > **Architecture reference**: `~/workspace/trading-journal` (isomorphic, live in production). Skeleton, conventions, Dockerfile, and CI all align with it; the only differences are "swap SQLite for PostgreSQL + invoice domain".
 
@@ -276,6 +276,13 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
+## 4.si Small improvements (separate from milestone numbering)
+
+- **SI1 · Document ordering, Quote duplication and Sent copies**: design agreed on 2026-10-25; implementation not started. The [implementation plan](improvements/SI1.md) follows the milestone format with four atomic steps, contracts, migration notes, review points and acceptance checks. Reuse existing line-order persistence and rounding; duplicate Quotes into new independently numbered drafts; optionally save all new outgoing messages and attachments to the provider's Sent mailbox through IMAP. M15 remains paused.
+- **Deferred**: product-manual PDF management and checkboxes for choosing extra quote attachments need a separately designed future milestone. SI1 reserves no schema or milestone number for it.
+
+---
+
 ## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M15)
 
 > **Status**: Explicitly **not doing** in the current roadmap through M15; this note is kept here so it's easy to pick up later. **No DB schema is reserved now** — any future columns/tables are additive migrations, existing data is unaffected, cost is acceptable, no need to pre-allocate.
@@ -365,6 +372,8 @@ docs/
     milestones/
       _TEMPLATE.md                   # Milestone refinement template
       M0.md, M1.md, ...              # Produced JIT before starting work (atomic step lists)
+    improvements/
+      SI1.md                         # Separately numbered small-improvement implementation plans
 ```
 
 **JIT refinement flow (when entering each milestone)**:
@@ -372,6 +381,8 @@ docs/
 2. Review the atomic step list for that milestone (backfill "to be refined" product decisions from the analysis docs as needed, e.g. whether units are optional, exact VAT numeric conventions, etc.).
 3. Implement step by step, each step passing [§5] DoD.
 4. Milestone wrap-up: walk through "🟢 deployment smoke test" and record acceptance conclusion.
+
+Small improvements use the same implementation-plan structure and quality gates, with their own `SI<n>` identifiers under `improvements/`; they do not change milestone numbering or resume a paused milestone. English plans ship with matching `_zh.md` mirrors.
 
 ---
 
@@ -400,5 +411,11 @@ docs/
 | M13 | Document Artifact Backfill | 🟢 Done (2026-09-05; orchestrated Steps 1–4 and blind reviews converged; AI output-budget walkthrough fix re-reviewed with no findings; Ruff/mypy/default 1243/integration 1074, migrations, codegen, frontend 148 + build + EN/ZH 1458, Docker/CJK PDF all green; author Standard-Invoice Happy Path passed, remaining manual paths accepted on automated evidence) |
 | M14 | Receipt inbox and review | 🟢 Done (2026-09-29; author PDF walkthrough accepted; browser concurrency and images accepted on automated evidence; non-blocking carryovers in `milestones/M14.md`) |
 | M15 | Agent receipt intake and business drafts (MCP; Hermes/Telegram first) | ⏸️ In development, paused by the author on 2026-10-24; implementation preserved on `wip/m15-agent-accounting-paused`, outside main; walkthrough stopped at 3/6 preparation, not accepted; see `milestones/M15.md` |
+
+Separately numbered improvements:
+
+| Improvement | Content | Status |
+| --- | --- | --- |
+| SI1 | Document ordering, Quote duplication and server-side Sent copies | ⬜ Not started; design agreed 2026-10-25; see [implementation plan](improvements/SI1.md) |
 
 > Legend: ⬜ Not started | 🟡 In progress | 🟢 Done (deployment smoke test passed) | ⏸️ In development but paused (not the active milestone)
