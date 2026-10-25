@@ -7,7 +7,7 @@ import {
   NButton, NSpace, NInput, NDataTable, NAlert, NSpin,
   NPagination, NSelect, NTag, NDropdown,
 } from 'naive-ui'
-import { AddOutline, SearchOutline, CreateOutline, TrashOutline, DownloadOutline, MailOutline, EyeOutline } from '@vicons/ionicons5'
+import { AddOutline, SearchOutline, CreateOutline, CopyOutline, TrashOutline, DownloadOutline, MailOutline, EyeOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
 import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
@@ -276,10 +276,10 @@ const columns = computed(() => [
     title: t('quotes.actions'),
     key: 'actions',
     width: 270,
-    align: 'center' as const,
+    align: 'left' as const,
     render(row: QuoteListItem) {
       const canDelete = row.status !== 'ACCEPTED'
-      return h(NSpace, { size: 4, justify: 'center', wrapItem: false }, () => [
+      return h(NSpace, { size: 4, justify: 'start', wrap: false, wrapItem: false }, () => [
         h(
           NButton,
           {
@@ -293,9 +293,13 @@ const columns = computed(() => [
         ),
         h(NButton, {
           size: 'small', loading: duplicatingId.value === row.id,
+          quaternary: true,
+          circle: true,
+          title: t('quotes.duplicate'),
+          'aria-label': t('quotes.duplicate'),
           disabled: duplicatingId.value !== null,
           onClick: () => handleDuplicate(row.id),
-        }, () => t('quotes.duplicate')),
+        }, { icon: () => h(NIcon, { size: 14 }, { default: () => h(CopyOutline) }) }),
         // PDF preview dropdown
         h(
           NDropdown,
@@ -348,7 +352,7 @@ const columns = computed(() => [
           },
           () => h(NIcon, null, { default: () => h(MailOutline) }),
         ),
-        ...(canDelete ? [h(
+        h(
           NButton,
           {
             size: 'small',
@@ -356,10 +360,12 @@ const columns = computed(() => [
             circle: true,
             type: 'error',
             title: t('quotes.delete'),
-            onClick: () => handleDelete(row.quote_number, row.id),
+            'aria-label': t('quotes.delete'),
+            disabled: !canDelete,
+            onClick: () => { if (canDelete) handleDelete(row.quote_number, row.id) },
           },
           () => h(NIcon, null, { default: () => h(TrashOutline) }),
-        )] : []),
+        ),
       ])
     },
   },
