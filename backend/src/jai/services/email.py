@@ -37,6 +37,7 @@ from __future__ import annotations
 import html
 import logging
 import re
+import ssl
 import uuid
 from datetime import UTC, datetime
 from email import policy
@@ -49,6 +50,7 @@ from typing import TYPE_CHECKING
 
 import aiosmtplib
 import nh3
+from aiosmtplib import errors as smtp_errors
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,6 +64,31 @@ if TYPE_CHECKING:
     from jai.models.email_log import EmailLog
 
 logger = logging.getLogger("jai.email")
+
+
+def log_smtp_test_failure(exc: Exception) -> None:
+    """Log a fixed diagnostic category, never protocol text or credentials."""
+    if isinstance(exc, smtp_errors.SMTPAuthenticationError):
+        code = "SMTP_AUTH_FAILED"
+    elif isinstance(exc, smtp_errors.SMTPSenderRefused):
+        code = "SMTP_SENDER_REJECTED"
+    elif isinstance(exc, (smtp_errors.SMTPRecipientRefused, smtp_errors.SMTPRecipientsRefused)):
+        code = "SMTP_RECIPIENT_REJECTED"
+    elif isinstance(exc, (TimeoutError, smtp_errors.SMTPTimeoutError)):
+        code = "SMTP_TIMEOUT"
+    elif isinstance(exc, ssl.SSLError) or isinstance(exc.__cause__, ssl.SSLError):
+        code = "SMTP_TLS_FAILED"
+    elif isinstance(exc, (ConnectionError, OSError)):
+        code = "SMTP_CONNECTION_FAILED"
+    elif isinstance(exc, smtp_errors.SMTPNotSupported):
+        code = "SMTP_FEATURE_UNSUPPORTED"
+    elif isinstance(exc, smtp_errors.SMTPResponseException):
+        code = "SMTP_SERVER_REJECTED"
+    elif isinstance(exc, (ValueError, UnicodeError)):
+        code = "SMTP_MESSAGE_INVALID"
+    else:
+        code = "SMTP_SEND_FAILED"
+    logger.warning("SMTP test send failed: %s", code, extra={"smtp_error_code": code})
 
 
 class MailSendResult(SentCopyResult):

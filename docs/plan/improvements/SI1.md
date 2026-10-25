@@ -1,7 +1,7 @@
 # SI1 · Document Ordering, Quote Duplication and Sent Copies
 > 🌐 **English** · [中文](SI1_zh.md)
 
-> **Status**: All four implementation steps, local automated gates and independent blind reviews completed on 2026-10-25; author acceptance remains pending. SI1 is a small-improvement issue, not a milestone. Its plan uses the milestone implementation format and lives beside `milestones/` in `improvements/`. M15 remains paused; SI1 neither depends on nor resumes its development branch.
+> **Status**: Completed and accepted by the author on 2026-10-25 after all four implementation steps, automated gates, independent blind reviews and the recorded representative walkthrough scope. SI1 is a small-improvement issue, not a milestone. Its plan uses the milestone implementation format and lives beside `milestones/` in `improvements/`. M15 remains paused; SI1 neither depends on nor resumes its development branch.
 
 ## Goals & Scope
 
@@ -87,6 +87,7 @@ Extend `GET/PUT /api/v1/settings/smtp` with typed nested `sent_copy` configurati
 
 ### Step 1 · Drag-to-reorder document lines
 
+- **Status**: Complete (2026-10-25); automated gates and independent blind review passed.
 - **Goal**: Invoice, Quote and Estimate editors can reorder lines, save them and recover the same order on reload and subsequent output.
 - **Contract**: no API changes; use ordered line arrays. Expected generated-type drift is zero.
 - **Frontend**: use the Vue 3 `vuedraggable` component with a shared handle-based ordering container. Keep normal text selection/input separate from dragging. Add stable keys to Invoice/Quote rows and reuse Estimate keys; cover loaded records, templates and new rows. Disable dragging while saving/loading or when current line-edit rules forbid it.
@@ -100,6 +101,7 @@ Extend `GET/PUT /api/v1/settings/smtp` with typed nested `sent_copy` configurati
 
 ### Step 2 · Complete Quote Duplicate workflow
 
+- **Status**: Complete (2026-10-25); automated gates and independent blind review passed.
 - **Goal**: create and open an independent duplicate from the list or an existing editor.
 - **Contract**: define the new route and `QuoteRead` result first; regenerate TS types.
 - **Backend**: implement duplication in the Quote service using a consistent source read and the existing create/numbering/pricing services. Copy the agreed raw fields and order; reset dates, state and associations. Preserve source data and use existing tenant protections rather than introducing a separate scoping convention.
@@ -111,6 +113,7 @@ Extend `GET/PUT /api/v1/settings/smtp` with typed nested `sent_copy` configurati
 
 ### Step 3 · Save complete outgoing mail to server-side Sent
 
+- **Status**: Complete (2026-10-25); automated gates and independent blind review passed.
 - **Goal**: every successful outgoing send attempts a provider-side copy when enabled and reports the two outcomes accurately.
 - **Contract/migration**: first define the settings/result schemas, compatibility rules and log migration above; regenerate types before frontend integration.
 - **Backend**: build the message once, add Date/Message-ID, serialize with SMTP line endings, and pass the same bytes to SMTP and IMAP. Use standard-library `imaplib` through a worker thread with bounded socket waits; verify TLS, authenticate with effective SMTP credentials, resolve/encode the folder correctly, APPEND with `\Seen` and an appropriate internal date, then close the connection.
@@ -124,6 +127,7 @@ Extend `GET/PUT /api/v1/settings/smtp` with typed nested `sent_copy` configurati
 
 ### Step 4 · Regression closure, documentation and issue report
 
+- **Status**: Complete (2026-10-25); automated gates and independent blind review passed.
 - **Goal**: finish verification and give the author one complete issue-level walkthrough.
 - **Execute**: Ruff, strict mypy, default and PostgreSQL integration suites, migration checks, runtime-role isolation, OpenAPI→TS freshness, frontend tests/build, EN/ZH key symmetry and Docker build.
 - **Recheck**: document editing/PDF, Estimate→Quote→Invoice, payments and formal retained artifacts, all mail types and backward-compatible SMTP settings.
@@ -149,13 +153,14 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 The final report must state which mail types were manually exercised and which rely on automated coverage; do not record an unperformed provider check as passed.
 
-## Acceptance Conclusion (Fill at Closure)
+## Acceptance Conclusion
 
-- Implementation date: 2026-10-25. All three capabilities are implemented; SI1 remains in progress until author acceptance.
-- Automated gates: All local gates passed: full PostgreSQL integration (1112 passed, including migrations and runtime-role isolation), Ruff, strict mypy (122 source files), default pytest (1370 passed), frontend Node (7) and Vitest (196) tests, frontend build, byte-identical OpenAPI→TS regeneration, EN/ZH key symmetry (1524 keys), and `docker build -t jai-si1-step4-fix01:test .` passed. Test databases/mail substitutes were isolated; no real provider or production data was used. Remote CI has not been triggered.
+- Implementation date: 2026-10-25. All three capabilities are implemented; the author accepted SI1 on the recorded representative scope on 2026-10-25.
+- Initial automated gates: All local gates passed: full PostgreSQL integration (1112 passed, including migrations and runtime-role isolation), Ruff, strict mypy (122 source files), default pytest (1370 passed), frontend Node (7) and Vitest (196) tests, frontend build, byte-identical OpenAPI→TS regeneration, EN/ZH key symmetry (1524 keys), and `docker build -t jai-si1-step4-fix01:test .` passed. Test databases/mail substitutes were isolated; no real provider or production data was used. These counts describe the initial orchestration gates; later follow-up evidence is recorded below.
 - Review: All four steps passed independent blind review: Steps 1–2 required no fixes; Step 3 converged after two fix rounds and Step 4 after one fix round. Local ignored implementation briefs, evidence logs and the integrated `review-notes/SI1-report.md` are the review/author-walkthrough inputs.
-- Author walkthrough: In progress at guided step 4/16. Existing-account login and the exercised Invoice reorder/save/reload cases passed manual checks; Quote/Estimate and provider checks, including webmail and attachment downloads, remain pending. Chromium checks with API substitutes are automated evidence only; unperformed manual checks are not recorded as passed.
-- Walkthrough refinement (2026-10-25): Quote list duplication now uses a copy icon; each row retains six left-aligned action positions with unavailable deletion disabled. The bounded follow-up passed independent blind review without findings, frontend Node 7/Vitest 197, build, Ruff, strict mypy, isolated default pytest 1370, browser substitutes and Docker build. Its visual author acceptance remains pending; API and business behavior are unchanged.
+- Author walkthrough: Accepted by the author at guided closeout step 16/16 on 2026-10-25, including the recorded skipped/manual-versus-automated scope. The exercised Invoice/Quote/Estimate ordering, Estimate→Quote→Invoice conversion and PDF order, Quote duplication/unsaved-change/independent-edit cases passed. The author verified test mail, Quote, STANDARD Invoice and an Invoice-origin payment receipt in the inbox and provider Sent folder, including CC and downloaded business PDFs; read-only database checks confirmed send/copy results and unchanged source/payment data. The STANDARD email links a retained formal PDF with a valid byte hash. ADVANCE/FINAL/CREDIT_NOTE, refund confirmation, password-reset and deliberate IMAP-failure manual sends were explicitly skipped by the author. Quote-origin receipts and Sent-off/provider-native behavior were not manually exercised. These paths retain automated evidence and are not recorded as manual passes.
+- Walkthrough refinement (2026-10-25): Quote list duplication now uses a copy icon; each row retains six left-aligned action positions with unavailable deletion disabled. The bounded follow-up passed independent blind review without findings, frontend Node 7/Vitest 197, build, Ruff, strict mypy, isolated default pytest 1370, browser substitutes and Docker build. The author accepted the action layout; API and business behavior are unchanged.
+- Walkthrough diagnostic follow-up: Added fixed, redacted SMTP test-failure categories to server logs while keeping the existing generic API error and independent SMTP/IMAP outcomes. Ruff, strict mypy (122 files), isolated default pytest (1388 tests, including 18 new diagnostics tests) and Docker build passed; full integration was not repeated for this logging-only change. The follow-up used the ordinary walkthrough workflow without another blind-review run; the author accepted and authorized committing this follow-up with closeout. The author updated credentials and the next real test succeeded; the earlier generic failure cannot be retrospectively classified. No agent sent real mail or accessed mailbox contents.
 - Operator guidance: See [README SMTP and server-side Sent copies](../../../README.md#smtp-and-server-side-sent-copies) for effective shared SMTP credentials/environment fallback, TLS/ports, existing-folder discovery, independent outcomes and safe troubleshooting.
 - Known carryover / deferred items: product-manual PDF management and attachment selection need a future separate milestone; Sent-copy retries/backfill and Quote version management remain out of scope. M15 stays paused.
 

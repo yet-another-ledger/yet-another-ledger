@@ -416,6 +416,6 @@ Separately numbered improvements:
 
 | Improvement | Content | Status |
 | --- | --- | --- |
-| SI1 | Document ordering, Quote duplication and server-side Sent copies | 🟡 Automated implementation, local gates and all four independent blind reviews complete; Quote list action refinement also passed blind review; author walkthrough at 4/16, acceptance pending; see [implementation plan](improvements/SI1.md) |
+| SI1 | Document ordering, Quote duplication and server-side Sent copies | 🟢 Done (2026-10-25; four steps and independent blind reviews complete; Quote action refinement accepted; representative author walkthrough accepted with skipped paths recorded); see [implementation plan](improvements/SI1.md) |
 
 > Legend: ⬜ Not started | 🟡 In progress | 🟢 Done (deployment smoke test passed) | ⏸️ In development but paused (not the active milestone)

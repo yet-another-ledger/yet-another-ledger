@@ -12,6 +12,7 @@
 
 - **发票** —— Standard、Advance、Final 以及绑定来源的 Credit Note；后端定价、并发安全编号、相互独立的生命周期/结算/贷记状态和可审计的单据链。
 - **报价** —— 可复用内容块/模板、到期自动失效，并可不可变地选择直接开票、仅收据定金或正式分阶段 Advance/Final 开票。
+- **编辑与复用** —— Invoice、Quote、Estimate 编辑页支持明细拖动排序；Quote 可复制为独立新编号、新日期的草稿。
 - **成本核算 → 报价** —— 内部按 margin 反推卖价，成本/毛利绝不泄漏给客户。
 - **收付款与退款** —— 分次收款、Quote 定金、自动结算状态、关联 Credit 的 Refund，以及 Refund Confirmation。
 - **开支** —— 先审阅后入账的票据收件箱、图片／PDF 原件的 AI 提取、周期性开支、记账字段（付款来源 / 业务使用 % / 折旧年限）。
@@ -82,6 +83,8 @@ SMTP 与 Sent 副本结果独立。复制失败时，SMTP 接受邮件仍代表�
 
 副本失败时检查稳定错误码：`IMAP_CONFIGURATION_FAILED` 表示缺少 host／可用共享凭据；连接／TLS／超时码需要检查 host、端口、安全模式、证书与可达性；`IMAP_AUTH_FAILED` 需要检查 IMAP 权限与实际生效的 SMTP 凭据；文件夹缺失／歧义／无效／失败码需要检查精确目录和发现支持；`IMAP_APPEND_FAILED` 需要检查写权限或配额；其他复制失败使用 `IMAP_COPY_FAILED`。错误只暴露安全码，不含供应商原始响应、凭据或邮件内容。**没有重试和历史回填**，恢复设置只影响新邮件。不要为了补副本重发已经送达的业务邮件，否则收件人会再次收到邮件。
 
+SMTP 测试失败仍返回通用的 `SMTP_SEND_FAILED` API 错误。服务端日志补充固定分类，例如 `SMTP_AUTH_FAILED`、`SMTP_SENDER_REJECTED`、`SMTP_RECIPIENT_REJECTED`、`SMTP_TIMEOUT`、`SMTP_TLS_FAILED` 和 `SMTP_CONNECTION_FAILED`，不记录供应商原文或凭据。再次手动测试前，可按分类核对相应配置。
+
 ## 开发
 
 从源码起完整开发栈（app + Postgres，带 dev override）：
@@ -95,6 +98,8 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ## 路线图
 
 M0–M14 已完成。**M15 仍在开发中，作者于 2026-10-24 决定暂缓，优先开展其他工作**；尚未验收。实现与走查修复保存在 `wip/m15-agent-accounting-paused` 分支，不属于 `main` 的功能。M15 范围为具备 scope 的 Agent/MCP 收据接入及客户、报价、普通发票草稿工具；现有 M14 收件箱与 AI 提取保持独立。当前没有活动里程碑，后续工作由作者指定，不自动恢复 M15。详见 [M15 状态与恢复检查点](docs/plan/milestones/M15_zh.md)、[路线图](docs/plan/roadmap_zh.md)及 [M14](docs/plan/milestones/M14_zh.md)。
+
+SI1（单据排序、Quote 复制和服务器侧 Sent 副本）已于2026-10-25按代表性走查范围验收；未实际执行的邮件类型和失败分支明确记录为自动化覆盖。参见 [SI1 计划与验收](docs/plan/improvements/SI1_zh.md)。
 
 ## 文档
 

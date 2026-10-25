@@ -12,6 +12,7 @@ Built with **FastAPI + Vue 3 + PostgreSQL**.
 
 - **Invoices** — Standard, Advance, Final and source-bound Credit Notes; backend pricing, concurrency-safe numbering, independent lifecycle/settlement/credit states, and an auditable document chain.
 - **Quotes** — reusable content blocks/templates, auto-expiry, and an immutable choice between direct invoicing, receipt-only deposits, or formal staged Advance/Final invoicing.
+- **Editing and reuse** — drag-to-reorder lines in Invoice, Quote and Estimate editors; duplicate a Quote into an independent draft with a fresh number and dates.
 - **Cost estimation → quote** — internal margin-based costing that never leaks cost/margin to the customer.
 - **Payments & refunds** — partial payments, Quote deposits, automatic settlement states, Credit-linked Refunds, and Refund Confirmations.
 - **Expenses** — receipt inbox for review before posting, AI extraction from image/PDF originals, recurring expenses, bookkeeping fields (paid-by / business-use % / depreciation years).
@@ -83,6 +84,8 @@ SMTP and Sent-copy results are separate. SMTP acceptance remains a successful se
 
 For a copy failure, check the stable error code: `IMAP_CONFIGURATION_FAILED` means missing host/usable shared credentials; connection/TLS/timeout codes call for checking host, port, security, certificate and reachability; `IMAP_AUTH_FAILED` calls for checking IMAP access and the effective SMTP credentials; folder missing/ambiguous/invalid/failed codes call for checking the exact folder and discovery support; `IMAP_APPEND_FAILED` calls for checking write permission or quota. Other copy failures use `IMAP_COPY_FAILED`. Errors expose safe codes rather than raw provider responses, credentials or message content. There is **no retry or historical backfill**: restoring settings affects new mail only. Do not resend a delivered business email just to obtain a copy, as that sends another email to its recipients.
 
+SMTP test failures keep the generic `SMTP_SEND_FAILED` API response. Server logs add fixed categories such as `SMTP_AUTH_FAILED`, `SMTP_SENDER_REJECTED`, `SMTP_RECIPIENT_REJECTED`, `SMTP_TIMEOUT`, `SMTP_TLS_FAILED` and `SMTP_CONNECTION_FAILED`, without logging provider text or credentials. Use the category to check the corresponding configuration before another manual test.
+
 ## Development
 
 Run the full dev stack (app + Postgres, with the dev override) from source:
@@ -96,6 +99,8 @@ Backend lives in `backend/` (`uv run ...`), frontend in `frontend/` (`npm run ..
 ## Roadmap
 
 M0–M14 are complete. **M15 remains in development and was paused by the author on 2026-10-24 to prioritize other work**; it has not been accepted. Its implementation and walkthrough fixes are preserved on `wip/m15-agent-accounting-paused`, outside `main`. M15 covers scoped Agent/MCP receipt intake and customer, quote, and Standard Invoice draft tools; the existing M14 inbox and AI extraction remain independent. No milestone is currently active; the author selects the next work, and M15 must not resume automatically. See the [M15 status and resume checkpoint](docs/plan/milestones/M15.md), [roadmap](docs/plan/roadmap.md), and [M14](docs/plan/milestones/M14.md).
+
+SI1 (document ordering, Quote duplication and server-side Sent copies) was accepted on 2026-10-25 on a representative walkthrough scope; unperformed mail variants and failure paths remain explicitly recorded with automated coverage. See the [SI1 plan and acceptance](docs/plan/improvements/SI1.md).
 
 ## Documentation
 

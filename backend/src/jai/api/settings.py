@@ -218,6 +218,7 @@ async def test_smtp_settings(
     try:
         result = await email_svc.send_test_email(session, user.email)
     except Exception as exc:
+        email_svc.log_smtp_test_failure(exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="SMTP_SEND_FAILED",
