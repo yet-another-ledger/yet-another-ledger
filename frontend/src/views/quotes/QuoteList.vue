@@ -24,6 +24,7 @@ const { t } = useI18n()
 const message = useMessage()
 const dialog = useDialog()
 const store = useQuotesStore()
+const duplicatingId = ref<string | null>(null)
 
 // Send dialog state
 const sendDialogShow = ref(false)
@@ -158,6 +159,20 @@ function handleEdit(id: string) {
   router.push(`/quotes/${id}/edit`)
 }
 
+async function handleDuplicate(id: string) {
+  if (duplicatingId.value) return
+  duplicatingId.value = id
+  try {
+    const duplicate = await store.duplicateQuote(id)
+    message.success(t('quotes.duplicateSuccess'))
+    await router.push(`/quotes/${duplicate.id}/edit`)
+  } catch (e: unknown) {
+    message.error(e instanceof Error ? e.message : t('quotes.duplicateFailed'))
+  } finally {
+    duplicatingId.value = null
+  }
+}
+
 function handleDelete(quoteNumber: string, id: string) {
   dialog.warning({
     title: t('quotes.delete'),
@@ -260,7 +275,7 @@ const columns = computed(() => [
   {
     title: t('quotes.actions'),
     key: 'actions',
-    width: 188,
+    width: 270,
     align: 'center' as const,
     render(row: QuoteListItem) {
       const canDelete = row.status !== 'ACCEPTED'
@@ -276,6 +291,11 @@ const columns = computed(() => [
           },
           () => h(NIcon, null, { default: () => h(CreateOutline) }),
         ),
+        h(NButton, {
+          size: 'small', loading: duplicatingId.value === row.id,
+          disabled: duplicatingId.value !== null,
+          onClick: () => handleDuplicate(row.id),
+        }, () => t('quotes.duplicate')),
         // PDF preview dropdown
         h(
           NDropdown,

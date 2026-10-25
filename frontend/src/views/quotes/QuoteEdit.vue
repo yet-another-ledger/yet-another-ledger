@@ -84,6 +84,7 @@ const invoicesStore = useInvoicesStore()
 const isEdit = ref(false)
 const pageLoading = ref(false)
 const saving = ref(false)
+const duplicating = ref(false)
 const pageError = ref<string | null>(null)
 const existingQuote = ref<QuoteRead | null>(null)
 const {
@@ -517,6 +518,8 @@ async function withDirtyCheck(): Promise<boolean> {
       },
       onNegativeClick: () => resolve(false),
       onClose: () => resolve(false),
+      onMaskClick: () => resolve(false),
+      onEsc: () => resolve(false),
     })
   })
 }
@@ -530,6 +533,21 @@ async function handleStatusTransition(newStatus: 'SENT' | 'ACCEPTED' | 'REJECTED
     router.push('/quotes')
   } catch (e: unknown) {
     message.error(e instanceof Error ? e.message : t('quotes.statusFailed'))
+  }
+}
+
+async function handleDuplicate() {
+  if (!existingQuote.value || duplicating.value || saving.value || pageLoading.value) return
+  duplicating.value = true
+  try {
+    if (!(await withDirtyCheck())) return
+    const duplicate = await store.duplicateQuote(existingQuote.value.id)
+    message.success(t('quotes.duplicateSuccess'))
+    await router.push(`/quotes/${duplicate.id}/edit`)
+  } catch (e: unknown) {
+    message.error(e instanceof Error ? e.message : t('quotes.duplicateFailed'))
+  } finally {
+    duplicating.value = false
   }
 }
 
@@ -815,6 +833,10 @@ function handleReceiptSent(log: EmailLogRead) {
                   : 'warning'">
                   {{ t(`quotes.status${existingQuote.status}`) }}
                 </n-tag>
+
+                <n-button size="small" :loading="duplicating" :disabled="duplicating || saving || pageLoading" @click="handleDuplicate">
+                  {{ t('quotes.duplicate') }}
+                </n-button>
 
                 <!-- PDF preview dropdown (default / en / zh) -->
                 <n-dropdown

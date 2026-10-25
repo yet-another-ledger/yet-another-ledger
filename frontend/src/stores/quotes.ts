@@ -97,6 +97,10 @@ export const useQuotesStore = defineStore('quotes', () => {
     return await post<QuoteRead>(`/api/v1/quotes/${id}/status`, body)
   }
 
+  async function duplicateQuote(id: string): Promise<QuoteRead> {
+    return await post<QuoteRead>(`/api/v1/quotes/${id}/duplicate`, undefined)
+  }
+
   async function convertQuote(id: string): Promise<InvoiceRead> {
     return await post<InvoiceRead>(`/api/v1/quotes/${id}/convert`, {})
   }
@@ -129,6 +133,7 @@ export const useQuotesStore = defineStore('quotes', () => {
     updateQuote,
     deleteQuote,
     transitionStatus,
+    duplicateQuote,
     convertQuote,
     reactivateQuote,
     calculatePreview,

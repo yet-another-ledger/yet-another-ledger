@@ -30,6 +30,7 @@ from decimal import Decimal
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from jai.db import set_rls_company
 from jai.models._enums import (
@@ -51,6 +52,8 @@ from jai.models.product import Product
 from jai.models.quote import Quote, QuoteLine, QuoteLineTax, QuoteTax
 from jai.models.vat import VatRate, VatTreatment
 from jai.schemas.invoice import (
+    DiscountInput,
+    InvoiceLineInput,
     InvoiceRead,
     VatTreatmentSnapshot,
 )
@@ -712,6 +715,71 @@ async def create_quote(
 
     await session.refresh(q)
     return _quote_to_read(q)
+
+
+async def duplicate_quote(
+    session: AsyncSession,
+    quote_id: uuid.UUID,
+    company_id: uuid.UUID,
+    company_currency: str,
+    creator_id: uuid.UUID | None,
+) -> QuoteRead | None:
+    """Read raw source content in one snapshot; create an unrelated draft.
+
+    Lock before taking the content snapshot: if a concurrent save held the lock,
+    the subsequent joined read sees its committed header and lines together.
+    Avoid get_quote: duplication must not expire or otherwise mutate the source.
+    """
+    await set_rls_company(session, company_id)
+    source_id = await session.scalar(
+        select(Quote.id)
+        .where(Quote.id == quote_id, Quote.company_id == company_id)
+        .with_for_update()
+    )
+    if source_id is None:
+        return None
+    result = await session.execute(
+        select(Quote)
+        .where(Quote.id == source_id)
+        .options(joinedload(Quote.lines))
+        .execution_options(populate_existing=True)
+    )
+    source = result.unique().scalar_one()
+    body = QuoteWrite(
+        customer_id=source.customer_id,
+        reference_number=source.reference_number,
+        quote_date=date.today(),
+        currency=source.currency,
+        tax_mode=InvoiceTaxMode(source.tax_mode),
+        amounts_include_vat=source.amounts_include_vat,
+        vat_treatment_id=source.vat_treatment_id,
+        document_vat_rate_id=source.document_vat_rate_id,
+        discount=DiscountInput(
+            type=DiscountType(source.discount_type), value=Decimal(str(source.discount_value))
+        ),
+        notes=source.notes,
+        warranty_text=source.warranty_text,
+        terms_text=source.terms_text,
+        bank_text=source.bank_text,
+        payment_terms_text=source.payment_terms_text,
+        lines=[
+            InvoiceLineInput(
+                product_id=line.product_id,
+                name=line.name,
+                description=line.description,
+                quantity=Decimal(str(line.quantity)),
+                unit_id=line.unit_id,
+                unit_name=line.unit_name,
+                unit_price=Decimal(str(line.unit_price)),
+                discount=DiscountInput(
+                    type=DiscountType(line.discount_type), value=Decimal(str(line.discount_value))
+                ),
+                vat_rate_id=line.vat_rate_id,
+            )
+            for line in source.lines
+        ],
+    )
+    return await create_quote(session, body, company_id, company_currency, creator_id)
 
 
 async def get_quote(

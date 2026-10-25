@@ -885,6 +885,9 @@
     "selectNoteTemplateTitle": "Select Note Template"
   },
   "quotes": {
+    "duplicate": "Duplicate",
+    "duplicateSuccess": "Quote duplicated.",
+    "duplicateFailed": "Could not duplicate quote.",
     "unsavedChanges": "Unsaved Changes",
     "unsavedChangesContent": "You have unsaved changes. Save the form before continuing?",
     "saveAndContinue": "Save & Continue",

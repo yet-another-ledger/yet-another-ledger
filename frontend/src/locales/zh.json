@@ -885,6 +885,9 @@
     "selectNoteTemplateTitle": "选择备注模板"
   },
   "quotes": {
+    "duplicate": "复制报价",
+    "duplicateSuccess": "报价已复制。",
+    "duplicateFailed": "复制报价失败。",
     "unsavedChanges": "有未保存的修改",
     "unsavedChangesContent": "表单有未保存的修改，是否保存后再继续？",
     "saveAndContinue": "保存并继续",

@@ -8,10 +8,11 @@ const http = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), downloadBlob: vi.f
 const quotes = vi.hoisted(() => ({
   fetchQuote: vi.fn(), fetchProductOptions: vi.fn(), calculatePreview: vi.fn(),
   createQuote: vi.fn(), updateQuote: vi.fn(), transitionStatus: vi.fn(),
-  convertQuote: vi.fn(), reactivateQuote: vi.fn(),
+  duplicateQuote: vi.fn(), convertQuote: vi.fn(), reactivateQuote: vi.fn(),
 }))
 const invoices = vi.hoisted(() => ({ fetchProductOptions: vi.fn() }))
 const payments = vi.hoisted(() => ({ listQuotePayments: vi.fn(), recordQuotePayment: vi.fn() }))
+const dialog = vi.hoisted(() => ({ warning: vi.fn() }))
 const ui = vi.hoisted(() => ({
   box: { inheritAttrs: false, template: '<div v-bind="$attrs"><slot /></div>' },
   button: { inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' },
@@ -34,7 +35,7 @@ vi.mock('../../src/stores/quotes', () => ({ useQuotesStore: () => quotes }))
 vi.mock('../../src/stores/invoices', () => ({ useInvoicesStore: () => invoices }))
 vi.mock('../../src/stores/payments', () => ({ usePaymentsStore: () => payments }))
 vi.mock('naive-ui', () => ({
-  useMessage: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }), useDialog: () => ({}),
+  useMessage: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }), useDialog: () => dialog,
   NAlert: ui.box, NButton: ui.button, NCard: ui.box, NCollapse: ui.box, NCollapseItem: ui.box, NDatePicker: ui.box, NDivider: ui.box, NDropdown: ui.box,
   NForm: ui.box, NFormItem: ui.box, NGrid: ui.box, NGi: ui.box, NIcon: ui.box, NInput: ui.input, NInputNumber: ui.number,
   NList: ui.box, NListItem: ui.box, NModal: ui.modal, NSelect: ui.box, NSpace: ui.box, NSpin: ui.box, NSwitch: ui.box,
@@ -633,5 +634,90 @@ describe('QuoteEdit UNSET mode cards', () => {
     expect(wrapper.text()).toContain('INV-B')
     expect(wrapper.text()).toContain('Billing mode locked')
     expect(wrapper.text()).toContain('Quote converted to invoice')
+  })
+})
+
+describe('Quote duplication', () => {
+  async function setup(status = 'DRAFT', id = 'quote') {
+    vi.clearAllMocks()
+    quotes.fetchQuote.mockResolvedValue({ ...quote, status, lines: [{
+      id: 'line', name: 'Original', quantity: '1', unit_price: '10',
+      discount_type: 'NONE', discount_value: '0', vat_rate_id: 'rate',
+    }] })
+    invoices.fetchProductOptions.mockResolvedValue([])
+    http.get.mockImplementation((url: string) => {
+      if (url.includes('/document-chain')) return Promise.resolve(chain)
+      if (url.startsWith('/api/v1/customers?q=') || url === '/api/v1/vat-rates' || url.startsWith('/api/v1/vat-treatments')) return Promise.resolve({ items: [] })
+      if (url === '/api/v1/settings/quote-default-valid-days') return Promise.resolve({ default_valid_days: 30 })
+      if (url.startsWith('/api/v1/document-templates') || url.startsWith('/api/v1/content-blocks') || url.startsWith('/api/v1/note-templates')) return Promise.resolve([])
+      if (url === '/api/v1/customers/customer') return Promise.resolve({ id: 'customer', name: 'Customer' })
+      throw new Error(`unexpected ${url}`)
+    })
+    const router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/quotes/:id/edit', component: QuoteEdit },
+    ] })
+    await router.push(`/quotes/${id}/edit`); await router.isReady()
+    const wrapper = mount(QuoteEdit, { global: { plugins: [router, i18n], stubs: {
+      DocumentSendDialog: true, PdfPreviewDialog: true, EmailLogPanel: true,
+      DocumentWorkflowPanel: true, QuotePaymentPanel: true,
+    } } })
+    await flushPromises()
+    return { wrapper, router }
+  }
+
+  it('duplicates accepted saved quotes, blocks repeat clicks, and navigates', async () => {
+    const { wrapper, router } = await setup('ACCEPTED')
+    let finish!: (value: { id: string }) => void
+    quotes.duplicateQuote.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    await byText(wrapper, 'Duplicate').trigger('click')
+    await byText(wrapper, 'Duplicate').trigger('click')
+    expect(quotes.duplicateQuote).toHaveBeenCalledTimes(1)
+    expect(quotes.duplicateQuote).toHaveBeenCalledWith('quote')
+    expect(byText(wrapper, 'Duplicate').attributes('disabled')).toBeDefined()
+    finish({ id: 'copy' }); await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/quotes/copy/edit')
+    wrapper.unmount()
+  })
+
+  it('guards unsaved edits with cancel or save-and-continue', async () => {
+    const { wrapper } = await setup()
+    await wrapper.find('input[value="Original"]').setValue('Changed')
+    await byText(wrapper, 'Duplicate').trigger('click')
+    expect(dialog.warning).toHaveBeenCalledTimes(1)
+    dialog.warning.mock.calls[0][0].onNegativeClick(); await flushPromises()
+    expect(quotes.duplicateQuote).not.toHaveBeenCalled()
+    await byText(wrapper, 'Duplicate').trigger('click')
+    quotes.updateQuote.mockResolvedValue({ ...quote, status: 'DRAFT' })
+    quotes.duplicateQuote.mockResolvedValue({ id: 'copy' })
+    await dialog.warning.mock.calls[1][0].onPositiveClick(); await flushPromises()
+    expect(quotes.updateQuote.mock.calls[0][1].lines[0].name).toBe('Changed')
+    expect(quotes.duplicateQuote).toHaveBeenCalledWith('quote')
+    wrapper.unmount()
+  })
+
+  it('blocks copying after save failure and permits retry after duplicate failure', async () => {
+    const { wrapper, router } = await setup()
+    await wrapper.find('input[value="Original"]').setValue('Changed')
+    await byText(wrapper, 'Duplicate').trigger('click')
+    quotes.updateQuote.mockRejectedValueOnce(new Error('save failed'))
+    await dialog.warning.mock.calls[0][0].onPositiveClick(); await flushPromises()
+    expect(quotes.duplicateQuote).not.toHaveBeenCalled()
+    expect(router.currentRoute.value.path).toBe('/quotes/quote/edit')
+    await byText(wrapper, 'Duplicate').trigger('click')
+    quotes.updateQuote.mockResolvedValue({ ...quote, status: 'DRAFT' })
+    quotes.duplicateQuote.mockRejectedValueOnce(new Error('copy failed'))
+    await dialog.warning.mock.calls[1][0].onPositiveClick(); await flushPromises()
+    expect(byText(wrapper, 'Duplicate').attributes('disabled')).toBeUndefined()
+    expect(router.currentRoute.value.path).toBe('/quotes/quote/edit')
+    quotes.duplicateQuote.mockResolvedValue({ id: 'copy' })
+    await byText(wrapper, 'Duplicate').trigger('click'); await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/quotes/copy/edit')
+    wrapper.unmount()
+  })
+
+  it('hides Duplicate on a new unsaved quote', async () => {
+    const { wrapper } = await setup('DRAFT', 'new')
+    expect(wrapper.findAll('button').some(button => button.text().includes('Duplicate'))).toBe(false)
+    wrapper.unmount()
   })
 })
