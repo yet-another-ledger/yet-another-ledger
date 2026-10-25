@@ -1243,6 +1243,7 @@
     "toggle": "切换主题"
   },
   "common": {
+    "reorderLine": "拖动调整行顺序",
     "cancel": "取消",
     "confirm": "确认",
     "retry": "重试",

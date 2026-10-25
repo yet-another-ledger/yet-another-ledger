@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
+import LineOrdering from '../../components/LineOrdering.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { localDateStr } from '../../utils/date'
@@ -42,7 +43,11 @@ type ContentBlockRead = components['schemas']['ContentBlockRead']
 type NoteTemplateRead = components['schemas']['NoteTemplateRead']
 type EmailLogRead = components['schemas']['EmailLogRead']
 
+let lineKeyCounter = 0
+function nextLineKey() { return `l${++lineKeyCounter}` }
+
 interface LineRow {
+  _key: string
   product_id: string | null
   name: string
   description: string | null
@@ -57,6 +62,7 @@ interface LineRow {
 
 function emptyLine(): LineRow {
   return {
+    _key: nextLineKey(),
     product_id: null,
     name: '',
     description: null,
@@ -166,6 +172,7 @@ const filteredTemplates = computed(() =>
 
 function applyTemplate(template: DocumentTemplateRead) {
   lines.value = (template.lines ?? []).map(l => ({
+    _key: nextLineKey(),
     product_id: null,
     name: l.name,
     description: l.description ?? null,
@@ -312,27 +319,39 @@ function buildCalculationRequest() {
 }
 
 let previewTimer: ReturnType<typeof setTimeout> | null = null
-
+let previewVersion = 0
+// Snapshot the row identities alongside each request; never match results to current indices.
+const lineCalcMap = ref(new Map<string, InvoiceCalculationRead['lines'][number]>())
 function schedulePreview() {
+  const version = ++previewVersion
   if (previewTimer) clearTimeout(previewTimer)
+  preview.value = null
+  previewError.value = null
+  lineCalcMap.value = new Map()
+  previewLoading.value = false
   previewTimer = setTimeout(async () => {
     const req = buildCalculationRequest()
-    if (!req) {
-      preview.value = null
-      return
-    }
+    const keys = lines.value.filter(l => l.name.trim()).map(l => l._key)
+    if (!req) return
     previewLoading.value = true
-    previewError.value = null
     try {
-      preview.value = await store.calculatePreview(req as Parameters<typeof store.calculatePreview>[0])
+      const result = await store.calculatePreview(req as Parameters<typeof store.calculatePreview>[0])
+      if (version !== previewVersion) return
+      preview.value = result
+      lineCalcMap.value = new Map(result.lines.map((line, i) => [keys[i]!, line]))
     } catch (e: unknown) {
+      if (version !== previewVersion) return
       previewError.value = e instanceof Error ? e.message : String(e)
       preview.value = null
     } finally {
-      previewLoading.value = false
+      if (version === previewVersion) previewLoading.value = false
     }
   }, 600)
 }
+onBeforeUnmount(() => {
+  ++previewVersion
+  if (previewTimer) clearTimeout(previewTimer)
+})
 
 watch(
   [customerId, invoiceDate, taxMode, amountsIncludeVat, vatTreatmentId, documentVatRateId,
@@ -436,6 +455,7 @@ function populateFromInvoice(inv: InvoiceRead) {
   bankText.value = inv.bank_text ?? null
   paymentTermsText.value = inv.payment_terms_text ?? null
   lines.value = (inv.lines ?? []).map(l => ({
+    _key: nextLineKey(),
     product_id: l.product_id ?? null,
     name: l.name,
     description: l.description ?? null,
@@ -452,6 +472,10 @@ function populateFromInvoice(inv: InvoiceRead) {
 let loadGeneration = 0
 
 function resetInvoiceContext(): void {
+  ++previewVersion
+  if (previewTimer) clearTimeout(previewTimer)
+  previewLoading.value = false
+  lineCalcMap.value = new Map()
   resetDocumentChain()
   pageLoading.value = false
   existingInvoice.value = null
@@ -955,7 +979,9 @@ function handleReceiptSent(log: EmailLogRead) {
                     {{ t('invoices.applyTemplate') }}
                   </n-button>
                 </template>
-                <div v-for="(line, i) in lines" :key="i" class="line-row">
+                <LineOrdering v-model="lines" :disabled="isReadOnly || saving || pageLoading">
+                  <template #default="{ line, index: i }">
+                <div class="line-row">
                   <n-divider v-if="i > 0" />
 
                   <n-grid :cols="12" :x-gap="8" :y-gap="4">
@@ -1052,6 +1078,8 @@ function handleReceiptSent(log: EmailLogRead) {
                     </n-gi>
                   </n-grid>
                 </div>
+                  </template>
+                </LineOrdering>
 
                 <n-button
                   v-if="!isReadOnly"

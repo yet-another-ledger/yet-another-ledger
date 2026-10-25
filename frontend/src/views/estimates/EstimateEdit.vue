@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
+import LineOrdering from '../../components/LineOrdering.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -194,13 +195,25 @@ function removeGroup(i: number) {
 // ------------------------------------------------------------------ preview / calculate
 
 let previewTimer: ReturnType<typeof setTimeout> | null = null
+let previewVersion = 0
 
 function schedulePreview() {
+  const version = ++previewVersion
   if (previewTimer) clearTimeout(previewTimer)
-  previewTimer = setTimeout(() => { void runPreview() }, 600)
+  preview.value = null
+  previewError.value = null
+  lineCalcMap.value = new Map()
+  groupCalcMap.value = new Map()
+  previewLoading.value = false
+  previewTimer = setTimeout(() => { void runPreview(version) }, 600)
 }
 
-async function runPreview() {
+onBeforeUnmount(() => {
+  ++previewVersion
+  if (previewTimer) clearTimeout(previewTimer)
+})
+
+async function runPreview(version: number) {
   const validGroupRefs = new Set<string>()
   const requestGroups = groups.value
     .filter(g => g.public_description.trim())
@@ -248,6 +261,7 @@ async function runPreview() {
       lines: validPairs.map(p => p.line),
     }
     const result = await store.calculatePreview(req as Parameters<typeof store.calculatePreview>[0])
+    if (version !== previewVersion) return
     preview.value = result
 
     const newLineMap = new Map<string, { line_total: string; margin_amount: string; line_sell_excl_vat: string }>()
@@ -267,9 +281,10 @@ async function runPreview() {
     result.groups.forEach(gr => newGroupMap.set(gr.ref, gr.group_sell_excl_vat))
     groupCalcMap.value = newGroupMap
   } catch (e: unknown) {
+    if (version !== previewVersion) return
     previewError.value = e instanceof ApiError ? e.message : (e instanceof Error ? e.message : String(e))
   } finally {
-    previewLoading.value = false
+    if (version === previewVersion) previewLoading.value = false
   }
 }
 
@@ -593,7 +608,9 @@ function handleDeleteGroup(i: number) {
               <!-- Cost Lines -->
               <n-card :title="t('estimates.linesSection')" style="margin-bottom: 16px">
 
-                <div v-for="(line, i) in lines" :key="line._key" class="line-block">
+                <LineOrdering v-model="lines" :disabled="saving || pageLoading || generating || duplicating">
+                  <template #default="{ line, index: i }">
+                <div class="line-block">
                   <n-divider v-if="i > 0" />
 
                   <!-- Row 1: product / name / group / remove -->
@@ -733,6 +750,8 @@ function handleDeleteGroup(i: number) {
                     </n-gi>
                   </n-grid>
                 </div>
+                  </template>
+                </LineOrdering>
 
                 <n-button dashed block style="margin-top: 12px" @click="addLine">
                   <template #icon><n-icon><AddOutline /></n-icon></template>

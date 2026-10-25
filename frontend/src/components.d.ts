@@ -21,6 +21,7 @@ declare module 'vue' {
     EmailLogPanel: typeof import('./components/EmailLogPanel.vue')['default']
     EmailTemplatesSettings: typeof import('./components/settings/EmailTemplatesSettings.vue')['default']
     InvoicePaymentPanel: typeof import('./components/InvoicePaymentPanel.vue')['default']
+    LineOrdering: typeof import('./components/LineOrdering.vue')['default']
     MileageSettings: typeof import('./components/settings/MileageSettings.vue')['default']
     NAlert: typeof import('naive-ui')['NAlert']
     NButton: typeof import('naive-ui')['NButton']
