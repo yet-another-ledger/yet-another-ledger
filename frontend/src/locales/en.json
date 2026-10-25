@@ -372,7 +372,8 @@
       "saveFailed": "Failed to save SMTP settings.",
       "testEmail": "Send test email",
       "testSuccess": "Test email sent successfully.",
-      "testFailed": "Failed to send test email."
+      "testFailed": "Failed to send test email.",
+      "loadFailed": "Could not load SMTP settings. Please reopen settings before saving."
     },
     "numbering": {
       "section": "Invoice Numbering",
@@ -1652,5 +1653,16 @@
     "previousPage": "Previous page",
     "nextPage": "Next page",
     "pageRange": "{start}–{end} of {total}"
+  },
+  "sentCopy": {
+    "enabled": "Save copies to Sent",
+    "host": "IMAP host",
+    "port": "IMAP port",
+    "folder": "Sent folder",
+    "folderHelp": "Blank: discover existing Sent folder",
+    "help": "Uses the effective SMTP username and password. Save settings before testing. Leave this off if your provider already saves SMTP mail to Sent, to avoid duplicates. Blank folder discovers the unique selectable \\Sent mailbox, then existing Sent. Copy failures do not resend mail and are not retried. SSL/TLS usually uses port 993; STARTTLS usually uses 143. Changing security keeps your entered port.",
+    "NOT_ATTEMPTED": "Sent copy not attempted.",
+    "SAVED": "Email sent and saved to Sent.",
+    "FAILED": "Email sent, but saving to Sent failed. Do not resend; check IMAP settings."
   }
 }

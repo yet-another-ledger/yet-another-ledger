@@ -27,6 +27,7 @@ from jai.auth.deps import current_mfa_user
 from jai.db import get_session
 from jai.models._enums import SettingLevel
 from jai.models.user import User
+from jai.schemas.email_log import SentCopyResult, SmtpTestResult
 from jai.schemas.setting import (
     DEFAULT_EMAIL_TEMPLATES,
     SETTING_KEY_AI,
@@ -60,6 +61,7 @@ from jai.schemas.setting import (
     QuoteNumberingConfig,
     QuoteNumberSequenceRead,
     QuoteNumberSequenceWrite,
+    SentCopySettings,
     SmtpSettings,
     SmtpSettingsRead,
     UserPreferences,
@@ -100,6 +102,7 @@ class SmtpSettingsUpdate(BaseModel):
     from_name: str = ""
     use_tls: bool = True
     use_ssl: bool = False
+    sent_copy: SentCopySettings | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +130,7 @@ def _to_read_model(cfg: SmtpSettings) -> SmtpSettingsRead:
         from_name=cfg.from_name,
         use_tls=cfg.use_tls,
         use_ssl=cfg.use_ssl,
+        sent_copy=cfg.sent_copy,
     )
 
 
@@ -184,6 +188,9 @@ async def update_smtp_settings(
         from_name=body.from_name,
         use_tls=body.use_tls,
         use_ssl=body.use_ssl,
+        sent_copy=body.sent_copy
+        if body.sent_copy is not None
+        else (existing.sent_copy if existing else SentCopySettings()),
     )
 
     await set_setting(
@@ -197,11 +204,11 @@ async def update_smtp_settings(
     return _to_read_model(new_cfg)
 
 
-@router.post("/smtp/test", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/smtp/test", status_code=status.HTTP_202_ACCEPTED, response_model=SmtpTestResult)
 async def test_smtp_settings(
     user: User = Depends(current_mfa_user),
     session: AsyncSession = Depends(get_session),
-) -> dict[str, str]:
+) -> SmtpTestResult:
     """Send a test email to the owner's address using current SMTP config.
 
     Returns ``{"status": "sent"}`` on success or raises 400 with error detail.
@@ -209,14 +216,14 @@ async def test_smtp_settings(
     _owner_only(user)
 
     try:
-        await email_svc.send_test_email(session, user.email)
+        result = await email_svc.send_test_email(session, user.email)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to send test email: {exc}",
+            detail="SMTP_SEND_FAILED",
         ) from exc
 
-    return {"status": "sent"}
+    return SmtpTestResult(**(result.model_dump() if isinstance(result, SentCopyResult) else {}))
 
 
 # ---------------------------------------------------------------------------
@@ -433,6 +440,7 @@ async def _get_numbering_config(
 ) -> InvoiceNumberingConfig:
     """Load the COMPANY-level numbering config, returning defaults if absent."""
     import uuid as _uuid
+
     company_uuid = company_id if isinstance(company_id, _uuid.UUID) else _uuid.UUID(str(company_id))
     cfg = await get_setting(
         session,
@@ -556,6 +564,7 @@ async def _get_quote_numbering_config(
     company_id: object,
 ) -> QuoteNumberingConfig:
     import uuid as _uuid
+
     company_uuid = company_id if isinstance(company_id, _uuid.UUID) else _uuid.UUID(str(company_id))
     cfg = await get_setting(
         session,

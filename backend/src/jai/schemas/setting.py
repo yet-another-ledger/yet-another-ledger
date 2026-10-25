@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 _POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807
 
@@ -100,6 +100,35 @@ class AuthSecretState(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class SentCopySettings(BaseModel):
+    """Provider-side copy; credentials always come from effective SMTP."""
+
+    enabled: bool = False
+    host: str = ""
+    port: int = Field(default=993, ge=1, le=65535)
+    security: Literal["SSL_TLS", "STARTTLS"] = "SSL_TLS"
+    folder: str | None = None
+
+    @field_validator("host")
+    @classmethod
+    def clean_host(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("folder")
+    @classmethod
+    def clean_folder(cls, value: str | None) -> str | None:
+        value = value.strip() if value else None
+        if value and any(c in value for c in "\r\n\x00"):
+            raise ValueError("Invalid mailbox name")
+        return value or None
+
+    @model_validator(mode="after")
+    def validate_enabled(self) -> SentCopySettings:
+        if self.enabled and not self.host:
+            raise ValueError("IMAP host is required when Sent copying is enabled")
+        return self
+
+
 class SmtpSettings(BaseModel):
     """SMTP connection parameters used by the email service.
 
@@ -116,6 +145,7 @@ class SmtpSettings(BaseModel):
     from_name: str = ""
     use_tls: bool = True
     use_ssl: bool = False
+    sent_copy: SentCopySettings = Field(default_factory=SentCopySettings)
 
 
 class SmtpSettingsRead(BaseModel):
@@ -129,6 +159,7 @@ class SmtpSettingsRead(BaseModel):
     from_name: str = ""
     use_tls: bool = True
     use_ssl: bool = False
+    sent_copy: SentCopySettings = Field(default_factory=SentCopySettings)
 
 
 # ---------------------------------------------------------------------------
@@ -520,59 +551,75 @@ def _formal_email_template_defaults() -> dict[str, EmailTemplateLocaleMap]:
         "advance": EmailTemplateLocaleMap(
             en=EmailTemplate(
                 subject="Advance Invoice {INVOICE_NUMBER} from {COMPANY_NAME}",
-                body=("Dear {CUSTOMER_NAME},\n\nPlease find attached Advance Invoice "
-                      "{INVOICE_NUMBER} dated {DATE}.\n\nAmount due: {CURRENCY} "
-                      "{AMOUNT_DUE}\nDue date: {DUE_DATE}\n\nKind regards,\n{COMPANY_NAME}"),
+                body=(
+                    "Dear {CUSTOMER_NAME},\n\nPlease find attached Advance Invoice "
+                    "{INVOICE_NUMBER} dated {DATE}.\n\nAmount due: {CURRENCY} "
+                    "{AMOUNT_DUE}\nDue date: {DUE_DATE}\n\nKind regards,\n{COMPANY_NAME}"
+                ),
             ),
             zh=EmailTemplate(
                 subject="{COMPANY_NAME} 预付款发票 {INVOICE_NUMBER}",
-                body=("尊敬的 {CUSTOMER_NAME}：\n\n请查收附件中的预付款发票 "
-                      "{INVOICE_NUMBER}，开票日期：{DATE}。\n\n应付金额：{CURRENCY} "
-                      "{AMOUNT_DUE}\n付款截止日：{DUE_DATE}\n\n此致\n{COMPANY_NAME}"),
+                body=(
+                    "尊敬的 {CUSTOMER_NAME}：\n\n请查收附件中的预付款发票 "
+                    "{INVOICE_NUMBER}，开票日期：{DATE}。\n\n应付金额：{CURRENCY} "
+                    "{AMOUNT_DUE}\n付款截止日：{DUE_DATE}\n\n此致\n{COMPANY_NAME}"
+                ),
             ),
         ),
         "final": EmailTemplateLocaleMap(
             en=EmailTemplate(
                 subject="Final Invoice {INVOICE_NUMBER} from {COMPANY_NAME}",
-                body=("Dear {CUSTOMER_NAME},\n\nPlease find attached Final Invoice "
-                      "{INVOICE_NUMBER} dated {DATE}.\n\nAmount due: {CURRENCY} "
-                      "{AMOUNT_DUE}\nDue date: {DUE_DATE}\n\nKind regards,\n{COMPANY_NAME}"),
+                body=(
+                    "Dear {CUSTOMER_NAME},\n\nPlease find attached Final Invoice "
+                    "{INVOICE_NUMBER} dated {DATE}.\n\nAmount due: {CURRENCY} "
+                    "{AMOUNT_DUE}\nDue date: {DUE_DATE}\n\nKind regards,\n{COMPANY_NAME}"
+                ),
             ),
             zh=EmailTemplate(
                 subject="{COMPANY_NAME} 最终结算发票 {INVOICE_NUMBER}",
-                body=("尊敬的 {CUSTOMER_NAME}：\n\n请查收附件中的最终结算发票 "
-                      "{INVOICE_NUMBER}，开票日期：{DATE}。\n\n应付金额：{CURRENCY} "
-                      "{AMOUNT_DUE}\n付款截止日：{DUE_DATE}\n\n此致\n{COMPANY_NAME}"),
+                body=(
+                    "尊敬的 {CUSTOMER_NAME}：\n\n请查收附件中的最终结算发票 "
+                    "{INVOICE_NUMBER}，开票日期：{DATE}。\n\n应付金额：{CURRENCY} "
+                    "{AMOUNT_DUE}\n付款截止日：{DUE_DATE}\n\n此致\n{COMPANY_NAME}"
+                ),
             ),
         ),
         "credit_note": EmailTemplateLocaleMap(
             en=EmailTemplate(
                 subject="Credit Note {CREDIT_NOTE_NUMBER} from {COMPANY_NAME}",
-                body=("Dear {CUSTOMER_NAME},\n\nPlease find attached Credit Note "
-                      "{CREDIT_NOTE_NUMBER} dated {DATE}.\n\nCredit amount: {CURRENCY} "
-                      "{TOTAL}\nSource document: {SOURCE_DOCUMENT_NUMBER}\n\n"
-                      "Kind regards,\n{COMPANY_NAME}"),
+                body=(
+                    "Dear {CUSTOMER_NAME},\n\nPlease find attached Credit Note "
+                    "{CREDIT_NOTE_NUMBER} dated {DATE}.\n\nCredit amount: {CURRENCY} "
+                    "{TOTAL}\nSource document: {SOURCE_DOCUMENT_NUMBER}\n\n"
+                    "Kind regards,\n{COMPANY_NAME}"
+                ),
             ),
             zh=EmailTemplate(
                 subject="{COMPANY_NAME} 贷项通知单 {CREDIT_NOTE_NUMBER}",
-                body=("尊敬的 {CUSTOMER_NAME}：\n\n请查收附件中的贷项通知单 "
-                      "{CREDIT_NOTE_NUMBER}，开具日期：{DATE}。\n\n贷项金额：{CURRENCY} "
-                      "{TOTAL}\n来源单据：{SOURCE_DOCUMENT_NUMBER}\n\n此致\n{COMPANY_NAME}"),
+                body=(
+                    "尊敬的 {CUSTOMER_NAME}：\n\n请查收附件中的贷项通知单 "
+                    "{CREDIT_NOTE_NUMBER}，开具日期：{DATE}。\n\n贷项金额：{CURRENCY} "
+                    "{TOTAL}\n来源单据：{SOURCE_DOCUMENT_NUMBER}\n\n此致\n{COMPANY_NAME}"
+                ),
             ),
         ),
         "refund": EmailTemplateLocaleMap(
             en=EmailTemplate(
                 subject="Refund confirmation for {CREDIT_NOTE_NUMBER} from {COMPANY_NAME}",
-                body=("Dear {CUSTOMER_NAME},\n\nPlease find the Refund Confirmation for "
-                      "Credit Note {CREDIT_NOTE_NUMBER} (source document "
-                      "{SOURCE_DOCUMENT_NUMBER}) attached.\n\nRefund amount: {CURRENCY} "
-                      "{TOTAL}\n\nKind regards,\n{COMPANY_NAME}"),
+                body=(
+                    "Dear {CUSTOMER_NAME},\n\nPlease find the Refund Confirmation for "
+                    "Credit Note {CREDIT_NOTE_NUMBER} (source document "
+                    "{SOURCE_DOCUMENT_NUMBER}) attached.\n\nRefund amount: {CURRENCY} "
+                    "{TOTAL}\n\nKind regards,\n{COMPANY_NAME}"
+                ),
             ),
             zh=EmailTemplate(
                 subject="{COMPANY_NAME} 的退款确认单（{CREDIT_NOTE_NUMBER}）",
-                body=("尊敬的 {CUSTOMER_NAME}：\n\n随信附上贷项通知单 "
-                      "{CREDIT_NOTE_NUMBER}（来源单据 {SOURCE_DOCUMENT_NUMBER}）的退款确认单。\n\n"
-                      "退款金额：{CURRENCY} {TOTAL}\n\n此致\n{COMPANY_NAME}"),
+                body=(
+                    "尊敬的 {CUSTOMER_NAME}：\n\n随信附上贷项通知单 "
+                    "{CREDIT_NOTE_NUMBER}（来源单据 {SOURCE_DOCUMENT_NUMBER}）的退款确认单。\n\n"
+                    "退款金额：{CURRENCY} {TOTAL}\n\n此致\n{COMPANY_NAME}"
+                ),
             ),
         ),
     }

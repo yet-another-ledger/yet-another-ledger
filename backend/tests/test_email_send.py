@@ -97,7 +97,7 @@ class TestSendMail:
             )
 
         msg = captured["msg"]
-        raw = msg.as_bytes()
+        raw = msg
         parsed = message_from_bytes(raw)
 
         # Top-level is multipart/mixed
@@ -143,7 +143,7 @@ class TestSendMail:
             )
 
         msg = captured["msg"]
-        raw = msg.as_bytes()
+        raw = msg
         parsed = message_from_bytes(raw)
 
         # No attachment → plain alternative, not mixed
@@ -164,11 +164,9 @@ class TestSendMail:
             captured["msg"] = msg
 
         with patch("aiosmtplib.send", side_effect=fake_send):
-            await _send_mail(
-                _smtp(), to="to@example.com", subject="S", html_body="<p>B</p>"
-            )
+            await _send_mail(_smtp(), to="to@example.com", subject="S", html_body="<p>B</p>")
 
-        parsed = message_from_bytes(captured["msg"].as_bytes())
+        parsed = message_from_bytes(captured["msg"])
         assert parsed.get("Cc") is None
 
     @pytest.mark.asyncio
@@ -319,7 +317,7 @@ class TestSendDocumentEmail:
         assert log.status == EmailStatus.FAILED
         assert log.sent_at is None
         assert log.error_message is not None
-        assert "ConnectionError" in log.error_message
+        assert log.error_message == "SMTP_SEND_FAILED"
         assert log.artifact_id is None
 
     @pytest.mark.asyncio
@@ -363,7 +361,7 @@ class TestSendDocumentEmail:
         assert log.error_message is not None
         # The SMTP password must not appear in the log.
         assert "MY_SECRET_PASS" not in (log.error_message or "")
-        assert "***" in (log.error_message or "")
+        assert log.error_message == "SMTP_SEND_FAILED"
 
     @pytest.mark.asyncio
     async def test_smtp_not_configured_raises_400(self) -> None:
@@ -814,9 +812,7 @@ class TestEmailSendIntegration:
         await _setup_company(db_client)
         vat = await _setup_vat(db_client)
         customer_id = await _create_customer(db_client)
-        quote_id = await _create_quote(
-            db_client, customer_id, vat["treatment_id"], vat["rate_id"]
-        )
+        quote_id = await _create_quote(db_client, customer_id, vat["treatment_id"], vat["rate_id"])
 
         with (
             patch("jai.services.email._get_smtp_config", return_value=_smtp()),
@@ -833,9 +829,7 @@ class TestEmailSendIntegration:
         assert data["related_type"] == "QUOTE"
 
     @pytest.mark.asyncio
-    async def test_send_failed_smtp_writes_failed_log(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_send_failed_smtp_writes_failed_log(self, db_client: AsyncClient) -> None:
         """SMTP exception during send → 200 response with FAILED status in log."""
         await _full_auth(db_client)
         await _setup_company(db_client)
@@ -863,15 +857,13 @@ class TestEmailSendIntegration:
         assert data["status"] == "FAILED"
         assert data["artifact_id"] is None
         assert data["error_message"] is not None
-        assert "ConnectionError" in data["error_message"]
+        assert data["error_message"] == "SMTP_SEND_FAILED"
         # Log row created and listable.
         list_resp = await db_client.get(f"/api/v1/invoices/{invoice_id}/emails")
         assert list_resp.json()["total"] == 1
 
     @pytest.mark.asyncio
-    async def test_smtp_not_configured_returns_400(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_smtp_not_configured_returns_400(self, db_client: AsyncClient) -> None:
         """SMTP not configured → 400; no log row written."""
         await _full_auth(db_client)
         await _setup_company(db_client)
@@ -896,9 +888,7 @@ class TestEmailSendIntegration:
         assert list_resp.json()["total"] == 0
 
     @pytest.mark.asyncio
-    async def test_send_invoice_cross_company_404(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_send_invoice_cross_company_404(self, db_client: AsyncClient) -> None:
         """POST /invoices/{id}/send with a foreign invoice id → 404."""
         await _full_auth(db_client)
         await _setup_company(db_client)
@@ -911,9 +901,7 @@ class TestEmailSendIntegration:
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_list_emails_cross_company_404(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_list_emails_cross_company_404(self, db_client: AsyncClient) -> None:
         """GET /invoices/{id}/emails with a foreign invoice id → 404."""
         await _full_auth(db_client)
         await _setup_company(db_client)
@@ -940,9 +928,7 @@ class TestEmailSendIntegration:
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_send_invoice_locale_override(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_send_invoice_locale_override(self, db_client: AsyncClient) -> None:
         """locale override in request → log row has that locale."""
         await _full_auth(db_client)
         await _setup_company(db_client)
@@ -966,9 +952,7 @@ class TestEmailSendIntegration:
         assert resp.json()["locale"] == "zh"
 
     @pytest.mark.asyncio
-    async def test_send_unissued_draft_invoice_returns_400(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_send_unissued_draft_invoice_returns_400(self, db_client: AsyncClient) -> None:
         """POST /invoices/{id}/send on an unnumbered DRAFT → 400 (issue-gated, D8).
 
         The draft is rejected before any PDF render / SMTP attempt, and no
@@ -1011,3 +995,39 @@ class TestEmailSendIntegration:
             )
         assert resp2.status_code == 200, resp2.text
         assert resp2.json()["status"] == "SENT"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_si1_quote_actual_transport_saves_copy_and_lists_result(db_client):
+    from unittest.mock import MagicMock
+
+    from jai.schemas.setting import SentCopySettings
+
+    await _full_auth(db_client)
+    await _setup_company(db_client)
+    vat = await _setup_vat(db_client)
+    customer = await _create_customer(db_client)
+    quote = await _create_quote(db_client, customer, vat["treatment_id"], vat["rate_id"])
+    cfg = _smtp()
+    cfg.sent_copy = SentCopySettings(enabled=True, host="imap.example.test")
+    imap = MagicMock()
+    imap.login.return_value = ("OK", [])
+    imap.capability.return_value = ("OK", [b"IMAP4rev1"])
+    imap.list.return_value = ("OK", [b'(\\Sent) "/" Sent'])
+    imap.append.return_value = ("OK", [])
+    with (
+        patch("jai.services.email._get_smtp_config", return_value=cfg),
+        patch("aiosmtplib.send", new_callable=AsyncMock) as smtp,
+        patch("jai.services.sent_copy.imaplib.IMAP4_SSL", return_value=imap),
+    ):
+        response = await db_client.post(
+            f"/api/v1/quotes/{quote}/send", json={"to": "to@example.com", "cc": "cc@example.com"}
+        )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["status"] == "SENT" and data["sent_copy_status"] == "SAVED"
+    assert data["sent_copy_saved_at"] and data["sent_copy_error_code"] is None
+    assert smtp.call_args.args[0] == imap.append.call_args.args[3]
+    items = (await db_client.get(f"/api/v1/quotes/{quote}/emails")).json()["items"]
+    assert items[0]["sent_copy_status"] == "SAVED"

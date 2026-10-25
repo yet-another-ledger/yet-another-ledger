@@ -372,7 +372,8 @@
       "saveFailed": "保存 SMTP 设置失败。",
       "testEmail": "发送测试邮件",
       "testSuccess": "测试邮件已发送。",
-      "testFailed": "发送测试邮件失败。"
+      "testFailed": "发送测试邮件失败。",
+      "loadFailed": "无法加载 SMTP 设置。保存前请重新打开设置。"
     },
     "numbering": {
       "section": "单据编号",
@@ -1652,5 +1653,16 @@
     "previousPage": "上一页",
     "nextPage": "下一页",
     "pageRange": "第 {start}–{end} 项，共 {total} 项"
+  },
+  "sentCopy": {
+    "enabled": "保存副本到已发送",
+    "host": "IMAP 服务器",
+    "port": "IMAP 端口",
+    "folder": "已发送文件夹",
+    "folderHelp": "留空：发现现有已发送文件夹",
+    "help": "使用实际生效的 SMTP 用户名与密码。请先保存设置再测试。若服务商已自动保存 SMTP 邮件，请关闭此功能以避免重复。文件夹留空时先发现唯一可选的 \\Sent 文件夹，再尝试现有 Sent。保存失败不会重发邮件或自动重试。SSL/TLS 通常使用 993 端口，STARTTLS 通常使用 143；切换安全模式会保留已填端口。",
+    "NOT_ATTEMPTED": "未尝试保存已发送副本。",
+    "SAVED": "邮件已发送并保存到已发送文件夹。",
+    "FAILED": "邮件已发送，但保存到已发送文件夹失败。请勿重发，请检查 IMAP 设置。"
   }
 }

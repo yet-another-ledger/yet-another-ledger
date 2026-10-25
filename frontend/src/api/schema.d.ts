@@ -4592,6 +4592,16 @@ export interface components {
          */
         EmailLogRead: {
             /**
+             * Sent Copy Status
+             * @default NOT_ATTEMPTED
+             * @enum {string}
+             */
+            sent_copy_status?: "NOT_ATTEMPTED" | "SAVED" | "FAILED";
+            /** Sent Copy Error Code */
+            sent_copy_error_code?: string | null;
+            /** Sent Copy Saved At */
+            sent_copy_saved_at?: string | null;
+            /**
              * Id
              * Format: uuid
              */
@@ -8717,6 +8727,35 @@ export interface components {
             next_run_date: string;
         };
         /**
+         * SentCopySettings
+         * @description Provider-side copy; credentials always come from effective SMTP.
+         */
+        SentCopySettings: {
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled?: boolean;
+            /**
+             * Host
+             * @default
+             */
+            host?: string;
+            /**
+             * Port
+             * @default 993
+             */
+            port?: number;
+            /**
+             * Security
+             * @default SSL_TLS
+             * @enum {string}
+             */
+            security?: "SSL_TLS" | "STARTTLS";
+            /** Folder */
+            folder?: string | null;
+        };
+        /**
          * SmtpSettingsRead
          * @description SMTP settings as returned by the API – password is desensitised.
          */
@@ -8761,6 +8800,7 @@ export interface components {
              * @default false
              */
             use_ssl?: boolean;
+            sent_copy?: components["schemas"]["SentCopySettings"];
         };
         /**
          * SmtpSettingsUpdate
@@ -8801,6 +8841,26 @@ export interface components {
              * @default false
              */
             use_ssl?: boolean;
+            sent_copy?: components["schemas"]["SentCopySettings"] | null;
+        };
+        /** SmtpTestResult */
+        SmtpTestResult: {
+            /**
+             * Sent Copy Status
+             * @default NOT_ATTEMPTED
+             * @enum {string}
+             */
+            sent_copy_status?: "NOT_ATTEMPTED" | "SAVED" | "FAILED";
+            /** Sent Copy Error Code */
+            sent_copy_error_code?: string | null;
+            /** Sent Copy Saved At */
+            sent_copy_saved_at?: string | null;
+            /**
+             * Status
+             * @default sent
+             * @constant
+             */
+            status?: "sent";
         };
         /**
          * UnitListResponse
@@ -9961,9 +10021,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["SmtpTestResult"];
                 };
             };
         };

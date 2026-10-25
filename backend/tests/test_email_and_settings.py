@@ -85,6 +85,7 @@ def _clean_caches() -> Iterator[None]:
     - ``get_settings()`` lru_cache (so env monkeypatches take effect)
     """
     from jai.config import get_settings
+
     mfa_svc._clear_pending_secrets()
     settings_svc._cache.clear()
     get_settings.cache_clear()
@@ -104,9 +105,7 @@ class TestSmtpSettingsApi:
     """Tests for ``GET/PUT /api/v1/settings/smtp`` and ``POST /smtp/test``."""
 
     @pytest.mark.asyncio
-    async def test_get_smtp_defaults_when_not_configured(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_get_smtp_defaults_when_not_configured(self, db_client: AsyncClient) -> None:
         """GET /settings/smtp returns defaults when no config exists."""
         await _full_auth(db_client)
 
@@ -117,9 +116,7 @@ class TestSmtpSettingsApi:
         assert data["password_set"] is False
 
     @pytest.mark.asyncio
-    async def test_put_and_get_smtp_settings(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_put_and_get_smtp_settings(self, db_client: AsyncClient) -> None:
         """PUT then GET returns the saved settings with password masked."""
         await _full_auth(db_client)
 
@@ -151,9 +148,7 @@ class TestSmtpSettingsApi:
         assert "password" not in data or data.get("password") is None
 
     @pytest.mark.asyncio
-    async def test_put_smtp_preserves_password_when_null(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_put_smtp_preserves_password_when_null(self, db_client: AsyncClient) -> None:
         """PUT with password=None keeps the existing password."""
         await _full_auth(db_client)
 
@@ -181,9 +176,7 @@ class TestSmtpSettingsApi:
         assert resp.json()["password_set"] is True
 
     @pytest.mark.asyncio
-    async def test_put_smtp_clears_password_when_empty(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_put_smtp_clears_password_when_empty(self, db_client: AsyncClient) -> None:
         """PUT with password="" clears the password."""
         await _full_auth(db_client)
 
@@ -210,9 +203,7 @@ class TestSmtpSettingsApi:
         assert resp.json()["password_set"] is False
 
     @pytest.mark.asyncio
-    async def test_smtp_settings_require_auth(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_smtp_settings_require_auth(self, client: AsyncClient) -> None:
         """SMTP endpoints return 401 without authentication."""
         resp = await client.get("/api/v1/settings/smtp")
         assert resp.status_code == 401
@@ -224,9 +215,7 @@ class TestSmtpSettingsApi:
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_test_email_returns_202_on_success(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_test_email_returns_202_on_success(self, db_client: AsyncClient) -> None:
         """POST /smtp/test returns 202 when email is sent successfully."""
         await _full_auth(db_client)
 
@@ -258,12 +247,10 @@ class TestSmtpSettingsApi:
 
         resp = await db_client.post("/api/v1/settings/smtp/test")
         assert resp.status_code == 400
-        assert "not configured" in resp.json()["detail"].lower()
+        assert resp.json()["detail"] == "SMTP_SEND_FAILED"
 
     @pytest.mark.asyncio
-    async def test_test_email_returns_400_on_send_failure(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_test_email_returns_400_on_send_failure(self, db_client: AsyncClient) -> None:
         """POST /smtp/test returns 400 when sending fails."""
         await _full_auth(db_client)
 
@@ -284,7 +271,7 @@ class TestSmtpSettingsApi:
         ):
             resp = await db_client.post("/api/v1/settings/smtp/test")
             assert resp.status_code == 400
-            assert "connection refused" in resp.json()["detail"].lower()
+            assert resp.json()["detail"] == "SMTP_SEND_FAILED"
 
 
 # ---------------------------------------------------------------------------
@@ -365,9 +352,7 @@ class TestForgotPassword:
     """Tests for ``POST /api/v1/auth/forgot-password``."""
 
     @pytest.mark.asyncio
-    async def test_returns_202_for_existing_user(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_returns_202_for_existing_user(self, db_client: AsyncClient) -> None:
         """Existing user + SMTP configured → 202, email sent."""
         await _full_auth(db_client)
 
@@ -389,9 +374,7 @@ class TestForgotPassword:
             assert resp.status_code == 202
 
     @pytest.mark.asyncio
-    async def test_returns_202_for_nonexistent_user(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_returns_202_for_nonexistent_user(self, db_client: AsyncClient) -> None:
         """Non-existent user → still 202 (anti-enumeration)."""
         await _full_auth(db_client)
 
@@ -403,9 +386,7 @@ class TestForgotPassword:
             assert resp.status_code == 202
 
     @pytest.mark.asyncio
-    async def test_returns_202_when_smtp_not_configured(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_returns_202_when_smtp_not_configured(self, db_client: AsyncClient) -> None:
         """SMTP not configured → still 202 (no email sent, no leak)."""
         await _full_auth(db_client)
 
@@ -446,9 +427,7 @@ class TestForgotPassword:
         assert resp.status_code == 202
 
     @pytest.mark.asyncio
-    async def test_email_contains_reset_link(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_email_contains_reset_link(self, db_client: AsyncClient) -> None:
         """The sent email contains a reset-password URL with a token."""
         await _full_auth(db_client)
 
@@ -484,6 +463,7 @@ class TestForgotPassword:
         # Read base_url from current settings so the assertion works regardless
         # of the developer's .env configuration.
         from jai.config import get_settings
+
         expected_prefix = f"{get_settings().base_url.rstrip('/')}/reset-password?token="
         assert expected_prefix in html
 
@@ -498,9 +478,7 @@ class TestResetPassword:
     """Tests for ``POST /api/v1/auth/reset-password``."""
 
     @pytest.mark.asyncio
-    async def test_reset_password_success(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_reset_password_success(self, db_client: AsyncClient) -> None:
         """Valid token + valid new password → 204, password is updated."""
         await _full_auth(db_client)
 
@@ -527,9 +505,7 @@ class TestResetPassword:
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_reset_password_invalid_token(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_reset_password_invalid_token(self, db_client: AsyncClient) -> None:
         """Invalid token → 400."""
         await _full_auth(db_client)
 
@@ -542,9 +518,7 @@ class TestResetPassword:
         assert "invalid" in detail or "expired" in detail
 
     @pytest.mark.asyncio
-    async def test_reset_password_expired_token(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_reset_password_expired_token(self, db_client: AsyncClient) -> None:
         """Expired token → 400."""
         await _full_auth(db_client)
 
@@ -569,9 +543,7 @@ class TestResetPassword:
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_reset_password_short_password_rejected(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_reset_password_short_password_rejected(self, db_client: AsyncClient) -> None:
         """Short new password → 400 (password validation)."""
         await _full_auth(db_client)
 
@@ -589,9 +561,7 @@ class TestResetPassword:
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_reset_password_token_for_deleted_user(
-        self, db_client: AsyncClient
-    ) -> None:
+    async def test_reset_password_token_for_deleted_user(self, db_client: AsyncClient) -> None:
         """Token with a user ID that doesn't exist → 400."""
         from jai.api.auth import _generate_reset_token
 
@@ -679,9 +649,7 @@ class TestEmailService:
         xss_url = 'http://x.com/reset?<script>alert("xss")</script>'
         with patch("jai.services.email._send_mail", side_effect=_capture):
             async with db_session_maker() as session:
-                await email_svc.send_password_reset_email(
-                    session, "user@test.com", xss_url
-                )
+                await email_svc.send_password_reset_email(session, "user@test.com", xss_url)
 
         # The HTML must contain the escaped version, not raw <script>.
         assert "<script>" not in html
@@ -788,3 +756,69 @@ class TestEmailService:
         async with db_session_maker() as session:
             result = await email_svc._get_smtp_config(session)
         assert result is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sent_copy_settings_backward_put_and_password_lifecycle(db_client):
+    """Old clients preserve IMAP settings through keep/update/clear password writes."""
+    await _full_auth(db_client)
+    url = "/api/v1/settings/smtp"
+    defaults = (await db_client.get(url)).json()
+    assert defaults["sent_copy"]["enabled"] is False
+    payload = {
+        "host": "smtp.example.com",
+        "username": "login",
+        "password": "SECRET-ONE",
+        "from_email": "from@example.com",
+        "sent_copy": {
+            "enabled": True,
+            "host": "imap.example.com",
+            "port": 1143,
+            "security": "STARTTLS",
+            "folder": " My Sent ",
+        },
+    }
+    saved = await db_client.put(url, json=payload)
+    assert saved.status_code == 200, saved.text
+    expected = saved.json()["sent_copy"]
+    assert expected["folder"] == "My Sent" and expected["port"] == 1143
+    assert "SECRET-ONE" not in saved.text
+    del payload["sent_copy"]
+    for password, is_set in [(None, True), ("SECRET-TWO", True), ("", False)]:
+        payload["password"] = password
+        response = await db_client.put(url, json=payload)
+        assert response.status_code == 200, response.text
+        assert response.json()["sent_copy"] == expected
+        assert response.json()["password_set"] == is_set
+        assert "SECRET" not in response.text
+        assert (await db_client.get(url)).json()["sent_copy"] == expected
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sent_copy_test_response_warning_and_safe_smtp_error(db_client):
+    from jai.schemas.email_log import SentCopyResult
+
+    await _full_auth(db_client)
+    with patch(
+        "jai.services.email.send_test_email",
+        return_value=SentCopyResult(
+            sent_copy_status="FAILED", sent_copy_error_code="IMAP_AUTH_FAILED"
+        ),
+    ):
+        response = await db_client.post("/api/v1/settings/smtp/test")
+    assert response.status_code == 202
+    assert response.json() == {
+        "status": "sent",
+        "sent_copy_status": "FAILED",
+        "sent_copy_error_code": "IMAP_AUTH_FAILED",
+        "sent_copy_saved_at": None,
+    }
+    with patch(
+        "jai.services.email.send_test_email", side_effect=RuntimeError("SECRET MIME PASSWORD")
+    ):
+        response = await db_client.post("/api/v1/settings/smtp/test")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "SMTP_SEND_FAILED"
+    assert "SECRET" not in response.text

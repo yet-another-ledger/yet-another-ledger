@@ -529,10 +529,7 @@ async def forgot_password(
             session, user.email, reset_url
         )
     except Exception:
-        logger.exception(
-            "Unexpected error during password-reset for %s – still returning 202",
-            user.email,
-        )
+        logger.warning("Password-reset SMTP send failed", extra={"error_code": "SMTP_SEND_FAILED"})
 
     return {"status": "accepted"}
 

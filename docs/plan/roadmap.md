@@ -2,7 +2,7 @@
 
 > 🌐 **English** · [中文](roadmap_zh.md)
 
-> **Current scheduling (2026-10-25)**: M15 remains in development but is paused, with its work preserved on `wip/m15-agent-accounting-paused`, outside `main`. No milestone is currently active. The author has agreed the [SI1 small-improvement implementation plan](improvements/SI1.md); implementation is in progress (Step 1 automated checks and blind review complete; Step 2 of 4 in progress; author acceptance pending). SI1 is separately numbered, not a milestone, and does not resume M15.
+> **Current scheduling (2026-10-25)**: M15 remains in development but is paused, with its work preserved on `wip/m15-agent-accounting-paused`, outside `main`. No milestone is currently active. The author has agreed the [SI1 small-improvement implementation plan](improvements/SI1.md); implementation is in progress (Steps 1–2 automated checks and blind review complete; Step 3 of 4 in progress; author acceptance pending). SI1 is separately numbered, not a milestone, and does not resume M15.
 
 > **What this is**: A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the planned receipt-inbox and agent-accounting follow-ons **M14–M15**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
 >
@@ -278,7 +278,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ## 4.si Small improvements (separate from milestone numbering)
 
-- **SI1 · Document ordering, Quote duplication and Sent copies**: design agreed on 2026-10-25; implementation in progress (Step 1 automated checks and blind review complete; Step 2/4 in progress; author acceptance pending). The [implementation plan](improvements/SI1.md) follows the milestone format with four atomic steps, contracts, migration notes, review points and acceptance checks. Reuse existing line-order persistence and rounding; duplicate Quotes into new independently numbered drafts; optionally save all new outgoing messages and attachments to the provider's Sent mailbox through IMAP. M15 remains paused.
+- **SI1 · Document ordering, Quote duplication and Sent copies**: design agreed on 2026-10-25; implementation in progress (Steps 1–2 automated checks and blind review complete; Step 3/4 in progress; author acceptance pending). The [implementation plan](improvements/SI1.md) follows the milestone format with four atomic steps, contracts, migration notes, review points and acceptance checks. Reuse existing line-order persistence and rounding; duplicate Quotes into new independently numbered drafts; optionally save all new outgoing messages and attachments to the provider's Sent mailbox through IMAP. M15 remains paused.
 - **Deferred**: product-manual PDF management and checkboxes for choosing extra quote attachments need a separately designed future milestone. SI1 reserves no schema or milestone number for it.
 
 ---
@@ -416,6 +416,6 @@ Separately numbered improvements:
 
 | Improvement | Content | Status |
 | --- | --- | --- |
-| SI1 | Document ordering, Quote duplication and server-side Sent copies | 🟡 In progress; Step 1 automated checks and blind review complete; Step 2/4 in progress; author acceptance pending; see [implementation plan](improvements/SI1.md) |
+| SI1 | Document ordering, Quote duplication and server-side Sent copies | 🟡 In progress; Steps 1–2 automated checks and blind review complete; Step 3/4 in progress; author acceptance pending; see [implementation plan](improvements/SI1.md) |
 
 > Legend: ⬜ Not started | 🟡 In progress | 🟢 Done (deployment smoke test passed) | ⏸️ In development but paused (not the active milestone)

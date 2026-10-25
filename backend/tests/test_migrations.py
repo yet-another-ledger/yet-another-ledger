@@ -148,7 +148,7 @@ def _query(
 
 
 def _expect_integrity_error(
-    url: str, statement: str, params: dict[str, object]
+    url: str, statement: str, params: dict[str, object], *, company_id: uuid.UUID | None = None
 ) -> str:
     """Execute one invalid raw SQL write and return its database error text."""
 
@@ -158,6 +158,11 @@ def _expect_integrity_error(
             async with engine.connect() as conn:
                 transaction = await conn.begin()
                 try:
+                    if company_id is not None:
+                        await conn.execute(
+                            text("SELECT set_config('jai.company_id', :company, true)"),
+                            {"company": str(company_id)},
+                        )
                     await conn.execute(text(statement), params)
                 except IntegrityError as exc:
                     await transaction.rollback()
@@ -366,6 +371,70 @@ class TestMigrations:
             f"upgrade head failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
+    def test_0044_sent_copy_preserves_historical_logs(self) -> None:
+        assert _run_alembic("upgrade", "head", url=self.url).returncode == 0
+        assert _run_alembic("downgrade", "0043", url=self.url).returncode == 0
+        company_id, log_id, related_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        params = {"company": company_id, "id": log_id, "related": related_id}
+        _query(
+            self.url,
+            "INSERT INTO company (id,name,base_currency) "
+            "VALUES (:company,'SI1 historical','EUR'); "
+            "INSERT INTO email_log (id,company_id,related_type,related_id,to_email,"
+            "subject,body_snapshot,status,sent_at) VALUES (:id,:company,'INVOICE',"
+            ":related,'to@example.com','old subject','old body','SENT',now())",
+            params,
+            company_id=company_id,
+        )
+        before = _query(
+            self.url,
+            "SELECT status,sent_at,body_snapshot FROM email_log WHERE id=:id",
+            params,
+            company_id=company_id,
+        )
+        result = _run_alembic("upgrade", "head", url=self.url)
+        assert result.returncode == 0, result.stderr
+        assert (
+            _query(
+                self.url,
+                "SELECT status,sent_at,body_snapshot FROM email_log WHERE id=:id",
+                params,
+                company_id=company_id,
+            )
+            == before
+        )
+        assert _query(
+            self.url,
+            "SELECT sent_copy_status,sent_copy_error_code,sent_copy_saved_at "
+            "FROM email_log WHERE id=:id",
+            params,
+            company_id=company_id,
+        ) == [
+            {
+                "sent_copy_status": "NOT_ATTEMPTED",
+                "sent_copy_error_code": None,
+                "sent_copy_saved_at": None,
+            }
+        ]
+        error = _expect_integrity_error(
+            self.url,
+            "UPDATE email_log SET sent_copy_status='INVALID' WHERE id=:id",
+            params,
+            company_id=company_id,
+        )
+        assert "ck_email_log_sent_copy_status" in error
+        assert _run_alembic("downgrade", "0043", url=self.url).returncode == 0
+        assert (
+            _query(
+                self.url,
+                "SELECT status,sent_at,body_snapshot FROM email_log WHERE id=:id",
+                params,
+                company_id=company_id,
+            )
+            == before
+        )
+        assert _run_alembic("upgrade", "head", url=self.url).returncode == 0
+
     def test_0042_upload_enum_upgrade_and_non_destructive_downgrade_posture(self) -> None:
         """UPLOAD is additive, and downgrade deliberately keeps the enum label."""
         assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
@@ -421,11 +490,14 @@ class TestMigrations:
 
         upgraded = _run_alembic("upgrade", "head", url=self.url)
         assert upgraded.returncode == 0, upgraded.stderr
-        assert _query(
-            self.url,
-            "SELECT net_amount, vat_amount, gross_amount FROM expense WHERE id=:expense_id",
-            {"expense_id": ids["expense_id"]},
-        ) == before
+        assert (
+            _query(
+                self.url,
+                "SELECT net_amount, vat_amount, gross_amount FROM expense WHERE id=:expense_id",
+                {"expense_id": ids["expense_id"]},
+            )
+            == before
+        )
         assert _query(
             self.url,
             "SELECT company_id, expense_id, storage_key, filename, byte_size, receipt_inbox_id "
@@ -490,11 +562,14 @@ class TestMigrations:
             {"id": inbox_id},
             company_id=ids["company_id"],
         )
-        assert _query(
-            self.url,
-            "SELECT id FROM expense_attachment WHERE id=:id",
-            {"id": inbox_file_id},
-        ) == []
+        assert (
+            _query(
+                self.url,
+                "SELECT id FROM expense_attachment WHERE id=:id",
+                {"id": inbox_file_id},
+            )
+            == []
+        )
 
         # A confirmed item has already transferred its file to Expense. Its
         # attachment no longer prevents SET NOT NULL, so the explicit guard
@@ -531,11 +606,14 @@ class TestMigrations:
         downgrade = _run_alembic("downgrade", "0042", url=self.url)
         assert downgrade.returncode != 0
         assert "cannot downgrade receipt inbox while inbox rows exist" in downgrade.stderr
-        assert _query(
-            self.url,
-            "SELECT id FROM receipt_inbox WHERE id=:id",
-            {"id": confirmed_id},
-        ) == []
+        assert (
+            _query(
+                self.url,
+                "SELECT id FROM receipt_inbox WHERE id=:id",
+                {"id": confirmed_id},
+            )
+            == []
+        )
         assert _query(
             self.url,
             "SELECT id FROM receipt_inbox WHERE id=:id",
@@ -1302,9 +1380,7 @@ class TestMigrations:
         """A quote-only deposit independently blocks downgrade before any DDL."""
         assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
         assert _run_alembic("upgrade", "0028", url=self.url).returncode == 0
-        ids = _insert_0028_downgrade_sentinel(
-            self.url, quote_provenance=True, payment_tax=False
-        )
+        ids = _insert_0028_downgrade_sentinel(self.url, quote_provenance=True, payment_tax=False)
 
         result = _run_alembic("downgrade", "0027", url=self.url)
         assert result.returncode != 0
@@ -1332,9 +1408,7 @@ class TestMigrations:
         """A VAT snapshot independently blocks downgrade before any DDL."""
         assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
         assert _run_alembic("upgrade", "0028", url=self.url).returncode == 0
-        ids = _insert_0028_downgrade_sentinel(
-            self.url, quote_provenance=False, payment_tax=True
-        )
+        ids = _insert_0028_downgrade_sentinel(self.url, quote_provenance=False, payment_tax=True)
 
         result = _run_alembic("downgrade", "0027", url=self.url)
         assert result.returncode != 0

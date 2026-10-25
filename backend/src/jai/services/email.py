@@ -38,9 +38,12 @@ import html
 import logging
 import re
 import uuid
+from datetime import UTC, datetime
+from email import policy
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import format_datetime, make_msgid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -51,12 +54,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.config import get_settings
 from jai.models._enums import EmailRelatedType, EmailStatus, SettingLevel
-from jai.schemas.setting import SETTING_KEY_SMTP, EmailTemplate, SmtpSettings
+from jai.schemas.email_log import SentCopyResult
+from jai.schemas.setting import SETTING_KEY_SMTP, EmailTemplate, SentCopySettings, SmtpSettings
+from jai.services.sent_copy import save_sent_copy
 
 if TYPE_CHECKING:
     from jai.models.email_log import EmailLog
 
 logger = logging.getLogger("jai.email")
+
+
+class MailSendResult(SentCopyResult):
+    """Internal SMTP acceptance time, independent of subsequent IMAP latency."""
+
+    smtp_sent_at: datetime
 
 
 def failed_email_log_values(log: EmailLog) -> dict[str, object]:
@@ -76,12 +87,13 @@ def failed_email_log_values(log: EmailLog) -> dict[str, object]:
         "error_message": log.error_message,
         "creator_id": log.creator_id,
         "sent_at": None,
+        "sent_copy_status": "NOT_ATTEMPTED",
+        "sent_copy_error_code": None,
+        "sent_copy_saved_at": None,
     }
 
 
-async def persist_failed_email_log(
-    session: AsyncSession, values: dict[str, object]
-) -> EmailLog:
+async def persist_failed_email_log(session: AsyncSession, values: dict[str, object]) -> EmailLog:
     """Persist a failed SMTP audit after its unsent artifact was rolled back."""
     from jai.models.email_log import EmailLog
 
@@ -89,6 +101,7 @@ async def persist_failed_email_log(
     session.add(log)
     await session.flush()
     return log
+
 
 # ---------------------------------------------------------------------------
 # Allowed placeholder token names (explicit allowlist — D4)
@@ -172,9 +185,7 @@ def payment_receipt_email_template(locale: str) -> EmailTemplate:
     resolution's final fallback.  Return a copy so this remains a pure default
     factory even though ``EmailTemplate`` is a mutable Pydantic model.
     """
-    template = _PAYMENT_RECEIPT_EMAIL_TEMPLATES.get(
-        locale, _PAYMENT_RECEIPT_EMAIL_TEMPLATES["en"]
-    )
+    template = _PAYMENT_RECEIPT_EMAIL_TEMPLATES.get(locale, _PAYMENT_RECEIPT_EMAIL_TEMPLATES["en"])
     return template.model_copy(deep=True)
 
 
@@ -213,7 +224,7 @@ async def _get_smtp_config(session: AsyncSession) -> SmtpSettings | None:
             value_type=SmtpSettings,
         )
     except Exception:
-        logger.warning("Failed to read SMTP settings from DB", exc_info=True)
+        logger.warning("SMTP_CONFIGURATION_READ_FAILED")
         cfg = None
 
     if cfg is not None and cfg.host:
@@ -232,12 +243,11 @@ async def _get_smtp_config(session: AsyncSession) -> SmtpSettings | None:
                 from_name=settings.smtp_from_name,
                 use_tls=settings.smtp_use_tls,
                 use_ssl=settings.smtp_use_ssl,
+                sent_copy=cfg.sent_copy if cfg else SentCopySettings(),
             )
         except Exception:
             logger.warning(
-                "SMTP env variables are incomplete or invalid – "
-                "skipping env fallback",
-                exc_info=True,
+                "SMTP env variables are incomplete or invalid – skipping env fallback",
             )
 
     return None
@@ -261,7 +271,7 @@ async def _send_mail(
     cc: list[str] | None = None,
     attachment_bytes: bytes | None = None,
     attachment_filename: str | None = None,
-) -> None:
+) -> MailSendResult:
     """Send an HTML email, optionally with CC recipients and a PDF attachment.
 
     Parameters
@@ -314,38 +324,54 @@ async def _send_mail(
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     msg["Subject"] = subject
-    msg["From"] = (
-        f"{cfg.from_name} <{cfg.from_email}>" if cfg.from_name else cfg.from_email
-    )
+    msg["From"] = f"{cfg.from_name} <{cfg.from_email}>" if cfg.from_name else cfg.from_email
     msg["To"] = to
     if cc:
         msg["Cc"] = ", ".join(cc)
 
+    date = datetime.now(UTC)
+    msg["Date"] = format_datetime(date)
+    msg["Message-ID"] = make_msgid()
     # Envelope recipients = primary + CC (both must be in the SMTP RCPT TO).
     recipients = [to] + (cc or [])
+    utf8_required = not (cfg.from_email + "".join(recipients)).isascii()
+    # Raw-byte sendmail bypasses send_message's SMTPUTF8 detection. Keep UTF-8
+    # addresses in headers and request UTF-8 envelope encoding explicitly; the
+    # library rejects servers without SMTPUTF8 before MAIL/DATA. MIME bodies
+    # stay 7-bit encoded, so no BODY=8BITMIME extension is needed.
+    raw = msg.as_bytes(policy=policy.SMTP.clone(utf8=utf8_required, cte_type="7bit"))
+    mail_options = ["SMTPUTF8"] if utf8_required else []
 
     if cfg.use_ssl:
         # Implicit TLS (port 465).
         await aiosmtplib.send(
-            msg,
+            raw,
             hostname=cfg.host,
             port=cfg.port,
             username=cfg.username or None,
             password=cfg.password or None,
             use_tls=True,
             recipients=recipients,
+            sender=cfg.from_email,
+            mail_options=mail_options,
         )
     else:
         # STARTTLS (port 587) or plain.
         await aiosmtplib.send(
-            msg,
+            raw,
             hostname=cfg.host,
             port=cfg.port,
             username=cfg.username or None,
             password=cfg.password or None,
             start_tls=cfg.use_tls,
             recipients=recipients,
+            sender=cfg.from_email,
+            mail_options=mail_options,
         )
+
+    accepted_at = datetime.now(UTC)
+    copy_result = await save_sent_copy(cfg, raw, date)
+    return MailSendResult(**copy_result.model_dump(), smtp_sent_at=accepted_at)
 
 
 # ---------------------------------------------------------------------------
@@ -386,13 +412,11 @@ async def send_password_reset_email(
     template = _jinja_env.get_template(template_name)
     html = template.render(reset_url=reset_url)
 
-    subject = (
-        "重置您的密码" if locale == "zh" else "Reset your password"
-    )
+    subject = "重置您的密码" if locale == "zh" else "Reset your password"
     await _send_mail(cfg, to, subject, html)
 
 
-async def send_test_email(session: AsyncSession, to: str) -> None:
+async def send_test_email(session: AsyncSession, to: str) -> SentCopyResult:
     """Send a test email to verify SMTP connectivity.
 
     Raises ``RuntimeError`` if SMTP is not configured or sending fails.
@@ -404,7 +428,7 @@ async def send_test_email(session: AsyncSession, to: str) -> None:
 
     html = "<p>This is a test email from <strong>Yet Another Ledger</strong>.</p>"
     subject = "YAL – Test Email"
-    await _send_mail(cfg, to, subject, html)
+    return await _send_mail(cfg, to, subject, html)
 
 
 async def is_smtp_configured(session: AsyncSession) -> bool:
@@ -468,6 +492,7 @@ def render_email_template(
         ``subject`` – plain-text subject with placeholders filled in.
         ``html_body`` – safe HTML body ready for sending.
     """
+
     # --- Subject (plain text, placeholder substitution only) ---
     def _replace_subject(m: re.Match[str]) -> str:
         token = m.group(1)
@@ -498,8 +523,8 @@ def render_email_template(
     # Step 4: Minimal HTML shell.
     html_body = (
         "<!DOCTYPE html>\n"
-        "<html><head><meta charset=\"utf-8\"></head>\n"
-        "<body style=\"font-family: sans-serif; font-size: 14px; color: #333;\">\n"
+        '<html><head><meta charset="utf-8"></head>\n'
+        '<body style="font-family: sans-serif; font-size: 14px; color: #333;">\n'
         f"{br_body}\n"
         "</body></html>"
     )
@@ -668,15 +693,18 @@ async def send_document_email(
     if not _configured(cfg):
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "SMTP is not configured.  Please set up SMTP settings before "
-                "sending emails."
-            ),
+            detail=("SMTP is not configured.  Please set up SMTP settings before sending emails."),
         )
     assert cfg is not None  # narrowing for type-checker
 
     # -- Resolve doc_type string -----------------------------------------------
-    doc_type = "invoice" if related_type == EmailRelatedType.INVOICE else "quote" if related_type == EmailRelatedType.QUOTE else "refund"
+    doc_type = (
+        "invoice"
+        if related_type == EmailRelatedType.INVOICE
+        else "quote"
+        if related_type == EmailRelatedType.QUOTE
+        else "refund"
+    )
     kind_value = getattr(document_kind, "value", document_kind)
     formal_kind = str(kind_value) if kind_value is not None else "STANDARD"
 
@@ -707,9 +735,15 @@ async def send_document_email(
             locale_map = getattr(templates_setting, _FORMAL_TEMPLATE_FIELDS[formal_kind])
             stored_template = locale_map.en if locale == "en" else locale_map.zh
         elif doc_type == "refund":
-            stored_template = templates_setting.refund.en if locale == "en" else templates_setting.refund.zh
+            stored_template = (
+                templates_setting.refund.en if locale == "en" else templates_setting.refund.zh
+            )
         else:
-            locale_map = templates_setting.invoice if doc_type in {"invoice", "refund"} else templates_setting.quote
+            locale_map = (
+                templates_setting.invoice
+                if doc_type in {"invoice", "refund"}
+                else templates_setting.quote
+            )
             stored_template = locale_map.en if locale == "en" else locale_map.zh
 
     # 2. If caller supplied an explicit subject or body, build a temporary
@@ -734,9 +768,10 @@ async def send_document_email(
     error_msg: str | None = None
     send_status = EmailStatus.SENT
     sent_at: datetime | None = None
+    copy_result = SentCopyResult()
 
     try:
-        await _send_mail(
+        result = await _send_mail(
             cfg=cfg,
             to=to,
             subject=rendered_subject,
@@ -745,22 +780,13 @@ async def send_document_email(
             attachment_bytes=pdf_bytes,
             attachment_filename=filename,
         )
-        sent_at = datetime.now(tz=UTC)
-    except Exception as exc:
+        if isinstance(result, SentCopyResult):
+            copy_result = SentCopyResult(**result.model_dump())
+        sent_at = result.smtp_sent_at if isinstance(result, MailSendResult) else datetime.now(tz=UTC)
+    except Exception:
         send_status = EmailStatus.FAILED
-        # Sanitise the error message so SMTP credentials are never logged.
-        # We include only the exception type and a cleaned message; we
-        # explicitly strip any occurrences of the password value.
-        raw_error = str(exc)
-        password_val = cfg.password or ""
-        username_val = cfg.username or ""
-        safe_error = raw_error
-        if password_val:
-            safe_error = safe_error.replace(password_val, "***")
-        if username_val:
-            safe_error = safe_error.replace(username_val, "***")
-        error_msg = f"{type(exc).__name__}: {safe_error}"
-        logger.warning("Failed to send document email to %s: %s", to, error_msg)
+        error_msg = "SMTP_SEND_FAILED"
+        logger.warning("Document SMTP send failed", extra={"error_code": error_msg})
 
     # -- Write EmailLog row (always, success or failure) -----------------------
     log = EmailLog(
@@ -780,6 +806,7 @@ async def send_document_email(
         error_message=error_msg,
         creator_id=creator_id,
         sent_at=sent_at,
+        **copy_result.model_dump(),
     )
     session.add(log)
     await session.flush()
