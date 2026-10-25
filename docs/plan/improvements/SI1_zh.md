@@ -161,6 +161,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 - 作者走查：作者于2026-10-25在引导收尾步骤16/16完成验收，包括已记录的跳过项及人工／自动证据范围。本轮实际执行的 Invoice／Quote／Estimate 排序、Estimate→Quote→Invoice 转换及 PDF 顺序、Quote 复制／未保存保护／独立编辑用例通过。作者已在收件箱和供应商 Sent 检查测试邮件、Quote、STANDARD Invoice 及一封 Invoice 来源付款收据，包括 CC 和业务 PDF 实际下载；只读数据库核对发送／副本结果及原单据／付款数据未变。STANDARD 邮件关联的正式 PDF 留存字节哈希有效。作者明确跳过 ADVANCE／FINAL／CREDIT_NOTE、退款确认、密码重置及故意 IMAP 失败的人工实发。Quote 来源收据、关闭 Sent／供应商原生副本行为未人工执行。这些路径保留自动化证据，不记录为人工通过。
 - 走查改进（2026-10-25）：Quote 列表复制改用复制图标；每行保留六个左对齐的操作位置，不可删除时禁用删除按钮。本次有界后续修复已独立盲审无发现，前端 Node 7／Vitest 197、build、Ruff、strict mypy、隔离默认 pytest 1370、浏览器替身及 Docker build 通过。作者已接受操作栏布局；API 与业务行为未变。
 - 走查诊断补充：服务端新增固定且脱敏的 SMTP 测试失败分类日志，保留原通用 API 错误与独立 SMTP／IMAP 结果。Ruff、strict mypy（122 文件）、隔离默认 pytest（1388 项，含新增18项诊断用例）及 Docker build 通过；本次仅日志变更，未重复全量集成。该补充按普通走查流程处理，未再开盲审循环，作者已接受并授权将该补充随收尾提交。作者更新凭据后真实测试成功，先前通用失败无法追溯分类。代理未发送真实邮件或读取邮箱内容。
+- 发布候选验证：main 提交 `5815bb7` 于2026-10-25通过全部远端 CI，包括全量 PostgreSQL 集成、后端质量、生成类型新鲜度、前端构建及 Docker 构建。该验证包含走查诊断补充，前述未在本地重复集成的限制属于当时记录。v0.8.0 标签指向此已验证提交。
 - 运维说明：参见 [README SMTP 与服务器端 Sent 副本](../../../README_zh.md#smtp-与服务器端-sent-副本)，涵盖实际共享 SMTP 凭据／环境回退、TLS／端口、已有目录发现、独立结果与安全排障。
 - 已知顺延：产品手册 PDF 管理和附件勾选另开未来 Milestone；Sent 重试／回填及 Quote 版本管理仍不在范围内。M15 保持暂停。
 
