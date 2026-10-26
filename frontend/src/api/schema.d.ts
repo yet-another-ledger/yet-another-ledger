@@ -1242,6 +1242,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/invoices/{invoice_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Invoice Revisions Endpoint */
+        get: operations["list_invoice_revisions_endpoint_api_v1_invoices__invoice_id__revisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices/{invoice_id}/document-chain": {
         parameters: {
             query?: never;
@@ -4160,7 +4177,7 @@ export interface components {
          * @description Append-only, safe-to-display lifecycle facts for a document chain.
          * @enum {string}
          */
-        DocumentChainEventType: "MODE_LOCKED" | "INVOICE_CREATED" | "QUOTE_PAYMENT_CREATED" | "QUOTE_PAYMENT_UPDATED" | "QUOTE_PAYMENT_DELETED" | "INVOICE_DELETED" | "INVOICE_UPDATED" | "INVOICE_ISSUED" | "INVOICE_STATUS_CHANGED" | "INVOICE_PAYMENT_CREATED" | "INVOICE_PAYMENT_UPDATED" | "INVOICE_PAYMENT_DELETED" | "REFUND_CREATED" | "REFUND_UPDATED" | "REFUND_DELETED" | "REPLACEMENT_CREATED" | "COMPENSATING_INVOICE_CREATED" | "PROJECT_CANCELLATION_CREDIT_CREATED";
+        DocumentChainEventType: "MODE_LOCKED" | "INVOICE_CREATED" | "QUOTE_PAYMENT_CREATED" | "QUOTE_PAYMENT_UPDATED" | "QUOTE_PAYMENT_DELETED" | "INVOICE_DELETED" | "INVOICE_UPDATED" | "INVOICE_ISSUED" | "INVOICE_STATUS_CHANGED" | "INVOICE_PAYMENT_CREATED" | "INVOICE_PAYMENT_UPDATED" | "INVOICE_PAYMENT_DELETED" | "REFUND_CREATED" | "REFUND_UPDATED" | "REFUND_DELETED" | "REPLACEMENT_CREATED" | "COMPENSATING_INVOICE_CREATED" | "PROJECT_CANCELLATION_CREDIT_CREATED" | "INVOICE_REVISED";
         /**
          * DocumentChainNodeRead
          * @description A Quote, formal document or cash row in stable chain order.
@@ -5712,6 +5729,21 @@ export interface components {
             correction_warnings?: components["schemas"]["ReportWarning"][];
         };
         /**
+         * InvoiceBusinessSnapshot
+         * @description Complete snapshot version 1; no ORM, request envelope, or free-form context.
+         */
+        InvoiceBusinessSnapshot: {
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version?: 1;
+            invoice: components["schemas"]["InvoiceRevisionDocumentSnapshot"];
+            /** Credit Basis */
+            credit_basis: components["schemas"]["InvoiceCreditBasisSnapshot"][];
+        };
+        /**
          * InvoiceCalculationRead
          * @description Response body for ``POST /api/v1/invoices/calculate``.
          */
@@ -5786,6 +5818,55 @@ export interface components {
              * @description At least 1 line required.
              */
             lines: components["schemas"]["InvoiceLineInput"][];
+        };
+        /** InvoiceCreditBasisSnapshot */
+        InvoiceCreditBasisSnapshot: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Invoice Line Id
+             * Format: uuid
+             */
+            invoice_line_id: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+            /** Unit Name */
+            unit_name: string | null;
+            /** Quantity */
+            quantity: string;
+            /** Vat Rate Id */
+            vat_rate_id: string | null;
+            /** Vat Rate Label */
+            vat_rate_label: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent: string | null;
+            /** Effective Vat Percent */
+            effective_vat_percent: string | null;
+            /** Vat Treatment Code */
+            vat_treatment_code: string;
+            /** Vat Treatment Effect */
+            vat_treatment_effect: string;
+            /** Vat Treatment Requires Icp */
+            vat_treatment_requires_icp: boolean;
+            /** Net Amount */
+            net_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Base Net Amount */
+            base_net_amount: string;
+            /** Base Vat Amount */
+            base_vat_amount: string;
+            /** Base Gross Amount */
+            base_gross_amount: string;
         };
         /**
          * InvoiceCreditStatus
@@ -6364,6 +6445,340 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            revision_eligibility?: components["schemas"]["InvoiceRevisionEligibilityRead"] | null;
+        };
+        /** InvoiceRevisionAddressSnapshot */
+        InvoiceRevisionAddressSnapshot: {
+            /** Street */
+            street: string | null;
+            /** House Number */
+            house_number: string | null;
+            /** House Number Addition */
+            house_number_addition: string | null;
+            /** Postal Code */
+            postal_code: string | null;
+            /** City */
+            city: string | null;
+            /** Province */
+            province: string | null;
+            /** Country Code */
+            country_code: string | null;
+        };
+        /**
+         * InvoiceRevisionDocumentSnapshot
+         * @description Frozen business fields, independent from the evolving API read model.
+         */
+        InvoiceRevisionDocumentSnapshot: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Company Id
+             * Format: uuid
+             */
+            company_id: string;
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /** Invoice Number */
+            invoice_number: string | null;
+            /** Sequence Number */
+            sequence_number: number | null;
+            /** Customer Sequence Number */
+            customer_sequence_number: number | null;
+            /** Reference Number */
+            reference_number: string | null;
+            /** Invoice Date */
+            invoice_date: string;
+            /** Due Date */
+            due_date: string | null;
+            /** Supply Or Advance Date */
+            supply_or_advance_date: string | null;
+            status: components["schemas"]["InvoiceStatus"];
+            paid_status: components["schemas"]["InvoicePaidStatus"];
+            document_kind: components["schemas"]["InvoiceDocumentKind"];
+            /** Quote Id */
+            quote_id: string | null;
+            /** Issued At */
+            issued_at: string | null;
+            /** Issued By User Id */
+            issued_by_user_id: string | null;
+            /** Currency */
+            currency: string;
+            /** Exchange Rate */
+            exchange_rate: string;
+            tax_mode: components["schemas"]["InvoiceTaxMode"];
+            /** Amounts Include Vat */
+            amounts_include_vat: boolean;
+            /**
+             * Vat Treatment Id
+             * Format: uuid
+             */
+            vat_treatment_id: string;
+            /** Document Vat Rate Id */
+            document_vat_rate_id: string | null;
+            /** Vat Treatment Code */
+            vat_treatment_code: string;
+            /** Vat Treatment Label */
+            vat_treatment_label: string;
+            /** Vat Treatment Effect */
+            vat_treatment_effect: string;
+            /** Vat Treatment Requires Icp */
+            vat_treatment_requires_icp: boolean;
+            discount_type: components["schemas"]["DiscountType"];
+            /** Discount Value */
+            discount_value: string;
+            /** Document Discount Amount */
+            document_discount_amount: string;
+            /** Subtotal Excl Vat */
+            subtotal_excl_vat: string;
+            /** Line Discount Total */
+            line_discount_total: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Total */
+            vat_total: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            /** Due Amount */
+            due_amount: string;
+            /** Payable Before Payments */
+            payable_before_payments: string;
+            /** Incoming Payment Total */
+            incoming_payment_total: string;
+            /** Credited Total */
+            credited_total: string;
+            /** Refunded Total */
+            refunded_total: string;
+            /** Notes */
+            notes: string | null;
+            /** Warranty Text */
+            warranty_text: string | null;
+            /** Terms Text */
+            terms_text: string | null;
+            /** Bank Text */
+            bank_text: string | null;
+            /** Payment Terms Text */
+            payment_terms_text: string | null;
+            /** Creator Id */
+            creator_id: string | null;
+            /** Refund Due Amount */
+            refund_due_amount: string;
+            settlement_status: components["schemas"]["InvoiceSettlementStatus"];
+            credit_status: components["schemas"]["InvoiceCreditStatus"];
+            /** Base Subtotal Excl Vat */
+            base_subtotal_excl_vat: string;
+            /** Base Line Discount Total */
+            base_line_discount_total: string;
+            /** Base Taxable Amount */
+            base_taxable_amount: string;
+            /** Base Vat Total */
+            base_vat_total: string;
+            /** Base Total Incl Vat */
+            base_total_incl_vat: string;
+            /** Base Due Amount */
+            base_due_amount: string;
+            /** Base Payable Before Payments */
+            base_payable_before_payments: string;
+            /** Base Incoming Payment Total */
+            base_incoming_payment_total: string;
+            /** Base Credited Total */
+            base_credited_total: string;
+            /** Base Refunded Total */
+            base_refunded_total: string;
+            /** Base Refund Due Amount */
+            base_refund_due_amount: string;
+            party_snapshot: components["schemas"]["InvoiceRevisionPartySnapshot"] | null;
+            /** Lines */
+            lines: components["schemas"]["InvoiceRevisionLineSnapshot"][];
+            /** Taxes */
+            taxes: components["schemas"]["InvoiceRevisionTaxSnapshot"][];
+        };
+        /** InvoiceRevisionEligibilityRead */
+        InvoiceRevisionEligibilityRead: {
+            /** Available */
+            available: boolean;
+            /** Reason Code */
+            reason_code?: string | null;
+        };
+        /** InvoiceRevisionLineSnapshot */
+        InvoiceRevisionLineSnapshot: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Product Id */
+            product_id: string | null;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+            /** Quantity */
+            quantity: string;
+            /** Unit Id */
+            unit_id: string | null;
+            /** Unit Name */
+            unit_name: string | null;
+            /** Unit Price */
+            unit_price: string;
+            discount_type: components["schemas"]["DiscountType"];
+            /** Discount Value */
+            discount_value: string;
+            /** Vat Rate Id */
+            vat_rate_id: string | null;
+            /** Vat Rate Label */
+            vat_rate_label: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent: string | null;
+            /** Subtotal Excl Vat */
+            subtotal_excl_vat: string;
+            /** Subtotal Incl Vat */
+            subtotal_incl_vat: string;
+            /** Line Discount Amount */
+            line_discount_amount: string;
+            /** Document Discount Share */
+            document_discount_share: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Total */
+            vat_total: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            /** Line Taxes */
+            line_taxes: components["schemas"]["InvoiceRevisionLineTaxSnapshot"][];
+        };
+        /** InvoiceRevisionLineTaxSnapshot */
+        InvoiceRevisionLineTaxSnapshot: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Effective Vat Percent */
+            effective_vat_percent: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Tax Amount */
+            tax_amount: string;
+        };
+        /** InvoiceRevisionListRead */
+        InvoiceRevisionListRead: {
+            /** Items */
+            items: components["schemas"]["InvoiceRevisionRead"][];
+            /** Total */
+            total: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset?: number;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit?: number;
+        };
+        /** InvoiceRevisionPartySnapshot */
+        InvoiceRevisionPartySnapshot: {
+            /** Provenance */
+            provenance: string;
+            /** Seller Name */
+            seller_name: string;
+            /** Seller Legal Name */
+            seller_legal_name: string | null;
+            /** Seller Vat Id */
+            seller_vat_id: string | null;
+            /** Seller Coc Number */
+            seller_coc_number: string | null;
+            /** Seller Email */
+            seller_email: string | null;
+            /** Seller Phone */
+            seller_phone: string | null;
+            seller_address: components["schemas"]["InvoiceRevisionAddressSnapshot"];
+            /** Buyer Name */
+            buyer_name: string;
+            /** Buyer Company Name */
+            buyer_company_name: string | null;
+            /** Buyer Contact Name */
+            buyer_contact_name: string | null;
+            /** Buyer Vat Id */
+            buyer_vat_id: string | null;
+            /** Buyer Email */
+            buyer_email: string | null;
+            /** Buyer Phone */
+            buyer_phone: string | null;
+            buyer_address: components["schemas"]["InvoiceRevisionAddressSnapshot"];
+            /** Locale */
+            locale: string;
+            /** Logo Id */
+            logo_id: string | null;
+        };
+        /** InvoiceRevisionRead */
+        InvoiceRevisionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Invoice Id
+             * Format: uuid
+             */
+            invoice_id: string;
+            /** Revision Order */
+            revision_order: number;
+            /** Actor User Id */
+            actor_user_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Reason */
+            reason: string;
+            /** Undelivered Confirmed */
+            undelivered_confirmed: boolean;
+            before_snapshot: components["schemas"]["InvoiceBusinessSnapshot"];
+            after_snapshot: components["schemas"]["InvoiceBusinessSnapshot"];
+        };
+        /** InvoiceRevisionTaxSnapshot */
+        InvoiceRevisionTaxSnapshot: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Effective Vat Percent */
+            effective_vat_percent: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Tax Amount */
+            tax_amount: string;
         };
         /**
          * InvoiceSettlementStatus
@@ -12287,6 +12702,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_invoice_revisions_endpoint_api_v1_invoices__invoice_id__revisions_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRevisionListRead"];
+                };
             };
             /** @description Validation Error */
             422: {

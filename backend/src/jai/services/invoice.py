@@ -1391,7 +1391,11 @@ async def get_invoice(
     inv = result.scalar_one_or_none()
     if inv is None:
         return None
-    return await _load_invoice_read(session, inv)
+    read = await _load_invoice_read(session, inv)
+    from jai.services.invoice_revision import get_revision_eligibility
+
+    eligibility = await get_revision_eligibility(session, inv, company_id)
+    return read.model_copy(update={"revision_eligibility": eligibility})
 
 
 async def update_invoice(

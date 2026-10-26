@@ -435,6 +435,83 @@ class TestMigrations:
         )
         assert _run_alembic("upgrade", "head", url=self.url).returncode == 0
 
+    def test_0045_revision_storage_downgrade_upgrade_preserves_business_rows(self) -> None:
+        """SI2 storage is additive and its isolated downgrade does not rewrite invoices."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_si2_revision_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        try:
+            assert _run_alembic("upgrade", "head", url=isolated_url).returncode == 0
+            to_0044 = _run_alembic("downgrade", "0044", url=isolated_url)
+            assert to_0044.returncode == 0, to_0044.stderr
+            sentinel = _insert_0028_downgrade_sentinel(
+                isolated_url, quote_provenance=False, payment_tax=True
+            )
+            before = _query(
+                isolated_url,
+                "SELECT invoice_number, sequence_number, total_incl_vat, due_amount "
+                "FROM invoice WHERE id=:invoice_id",
+                {"invoice_id": sentinel["invoice_id"]},
+                company_id=sentinel["company_id"],
+            )
+            production_upgrade = _run_alembic("upgrade", "head", url=isolated_url)
+            assert production_upgrade.returncode == 0, production_upgrade.stderr
+            assert _query(
+                isolated_url,
+                "SELECT to_regclass('public.invoice_revision') AS table_name",
+            ) == [{"table_name": "invoice_revision"}]
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT invoice_number, sequence_number, total_incl_vat, due_amount "
+                    "FROM invoice WHERE id=:invoice_id",
+                    {"invoice_id": sentinel["invoice_id"]},
+                    company_id=sentinel["company_id"],
+                )
+                == before
+            )
+            downgrade = _run_alembic("downgrade", "0044", url=isolated_url)
+            assert downgrade.returncode == 0, downgrade.stderr
+            assert _query(
+                isolated_url,
+                "SELECT to_regclass('public.invoice_revision') AS table_name",
+            ) == [{"table_name": None}]
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT invoice_number, sequence_number, total_incl_vat, due_amount "
+                    "FROM invoice WHERE id=:invoice_id",
+                    {"invoice_id": sentinel["invoice_id"]},
+                    company_id=sentinel["company_id"],
+                )
+                == before
+            )
+            upgrade = _run_alembic("upgrade", "head", url=isolated_url)
+            assert upgrade.returncode == 0, upgrade.stderr
+            assert _query(
+                isolated_url,
+                "SELECT to_regclass('public.invoice_revision') AS table_name",
+            ) == [{"table_name": "invoice_revision"}]
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT invoice_number, sequence_number, total_incl_vat, due_amount "
+                    "FROM invoice WHERE id=:invoice_id",
+                    {"invoice_id": sentinel["invoice_id"]},
+                    company_id=sentinel["company_id"],
+                )
+                == before
+            )
+        finally:
+            _drop_database(isolated_url)
+        assert _run_alembic("upgrade", "head", url=self.url).returncode == 0
+
     def test_0042_upload_enum_upgrade_and_non_destructive_downgrade_posture(self) -> None:
         """UPLOAD is additive, and downgrade deliberately keeps the enum label."""
         assert _run_alembic("downgrade", "base", url=self.url).returncode == 0

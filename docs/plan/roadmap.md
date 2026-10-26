@@ -2,7 +2,7 @@
 
 > 🌐 **English** · [中文](roadmap_zh.md)
 
-> **Current scheduling (2026-10-26)**: M15 remains in development but is paused, with its work preserved on `wip/m15-agent-accounting-paused`, outside `main`. No milestone is currently active. SI1 was accepted on the recorded representative walkthrough scope on 2026-10-25. The author agreed the [SI2 implementation plan](improvements/SI2.md) on 2026-10-26: five atomic steps for audited revision of undelivered, unpaid Standard Invoices; implementation has not started. Small improvements are separately numbered and do not resume M15.
+> **Current scheduling (2026-10-26)**: M15 remains in development but is paused, with its work preserved on `wip/m15-agent-accounting-paused`, outside `main`. No milestone is currently active. SI1 was accepted on the recorded representative walkthrough scope on 2026-10-25. The author agreed the [SI2 implementation plan](improvements/SI2.md) on 2026-10-26: five atomic steps for audited revision of undelivered, unpaid Standard Invoices; orchestrated implementation is in progress, with author acceptance pending. Small improvements are separately numbered and do not resume M15.
 
 > **What this is**: A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the planned receipt-inbox and agent-accounting follow-ons **M14–M15**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
 >
@@ -279,7 +279,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 ## 4.si Small improvements (separate from milestone numbering)
 
 - **SI1 · Document ordering, Quote duplication and Sent copies**: design agreed on 2026-10-25; all four implementation steps, automated gates and independent blind reviews are complete, and the author accepted the recorded representative walkthrough scope on 2026-10-25. The [implementation plan](improvements/SI1.md) follows the milestone format with four atomic steps, contracts, migration notes, review points and acceptance checks. Reuse existing line-order persistence and rounding; duplicate Quotes into new independently numbered drafts; optionally save all new outgoing messages and attachments to the provider's Sent mailbox through IMAP. M15 remains paused.
-- **SI2 · Revising undelivered Standard Invoices**: design agreed on 2026-10-26; implementation not started. The [implementation plan](improvements/SI2.md) defines five atomic steps covering audit/eligibility, snapshot-preserving preview, transactional save, editor/history and regression closure. Retain SENT and the original number; allow revision only before delivery/payment and without dependent correction/settlement chains. Delivered financial changes use existing correction workflows. Reuse existing T&C content blocks; no new Dictionary template feature. M15 remains paused.
+- **SI2 · Revising undelivered Standard Invoices**: design agreed on 2026-10-26; orchestrated implementation is in progress, with author acceptance pending. The [implementation plan](improvements/SI2.md) defines five atomic steps covering audit/eligibility, snapshot-preserving preview, transactional save, editor/history and regression closure. Retain SENT and the original number; allow revision only before delivery/payment and without dependent correction/settlement chains. Delivered financial changes use existing correction workflows. Reuse existing T&C content blocks; no new Dictionary template feature. M15 remains paused.
 - **Deferred**: product-manual PDF management and checkboxes for choosing extra quote attachments need a separately designed future milestone. SI1 reserves no schema or milestone number for it.
 
 ---
@@ -418,6 +418,6 @@ Separately numbered improvements:
 | Improvement | Content | Status |
 | --- | --- | --- |
 | SI1 | Document ordering, Quote duplication and server-side Sent copies | 🟢 Done (2026-10-25; four steps and independent blind reviews complete; Quote action refinement accepted; representative author walkthrough accepted with skipped paths recorded); see [implementation plan](improvements/SI1.md) |
-| SI2 | Audited revision of undelivered, unpaid Standard Invoices | ⬜ Not started (design agreed 2026-10-26; five atomic steps); see [implementation plan](improvements/SI2.md) |
+| SI2 | Audited revision of undelivered, unpaid Standard Invoices | 🟡 In progress (Step 1 automated gates and independent review complete; Steps 2–5 and author acceptance pending); see [implementation plan](improvements/SI2.md) |
 
 > Legend: ⬜ Not started | 🟡 In progress | 🟢 Done (deployment smoke test passed) | ⏸️ In development but paused (not the active milestone)

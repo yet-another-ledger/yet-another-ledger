@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import pytest
 
 from jai.models._enums import InvoiceDocumentKind, InvoiceStatus, QuoteSettlementMode
-from jai.services.document_actions import credit_note_eligibility, followup_eligibility
+from jai.services.document_actions import (
+    credit_note_eligibility,
+    followup_eligibility,
+    invoice_revision_eligibility,
+)
 
 
 def _invoice(
@@ -73,3 +77,35 @@ def test_draft_credit_followup_uses_locked_command_code() -> None:
         "CREDIT_NOT_ISSUED",
         "CREDIT_NOT_ISSUED",
     )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "available", "reason"),
+    [
+        ({}, True, None),
+        ({"document_kind": InvoiceDocumentKind.ADVANCE}, False, "REVISION_KIND_UNSUPPORTED"),
+        ({"status": InvoiceStatus.DRAFT}, False, "REVISION_STATUS_UNSUPPORTED"),
+        (
+            {"settlement_mode": QuoteSettlementMode.RECEIPT_ONLY},
+            False,
+            "REVISION_SETTLEMENT_UNSUPPORTED",
+        ),
+        ({"has_effective_payment": True}, False, "REVISION_HAS_PAYMENT"),
+        ({"has_successful_email": True}, False, "REVISION_ALREADY_DELIVERED"),
+        ({"has_dependent_chain": True}, False, "REVISION_HAS_DEPENDENCIES"),
+        ({"has_receipt_only_provenance": True}, False, "REVISION_RECEIPT_PROVENANCE"),
+    ],
+)
+def test_invoice_revision_predicate_uses_actual_guard_facts(overrides, available, reason) -> None:
+    values = {
+        "document_kind": InvoiceDocumentKind.STANDARD,
+        "status": InvoiceStatus.SENT,
+        "settlement_mode": QuoteSettlementMode.DIRECT_INVOICE,
+        "has_effective_payment": False,
+        "has_successful_email": False,
+        "has_dependent_chain": False,
+        "has_receipt_only_provenance": False,
+    }
+    values.update(overrides)
+    result = invoice_revision_eligibility(**values)
+    assert (result.available, result.reason_code) == (available, reason)

@@ -53,10 +53,7 @@ class FinalAdvanceApplication(Base):
         UUID(as_uuid=True), ForeignKey("invoice.id", ondelete="CASCADE"), nullable=False, index=True
     )
     advance_invoice_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("invoice.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
+        UUID(as_uuid=True), ForeignKey("invoice.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
     advance_invoice_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -228,7 +225,10 @@ class InvoiceCorrection(Base):
         UUID(as_uuid=True), ForeignKey("invoice.id", ondelete="CASCADE"), nullable=False, index=True
     )
     source_invoice_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("invoice.id", ondelete="RESTRICT"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("invoice.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     # Preserve whether the author selected the semantic "full remaining" mode
     # rather than merely selecting every currently visible basis row.  Those
@@ -353,3 +353,37 @@ class DocumentChainEvent(Base):
         server_default=text("nextval('document_chain_event_order_seq')"),
     )
     metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class InvoiceRevision(Base):
+    """Append-only, typed business snapshots for an actual Invoice revision."""
+
+    __tablename__ = "invoice_revision"
+    __table_args__ = (UniqueConstraint("revision_order", name="uq_invoice_revision_order"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("company.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoice.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    revision_order: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("nextval('invoice_revision_order_seq')")
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    undelivered_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    before_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    after_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)

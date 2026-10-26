@@ -1,7 +1,7 @@
 # SI2 · Revising Undelivered Standard Invoices
 > 🌐 **English** · [中文](SI2_zh.md)
 
-> **Status**: Design agreed on 2026-10-26; implementation has not started. SI2 is a separately numbered small improvement, not a milestone. It follows the milestone implementation-plan format. M15 remains paused; SI2 neither depends on nor resumes its development branch.
+> **Status**: Design agreed on 2026-10-26; orchestrated implementation is in progress. Author walkthrough remains pending. SI2 is a separately numbered small improvement, not a milestone. It follows the milestone implementation-plan format. M15 remains paused; SI2 neither depends on nor resumes its development branch.
 
 ## Goals & Scope
 
@@ -124,7 +124,7 @@ Add `invoice_revision` with:
 
 ### Step 1 · Audit foundation and read-only revision eligibility
 
-- **Status**: Not started.
+- **Status**: Automated implementation, full local gates and independent blind review complete (2026-10-26); author walkthrough pending.
 - **Goal**: establish revision storage, history reads and reliable eligibility without enabling revision writes.
 - **Contract**: define snapshot/history/eligibility schemas and stable error codes; expose history reads and detail eligibility; regenerate TS types.
 - **Backend**: add models, migration and history service/API. Extend the existing action-eligibility mechanism with a shared pure predicate supplied with actual payment, successful-mail and related-chain facts. Detail reads remain non-mutating.

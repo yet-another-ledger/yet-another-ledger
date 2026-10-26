@@ -601,6 +601,11 @@ class InvoiceTaxRowRead(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class InvoiceRevisionEligibilityRead(BaseModel):
+    available: bool
+    reason_code: str | None = None
+
+
 class InvoiceRead(BaseModel):
     """Full invoice representation returned by CRUD endpoints."""
 
@@ -691,6 +696,7 @@ class InvoiceRead(BaseModel):
 
     created_at: datetime
     updated_at: datetime
+    revision_eligibility: InvoiceRevisionEligibilityRead | None = None
 
 
 class ProjectCancellationResult(BaseModel):
