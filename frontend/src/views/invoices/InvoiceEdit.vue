@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 import LineOrdering from '../../components/LineOrdering.vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { localDateStr } from '../../utils/date'
 import {
-  useMessage,
+  useMessage, useDialog,
   NButton, NSpace, NInput, NForm, NFormItem, NCard, NSpin, NAlert,
   NDivider, NInputNumber, NSelect, NSwitch, NTag, NDatePicker,
-  NGrid, NGi, NText, NModal, NList, NListItem, NThing, NDropdown, NEmpty,
+  NGrid, NGi, NText, NModal, NList, NListItem, NThing, NDropdown, NEmpty, NCheckbox,
 } from 'naive-ui'
 import { AddOutline, TrashOutline, DocumentTextOutline, DownloadOutline, MailOutline, EyeOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
@@ -19,7 +19,7 @@ import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
 import EmailLogPanel from '../../components/EmailLogPanel.vue'
 import { useInvoicesStore } from '../../stores/invoices'
 import type { InvoicePaymentsResponse } from '../../stores/payments'
-import { get, downloadBlob } from '../../api/http'
+import { ApiError, get, downloadBlob } from '../../api/http'
 import {
   createDocumentChainPaymentChangeHandler,
   useDocumentChainRefresh,
@@ -42,12 +42,15 @@ type DocumentTemplateRead = components['schemas']['DocumentTemplateRead']
 type ContentBlockRead = components['schemas']['ContentBlockRead']
 type NoteTemplateRead = components['schemas']['NoteTemplateRead']
 type EmailLogRead = components['schemas']['EmailLogRead']
+type InvoiceRevisionChanges = components['schemas']['InvoiceRevisionChanges']
+type InvoiceRevisionRead = components['schemas']['InvoiceRevisionRead']
 
 let lineKeyCounter = 0
 function nextLineKey() { return `l${++lineKeyCounter}` }
 
 interface LineRow {
   _key: string
+  _lineId?: string
   product_id: string | null
   name: string
   description: string | null
@@ -58,6 +61,11 @@ interface LineRow {
   discount_type: 'NONE' | 'PERCENTAGE' | 'FIXED'
   discount_value: number
   vat_rate_id: string | null
+  _persistedNumeric?: {
+    quantity: { raw: string; input: number }
+    unit_price: { raw: string; input: number }
+    discount_value: { raw: string; input: number }
+  }
 }
 
 function emptyLine(): LineRow {
@@ -80,11 +88,21 @@ const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 const message = useMessage()
+const dialog = useDialog()
 const store = useInvoicesStore()
 
 const isEdit = ref(false)
 const pageLoading = ref(false)
 const saving = ref(false)
+const revisionMode = ref(false)
+const eligibilityChecking = ref(false)
+const revisionReason = ref('')
+const confirmUndelivered = ref(false)
+const revisionHistory = ref<InvoiceRevisionRead[]>([])
+const historyLoading = ref(false)
+const historyError = ref(false)
+let historyGeneration = 0
+let eligibilityGeneration = 0
 const pageError = ref<string | null>(null)
 const existingInvoice = ref<InvoiceRead | null>(null)
 const {
@@ -114,12 +132,14 @@ const selectedCustomer = computed(() =>
 const referenceNumber = ref<string | null>(null)
 const invoiceDate = ref(localDateStr(new Date()))
 const dueDate = ref<string | null>(null)
+const supplyOrAdvanceDate = ref<string | null>(null)
 const taxMode = ref<'LINE' | 'DOCUMENT'>('LINE')
 const amountsIncludeVat = ref(false)
 const vatTreatmentId = ref<string | null>(null)
 const documentVatRateId = ref<string | null>(null)
 const discountType = ref<'NONE' | 'PERCENTAGE' | 'FIXED'>('NONE')
 const discountValue = ref(0)
+const persistedDocumentDiscount = ref<{ raw: string; input: number } | null>(null)
 const notes = ref<string | null>(null)
 const lines = ref<LineRow[]>([emptyLine()])
 
@@ -171,6 +191,7 @@ const filteredTemplates = computed(() =>
 )
 
 function applyTemplate(template: DocumentTemplateRead) {
+  if (saving.value) return
   lines.value = (template.lines ?? []).map(l => ({
     _key: nextLineKey(),
     product_id: null,
@@ -188,6 +209,7 @@ function applyTemplate(template: DocumentTemplateRead) {
 }
 
 function insertNoteTemplate(body: string) {
+  if (saving.value) return
   notes.value = notes.value ? `${notes.value}\n${body}` : body
   showNoteTemplateModal.value = false
 }
@@ -202,6 +224,7 @@ const contentBlocksByKind = computed(() => {
 })
 
 function selectContentBlock(kind: 'WARRANTY' | 'TERMS' | 'BANK' | 'PAYMENT_TERMS', id: string) {
+  if (saving.value) return
   const block = contentBlocks.value.find(b => b.id === id)
   if (!block) return
   if (kind === 'WARRANTY') warrantyText.value = block.body
@@ -264,16 +287,19 @@ const discountTypeOptions = computed(() => [
 ])
 
 function addLine() {
+  if (saving.value) return
   lines.value.push(emptyLine())
 }
 
 function removeLine(i: number) {
+  if (saving.value) return
   if (lines.value.length > 1) {
     lines.value.splice(i, 1)
   }
 }
 
 function handleProductSelect(i: number, productId: string | null) {
+  if (saving.value) return
   const line = lines.value[i]
   line.product_id = productId
   if (productId) {
@@ -309,6 +335,7 @@ function buildCalculationRequest() {
     customer_id: customerId.value,
     invoice_date: invoiceDate.value,
     due_date: dueDate.value ?? undefined,
+    supply_or_advance_date: supplyOrAdvanceDate.value ?? undefined,
     tax_mode: taxMode.value,
     amounts_include_vat: amountsIncludeVat.value,
     vat_treatment_id: vatTreatmentId.value ?? undefined,
@@ -318,10 +345,184 @@ function buildCalculationRequest() {
   }
 }
 
+function buildRevisionChanges(): InvoiceRevisionChanges | null {
+  const original = existingInvoice.value
+  if (!original) return null
+  const changes: InvoiceRevisionChanges = {}
+  const clearable = (value: unknown) => value === '' ? null : value
+  // Compare raw numeric inputs without calculating invoice amounts.
+  const canonicalRawNumber = (value: unknown): string => {
+    const match = /^([+-]?)(\d+)(?:\.(\d*))?$/.exec(String(value ?? '').trim())
+    if (!match) return String(value ?? '').trim()
+    const integer = match[2]!.replace(/^0+(?=\d)/, '')
+    const fraction = (match[3] ?? '').replace(/0+$/, '')
+    return `${match[1] === '-' && (integer !== '0' || fraction) ? '-' : ''}${integer}${fraction ? `.${fraction}` : ''}`
+  }
+  const sameRawNumber = (left: unknown, right: unknown) => canonicalRawNumber(left) === canonicalRawNumber(right)
+  const rawOrEditedNumber = (value: number, persisted?: { raw: string; input: number }) =>
+    persisted && value === persisted.input ? persisted.raw : canonicalRawNumber(value)
+  const documentDiscountRaw = rawOrEditedNumber(discountValue.value, persistedDocumentDiscount.value ?? undefined)
+  const pairs: Array<[keyof InvoiceRevisionChanges, unknown, unknown]> = [
+    ['invoice_date', original.invoice_date, invoiceDate.value], ['due_date', original.due_date ?? null, dueDate.value],
+    ['supply_or_advance_date', original.supply_or_advance_date ?? null, supplyOrAdvanceDate.value],
+    ['reference_number', original.reference_number ?? null, referenceNumber.value], ['notes', original.notes ?? null, notes.value],
+    ['warranty_text', original.warranty_text ?? null, warrantyText.value], ['terms_text', original.terms_text ?? null, termsText.value],
+    ['bank_text', original.bank_text ?? null, bankText.value], ['payment_terms_text', original.payment_terms_text ?? null, paymentTermsText.value],
+    ['tax_mode', original.tax_mode, taxMode.value], ['amounts_include_vat', original.amounts_include_vat, amountsIncludeVat.value],
+    ['vat_treatment_id', original.vat_treatment_id, vatTreatmentId.value], ['document_vat_rate_id', original.document_vat_rate_id ?? null, documentVatRateId.value],
+    ['discount', { type: original.discount_type, value: String(original.discount_value) }, { type: discountType.value, value: documentDiscountRaw }],
+  ]
+  for (const [key, before, after] of pairs) {
+    const normalized = ['due_date', 'supply_or_advance_date', 'reference_number', 'notes', 'warranty_text', 'terms_text', 'bank_text', 'payment_terms_text', 'vat_treatment_id', 'document_vat_rate_id'].includes(String(key))
+      ? clearable(after) : after
+    const equal = key === 'discount'
+      ? (before as { type: string; value: string }).type === (normalized as { type: string; value: string }).type
+        && sameRawNumber((before as { value: string }).value, (normalized as { value: string }).value)
+      : JSON.stringify(before) === JSON.stringify(normalized)
+    if (!equal) Object.assign(changes, { [key]: normalized })
+  }
+  const originalLines = original.lines ?? []
+  const nextLines = lines.value.filter(l => l.name.trim()).map(l => {
+    const row: components['schemas']['InvoiceRevisionLineInput'] = {
+      name: l.name.trim(), quantity: rawOrEditedNumber(l.quantity, l._persistedNumeric?.quantity), unit_price: rawOrEditedNumber(l.unit_price, l._persistedNumeric?.unit_price),
+      product_id: l.product_id, description: clearable(l.description) as string | null, unit_id: l.unit_id,
+      unit_name: l.unit_name, discount: { type: l.discount_type, value: rawOrEditedNumber(l.discount_value, l._persistedNumeric?.discount_value) }, vat_rate_id: l.vat_rate_id,
+    }
+    if (l._lineId) row.line_id = l._lineId
+    return row
+  })
+  const oldRows = originalLines.map(l => ({
+    id: l.id, product_id: l.product_id ?? null, name: l.name, description: l.description ?? null,
+    quantity: String(l.quantity), unit_id: l.unit_id ?? null, unit_name: l.unit_name ?? null,
+    unit_price: String(l.unit_price), discount_type: l.discount_type, discount_value: String(l.discount_value), vat_rate_id: l.vat_rate_id ?? null,
+  }))
+  const newRows = lines.value.filter(l => l.name.trim()).map(l => ({
+    id: l._lineId ?? null, product_id: l.product_id, name: l.name.trim(), description: l.description,
+    quantity: rawOrEditedNumber(l.quantity, l._persistedNumeric?.quantity), unit_id: l.unit_id, unit_name: l.unit_name,
+    unit_price: rawOrEditedNumber(l.unit_price, l._persistedNumeric?.unit_price), discount_type: l.discount_type,
+    discount_value: rawOrEditedNumber(l.discount_value, l._persistedNumeric?.discount_value), vat_rate_id: l.vat_rate_id,
+  }))
+  if (JSON.stringify(oldRows) !== JSON.stringify(newRows)) changes.lines = nextLines
+  return changes
+}
+
+const revisionChanges = computed(() => revisionMode.value ? buildRevisionChanges() : null)
+const hasRevisionChanges = computed(() => Object.keys(revisionChanges.value ?? {}).length > 0)
+const revisionDirty = computed(() => hasRevisionChanges.value || Boolean(revisionReason.value.trim()) || confirmUndelivered.value)
+function reportPeriod(date: string | null | undefined): string {
+  if (!date) return '—'
+  const [year, month] = date.split('-').map(Number)
+  return `Q${Math.ceil(month / 3)} ${year}`
+}
+const crossesReportPeriod = computed(() => Boolean(revisionMode.value && existingInvoice.value
+  && invoiceDate.value !== existingInvoice.value.invoice_date
+  && reportPeriod(invoiceDate.value) !== reportPeriod(existingInvoice.value.invoice_date)))
+function displayRevisionValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return t('invoices.revision.emptyValue')
+  if (typeof value === 'object') return JSON.stringify(value)
+  if (typeof value === 'boolean') return value ? t('vat.yes') : t('vat.no')
+  return String(value)
+}
+function displayRevisionField(key: string, value: unknown, snapshot?: Record<string, unknown>): string {
+  if (key === 'vat_treatment_id' && typeof value === 'string' && snapshot) {
+    const treatment = snapshot.vat_treatment_snapshot as Record<string, unknown> | undefined
+    const code = snapshot.vat_treatment_code ?? treatment?.code
+    const label = snapshot.vat_treatment_label ?? treatment?.label
+    if (typeof code === 'string' && typeof label === 'string') return `${code} – ${label}`
+  }
+  if (key === 'document_vat_rate_id' && typeof value === 'string' && snapshot) {
+    const taxes = snapshot.taxes ?? snapshot.document_taxes
+    if (Array.isArray(taxes)) {
+      const tax = (taxes as Array<Record<string, unknown>>).find(item => item.vat_rate_id === value)
+      if (tax && typeof tax.vat_rate_label === 'string' && typeof tax.vat_rate_percent === 'string') {
+        return `${tax.vat_rate_label} (${tax.vat_rate_percent}%)`
+      }
+    }
+  }
+  return displayRevisionValue(value)
+}
+const revisionSummary = computed(() => {
+  const changes = revisionChanges.value
+  const original = existingInvoice.value
+  if (!changes || !original) return []
+  const labels: Record<string, string> = {
+    invoice_date: 'invoiceDate', due_date: 'dueDate', supply_or_advance_date: 'supplyDate', reference_number: 'reference', notes: 'notes',
+    warranty_text: 'warranty', terms_text: 'terms', bank_text: 'bank', payment_terms_text: 'paymentTerms',
+    tax_mode: 'taxMode', amounts_include_vat: 'amountsIncludeVat', vat_treatment_id: 'vatTreatment',
+    document_vat_rate_id: 'documentVatRate', discount: 'discount', lines: 'lines',
+  }
+  const before: Record<string, unknown> = {
+    invoice_date: original.invoice_date, due_date: original.due_date, supply_or_advance_date: original.supply_or_advance_date, reference_number: original.reference_number,
+    notes: original.notes, warranty_text: original.warranty_text, terms_text: original.terms_text, bank_text: original.bank_text,
+    payment_terms_text: original.payment_terms_text, tax_mode: original.tax_mode, amounts_include_vat: original.amounts_include_vat,
+    vat_treatment_id: original.vat_treatment_id, document_vat_rate_id: original.document_vat_rate_id,
+    discount: `${original.discount_type} ${original.discount_value}`,
+  }
+  return Object.entries(changes).map(([key, value]) => ({
+    key, label: t(`invoices.revision.field.${labels[key] ?? key}`),
+    before: key === 'lines'
+      ? (original.lines ?? []).map((line, index) => `${index + 1}. ${line.name} · ${line.description ?? t('invoices.revision.emptyValue')} · ${line.quantity} × ${line.unit_price} · ${line.unit_name ?? t('invoices.revision.emptyValue')} · ${t('invoices.revision.field.discount')}: ${line.discount_type} ${line.discount_value} · ${t('invoices.revision.field.vatTreatment')}: ${line.vat_rate_id ?? t('invoices.revision.emptyValue')} · ${t('invoices.revision.lineTotal')}: ${line.total_incl_vat ?? t('invoices.revision.emptyValue')}`).join('; ')
+      : displayRevisionField(key, before[key], original as unknown as Record<string, unknown>),
+    after: key === 'lines'
+      ? (value as components['schemas']['InvoiceRevisionLineInput'][]).map((line, index) => {
+        const currentRows = lines.value.filter(row => row.name.trim())
+        const calc = lineCalcMap.value.get(currentRows[index]?._key ?? '')
+        return `${index + 1}. ${line.name} · ${line.description ?? t('invoices.revision.emptyValue')} · ${line.quantity} × ${line.unit_price} · ${line.unit_name ?? t('invoices.revision.emptyValue')} · ${t('invoices.revision.field.discount')}: ${line.discount?.type ?? 'NONE'} ${line.discount?.value ?? '0'} · ${t('invoices.revision.field.vatTreatment')}: ${line.vat_rate_id ?? t('invoices.revision.emptyValue')} · ${t('invoices.revision.lineTotal')}: ${calc?.total_incl_vat ?? t('invoices.revision.previewPending')}`
+      }).join('; ')
+      : displayRevisionField(key, value, preview.value as unknown as Record<string, unknown> | undefined),
+  }))
+})
+function historyRows(revision: InvoiceRevisionRead) {
+  const before = revision.before_snapshot.invoice as unknown as Record<string, unknown>
+  const after = revision.after_snapshot.invoice as unknown as Record<string, unknown>
+  const fields = ['invoice_date', 'due_date', 'supply_or_advance_date', 'reference_number', 'notes', 'warranty_text',
+    'terms_text', 'bank_text', 'payment_terms_text', 'tax_mode', 'amounts_include_vat', 'vat_treatment_id',
+    'vat_treatment_code', 'vat_treatment_label', 'vat_treatment_effect', 'vat_treatment_requires_icp',
+    'document_vat_rate_id', 'discount_type', 'discount_value', 'document_discount_amount', 'line_discount_total',
+    'subtotal_excl_vat', 'taxable_amount', 'vat_total', 'total_incl_vat', 'due_amount']
+  return fields.filter(key => JSON.stringify(before[key] ?? null) !== JSON.stringify(after[key] ?? null)).map(key => ({
+    key, label: t(`invoices.revision.field.${({
+      invoice_date: 'invoiceDate', due_date: 'dueDate', supply_or_advance_date: 'supplyDate', reference_number: 'reference',
+      warranty_text: 'warranty', terms_text: 'terms', bank_text: 'bank', payment_terms_text: 'paymentTerms',
+      tax_mode: 'taxMode', amounts_include_vat: 'amountsIncludeVat', vat_treatment_id: 'vatTreatment',
+      vat_treatment_code: 'vatTreatmentCode', vat_treatment_label: 'vatTreatmentLabel', vat_treatment_effect: 'vatTreatmentEffect',
+      vat_treatment_requires_icp: 'vatTreatmentIcp', document_vat_rate_id: 'documentVatRate',
+      discount_type: 'discountType', discount_value: 'discount', document_discount_amount: 'documentDiscount',
+      line_discount_total: 'lineDiscount', subtotal_excl_vat: 'subtotal', taxable_amount: 'taxable',
+      vat_total: 'vat', total_incl_vat: 'total', due_amount: 'dueAmount', notes: 'notes',
+    } as Record<string, string>)[key] ?? key}`),
+    before: displayRevisionField(key, before[key], before), after: displayRevisionField(key, after[key], after),
+  }))
+}
+function historyLines(revision: InvoiceRevisionRead, side: 'before_snapshot' | 'after_snapshot') {
+  const snapshot = revision[side].invoice as unknown as Record<string, unknown>
+  const rows = (snapshot.lines ?? []) as Array<Record<string, unknown>>
+  return rows.map((line, index) => {
+    const parts = [
+      `${index + 1}. ${String(line.name ?? '')}`,
+      line.description ? String(line.description) : null,
+      line.unit_name ? String(line.unit_name) : null,
+      `${String(line.quantity ?? '')} × ${String(line.unit_price ?? '')}`,
+      line.discount_type && line.discount_type !== 'NONE' ? `${t('invoices.revision.field.discount')}: ${line.discount_type} ${String(line.discount_value ?? '')}` : null,
+      line.vat_rate_label ? `${t('invoices.revision.field.vatTreatment')}: ${String(line.vat_rate_label)} (${String(line.vat_rate_percent ?? '')}%)` : null,
+      Array.isArray(line.line_taxes) && line.line_taxes.length
+        ? (line.line_taxes as Array<Record<string, unknown>>).map(tax => `${String(tax.vat_rate_label ?? '')} ${String(tax.effective_vat_percent ?? '')}%: ${String(tax.tax_amount ?? '')}`).join(', ')
+        : null,
+      `${t('invoices.revision.lineTotal')}: ${String(line.total_incl_vat ?? '')}`,
+    ].filter(Boolean)
+    return parts.join(' · ')
+  })
+}
+
 let previewTimer: ReturnType<typeof setTimeout> | null = null
 let previewVersion = 0
 // Snapshot the row identities alongside each request; never match results to current indices.
 const lineCalcMap = ref(new Map<string, InvoiceCalculationRead['lines'][number]>())
+const isPersistedReadOnlyInvoice = computed(() => isEdit.value && !revisionMode.value
+  && existingInvoice.value != null && existingInvoice.value.status !== 'DRAFT')
+const displayPreview = computed(() => isPersistedReadOnlyInvoice.value && existingInvoice.value
+  ? existingInvoice.value as unknown as InvoiceCalculationRead
+  : preview.value)
 function schedulePreview() {
   const version = ++previewVersion
   if (previewTimer) clearTimeout(previewTimer)
@@ -329,13 +530,28 @@ function schedulePreview() {
   previewError.value = null
   lineCalcMap.value = new Map()
   previewLoading.value = false
+  if (isPersistedReadOnlyInvoice.value && existingInvoice.value) {
+    preview.value = null
+    const persistedLineCalculations = new Map<string, InvoiceCalculationRead['lines'][number]>()
+    for (const [index, line] of (existingInvoice.value.lines ?? []).entries()) {
+      const key = lines.value[index]?._key
+      if (key) persistedLineCalculations.set(key, line as unknown as InvoiceCalculationRead['lines'][number])
+    }
+    lineCalcMap.value = persistedLineCalculations
+    return
+  }
   previewTimer = setTimeout(async () => {
     const req = buildCalculationRequest()
     const keys = lines.value.filter(l => l.name.trim()).map(l => l._key)
     if (!req) return
     previewLoading.value = true
     try {
-      const result = await store.calculatePreview(req as Parameters<typeof store.calculatePreview>[0])
+      const result = revisionMode.value && existingInvoice.value
+        ? await store.calculateRevision(existingInvoice.value.id, {
+          expected_updated_at: existingInvoice.value.updated_at,
+          changes: buildRevisionChanges() ?? {},
+        })
+        : await store.calculatePreview(req as Parameters<typeof store.calculatePreview>[0])
       if (version !== previewVersion) return
       preview.value = result
       lineCalcMap.value = new Map(result.lines.map((line, i) => [keys[i]!, line]))
@@ -354,8 +570,8 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  [customerId, invoiceDate, taxMode, amountsIncludeVat, vatTreatmentId, documentVatRateId,
-    discountType, discountValue, lines],
+  [customerId, referenceNumber, invoiceDate, dueDate, supplyOrAdvanceDate, taxMode, amountsIncludeVat, vatTreatmentId, documentVatRateId,
+    discountType, discountValue, notes, warrantyText, termsText, bankText, paymentTermsText, lines],
   schedulePreview,
   { deep: true },
 )
@@ -383,6 +599,7 @@ function buildWritePayload(): InvoiceWrite | null {
     reference_number: referenceNumber.value ?? undefined,
     invoice_date: invoiceDate.value,
     due_date: dueDate.value ?? undefined,
+    supply_or_advance_date: supplyOrAdvanceDate.value ?? undefined,
     tax_mode: taxMode.value,
     amounts_include_vat: amountsIncludeVat.value,
     vat_treatment_id: vatTreatmentId.value ?? undefined,
@@ -398,6 +615,10 @@ function buildWritePayload(): InvoiceWrite | null {
 }
 
 async function handleSave() {
+  if (revisionMode.value) {
+    await handleSaveRevision()
+    return
+  }
   // Formal documents intentionally do not share the legacy invoice write
   // contract.  Their dedicated controls in DocumentWorkflowPanel submit raw
   // intent to the kind-specific endpoints.
@@ -424,6 +645,114 @@ async function handleSave() {
   }
 }
 
+function confirmDiscard(): Promise<boolean> {
+  if (!revisionMode.value || !revisionDirty.value) return Promise.resolve(true)
+  return new Promise(resolve => dialog.warning({
+    title: t('invoices.revision.unsavedTitle'), content: t('invoices.revision.unsavedContent'),
+    positiveText: t('invoices.revision.discard'), negativeText: t('invoices.revision.keepEditing'),
+    onPositiveClick: () => resolve(true), onNegativeClick: () => resolve(false), onClose: () => resolve(false),
+  }))
+}
+
+async function cancelRevision(): Promise<void> {
+  if (!await confirmDiscard()) return
+  revisionMode.value = false
+  revisionReason.value = ''
+  confirmUndelivered.value = false
+  if (existingInvoice.value) populateFromInvoice(existingInvoice.value)
+  schedulePreview()
+}
+
+async function enterRevision(): Promise<void> {
+  const current = existingInvoice.value
+  if (!current?.revision_eligibility?.available || revisionMode.value || eligibilityChecking.value || saving.value) return
+  const context = ++eligibilityGeneration
+  const invoiceId = current.id
+  eligibilityChecking.value = true
+  try {
+    const fresh = await store.fetchInvoice(invoiceId)
+    if (context !== eligibilityGeneration || existingInvoice.value?.id !== invoiceId || route.params.id !== invoiceId) return
+    populateFromInvoice(fresh)
+    if (!fresh.revision_eligibility?.available) {
+      message.warning(t('invoices.revision.noLongerEligible'))
+      return
+    }
+    revisionMode.value = true
+  } catch (e: unknown) {
+    if (context === eligibilityGeneration && existingInvoice.value?.id === invoiceId && route.params.id === invoiceId) {
+      message.error(e instanceof Error ? e.message : t('invoices.revision.eligibilityFailed'))
+    }
+    return
+  } finally {
+    if (context === eligibilityGeneration) eligibilityChecking.value = false
+  }
+  revisionReason.value = ''
+  confirmUndelivered.value = false
+  schedulePreview()
+}
+
+async function handleSaveRevision(): Promise<void> {
+  const inv = existingInvoice.value
+  const changes = buildRevisionChanges()
+  if (!inv || !changes || !hasRevisionChanges.value || saving.value || !revisionReason.value.trim() || !confirmUndelivered.value) return
+  saving.value = true
+  showTemplateModal.value = false
+  showNoteTemplateModal.value = false
+  const saveContext = ++saveGeneration
+  const invoiceId = inv.id
+  try {
+    const updated = await store.saveRevision(invoiceId, {
+      expected_updated_at: inv.updated_at,
+      changes,
+      reason: revisionReason.value.trim(),
+      confirm_not_delivered: true,
+    })
+    if (saveContext !== saveGeneration || existingInvoice.value?.id !== invoiceId || route.params.id !== invoiceId) return
+    populateFromInvoice(updated)
+    revisionMode.value = false
+    revisionReason.value = ''
+    confirmUndelivered.value = false
+    message.success(t('invoices.revision.saved'))
+    await loadRevisionHistory()
+  } catch (e: unknown) {
+    if (saveContext !== saveGeneration || existingInvoice.value?.id !== invoiceId || route.params.id !== invoiceId) return
+    message.error(e instanceof ApiError && e.status === 409
+      ? t('invoices.revision.conflict')
+      : e instanceof Error ? e.message : t('invoices.revision.saveFailed'))
+  } finally {
+    if (saveContext === saveGeneration && existingInvoice.value?.id === invoiceId && route.params.id === invoiceId) saving.value = false
+  }
+}
+
+async function loadRevisionHistory(): Promise<void> {
+  const id = existingInvoice.value?.id
+  if (!id) return
+  const generation = ++historyGeneration
+  historyLoading.value = true
+  historyError.value = false
+  try {
+    const allItems: InvoiceRevisionRead[] = []
+    let offset = 0
+    let total = 0
+    do {
+      const result = await store.fetchRevisions(id, { offset, limit: 100 })
+      if (generation !== historyGeneration || existingInvoice.value?.id !== id) return
+      allItems.push(...result.items)
+      total = result.total
+      offset += result.items.length
+      if (!result.items.length) break
+    } while (offset < total)
+    if (generation === historyGeneration && existingInvoice.value?.id === id) revisionHistory.value = allItems
+  } catch {
+    if (generation === historyGeneration && existingInvoice.value?.id === id) historyError.value = true
+  } finally {
+    if (generation === historyGeneration) historyLoading.value = false
+  }
+}
+
+onBeforeRouteLeave(async () => await confirmDiscard())
+onBeforeRouteUpdate(async (to, from) => to.params.id === from.params.id ? true : await confirmDiscard())
+
 async function handleStatusTransition(newStatus: 'SENT' | 'CANCELLED' | 'DRAFT') {
   if (!existingInvoice.value) return
   try {
@@ -443,12 +772,14 @@ function populateFromInvoice(inv: InvoiceRead) {
   referenceNumber.value = inv.reference_number ?? null
   invoiceDate.value = inv.invoice_date
   dueDate.value = inv.due_date ?? null
+  supplyOrAdvanceDate.value = inv.supply_or_advance_date ?? null
   taxMode.value = inv.tax_mode
   amountsIncludeVat.value = inv.amounts_include_vat
   vatTreatmentId.value = inv.vat_treatment_id
   documentVatRateId.value = inv.document_vat_rate_id ?? null
   discountType.value = inv.discount_type
   discountValue.value = Number(inv.discount_value)
+  persistedDocumentDiscount.value = { raw: String(inv.discount_value), input: Number(inv.discount_value) }
   notes.value = inv.notes ?? null
   warrantyText.value = inv.warranty_text ?? null
   termsText.value = inv.terms_text ?? null
@@ -456,6 +787,7 @@ function populateFromInvoice(inv: InvoiceRead) {
   paymentTermsText.value = inv.payment_terms_text ?? null
   lines.value = (inv.lines ?? []).map(l => ({
     _key: nextLineKey(),
+    _lineId: l.id,
     product_id: l.product_id ?? null,
     name: l.name,
     description: l.description ?? null,
@@ -466,19 +798,35 @@ function populateFromInvoice(inv: InvoiceRead) {
     discount_type: l.discount_type as 'NONE' | 'PERCENTAGE' | 'FIXED',
     discount_value: Number(l.discount_value),
     vat_rate_id: l.vat_rate_id ?? null,
+    _persistedNumeric: {
+      quantity: { raw: String(l.quantity), input: Number(l.quantity) },
+      unit_price: { raw: String(l.unit_price), input: Number(l.unit_price) },
+      discount_value: { raw: String(l.discount_value), input: Number(l.discount_value) },
+    },
   }))
 }
 
 let loadGeneration = 0
+let saveGeneration = 0
 
 function resetInvoiceContext(): void {
+  ++eligibilityGeneration
+  eligibilityChecking.value = false
+  ++saveGeneration
+  saving.value = false
   ++previewVersion
+  ++historyGeneration
   if (previewTimer) clearTimeout(previewTimer)
   previewLoading.value = false
   lineCalcMap.value = new Map()
   resetDocumentChain()
   pageLoading.value = false
   existingInvoice.value = null
+  persistedDocumentDiscount.value = null
+  revisionMode.value = false
+  revisionHistory.value = []
+  historyLoading.value = false
+  historyError.value = false
   preview.value = null
   previewError.value = null
   pageError.value = null
@@ -502,6 +850,7 @@ async function loadPage(id = route.params.id as string | undefined): Promise<voi
       const inv = await store.fetchInvoice(id)
       if (generation !== loadGeneration) return
       populateFromInvoice(inv)
+      if (inv.document_kind === 'STANDARD') void loadRevisionHistory()
       await loadInitialDocumentChain()
       if (generation !== loadGeneration) return
       // Ensure the selected customer is in the list even if not returned by the initial search.
@@ -528,9 +877,11 @@ const routeEntityReload = useRouteEntityReload(routeEntityId, resetInvoiceContex
 onMounted(() => { void routeEntityReload.reload() })
 
 const isReadOnly = computed(() =>
-  (existingInvoice.value?.status !== 'DRAFT' && isEdit.value)
+  (revisionMode.value && saving.value)
+  || (!revisionMode.value && existingInvoice.value?.status !== 'DRAFT' && isEdit.value)
   || (isEdit.value && existingInvoice.value?.document_kind !== 'STANDARD' && existingInvoice.value?.document_kind !== 'FINAL'),
 )
+const revisionLocked = computed(() => revisionMode.value)
 // D7: a Final keeps its accepted Quote party/currency/treatment boundary.
 // Currency has no generic editor in this screen; lock the remaining mutable
 // selectors up front instead of relying on a rejected PUT.
@@ -541,7 +892,7 @@ const isFinalDraft = computed(() => isEdit.value
 // Show payment panel only when editing an existing invoice that is SENT or COMPLETED
 const showPaymentPanel = computed(() =>
   isEdit.value &&
-  existingInvoice.value !== null &&
+  existingInvoice.value != null &&
   existingInvoice.value.document_kind !== 'CREDIT_NOTE' &&
   (existingInvoice.value.status === 'SENT' || existingInvoice.value.status === 'COMPLETED' || existingInvoice.value.status === 'DRAFT' || existingInvoice.value.status === 'CANCELLED'),
 )
@@ -719,10 +1070,14 @@ function handleReceiptSent(log: EmailLogRead) {
                 </n-dropdown>
 
                 <!-- Send email button -->
-                <n-button size="small" type="info" @click="openSendDialog">
+                <n-button size="small" type="info" :disabled="revisionMode" @click="openSendDialog">
                   <template #icon><n-icon><MailOutline /></n-icon></template>
                   {{ t('sendDialog.title') }}
                 </n-button>
+                <n-button
+                  v-if="existingInvoice.document_kind === 'STANDARD' && existingInvoice.status === 'SENT' && existingInvoice.revision_eligibility?.available && !revisionMode"
+                  size="small" type="warning" :loading="eligibilityChecking" :disabled="eligibilityChecking" @click="enterRevision"
+                >{{ t('invoices.revision.start') }}</n-button>
 
                 <template v-if="existingInvoice.status === 'DRAFT'">
                   <n-button size="small" type="info" @click="handleStatusTransition('SENT')">
@@ -745,6 +1100,19 @@ function handleReceiptSent(log: EmailLogRead) {
               <n-button text type="primary" :loading="chainRefreshing" :disabled="chainRefreshing" @click="retryInitialDocumentChain">
                 {{ t('chain.retry') }}
               </n-button>
+            </n-alert>
+
+            <n-alert
+              v-if="existingInvoice?.document_kind === 'STANDARD' && existingInvoice.status === 'SENT' && !revisionMode && !existingInvoice.revision_eligibility?.available"
+              type="info" style="margin-bottom: 16px"
+            >
+              {{ t('invoices.revision.deliveredBoundary') }}
+              <div>{{ t('invoices.revision.correctionPaths') }}</div>
+            </n-alert>
+
+            <n-alert v-if="revisionMode" type="warning" style="margin-bottom: 16px">
+              {{ t('invoices.revision.modeNotice') }}
+              <div>{{ t('invoices.revision.deliveryCheck') }}</div>
             </n-alert>
             <n-alert v-if="paymentRefreshError" type="warning" style="margin-bottom: 16px">
               {{ t('chain.paymentRefreshFailed') }}
@@ -773,7 +1141,7 @@ function handleReceiptSent(log: EmailLogRead) {
               {{ pageError }}
             </n-alert>
 
-            <n-form v-if="!isEdit || existingInvoice?.document_kind === 'STANDARD' || existingInvoice?.document_kind === 'FINAL'" label-placement="top" :disabled="isReadOnly">
+            <n-form v-if="!isEdit || existingInvoice?.document_kind === 'STANDARD' || existingInvoice?.document_kind === 'FINAL'" data-testid="invoice-edit-form" label-placement="top" :disabled="isReadOnly">
 
               <!-- Invoice header -->
               <n-card :title="t('invoices.headerSection')" style="margin-bottom: 16px">
@@ -782,9 +1150,9 @@ function handleReceiptSent(log: EmailLogRead) {
                     <n-form-item :label="t('invoices.customer')" required>
                       <n-select
                         v-model:value="customerId"
-                        :disabled="isFinalDraft"
+                        :disabled="isFinalDraft || revisionLocked"
                         filterable
-                        clearable
+                        :clearable="!isReadOnly && !revisionLocked && !isFinalDraft"
                         remote
                         :options="customerOptions"
                         :placeholder="t('invoices.customerSearch')"
@@ -804,7 +1172,7 @@ function handleReceiptSent(log: EmailLogRead) {
                         v-model:formatted-value="invoiceDate"
                         value-format="yyyy-MM-dd"
                         type="date"
-                        clearable
+                        :clearable="!isReadOnly"
                         style="width: 100%"
                       />
                     </n-form-item>
@@ -813,6 +1181,17 @@ function handleReceiptSent(log: EmailLogRead) {
                     <n-form-item :label="t('invoices.dueDate')">
                       <n-date-picker
                         v-model:formatted-value="dueDate"
+                        value-format="yyyy-MM-dd"
+                        type="date"
+                        clearable
+                        style="width: 100%"
+                      />
+                    </n-form-item>
+                  </n-gi>
+                  <n-gi>
+                    <n-form-item :label="t('invoices.revision.field.supplyDate')">
+                      <n-date-picker
+                        v-model:formatted-value="supplyOrAdvanceDate"
                         value-format="yyyy-MM-dd"
                         type="date"
                         clearable
@@ -846,10 +1225,10 @@ function handleReceiptSent(log: EmailLogRead) {
                     <n-form-item :label="t('invoices.vatTreatment')">
                       <n-select
                         v-model:value="vatTreatmentId"
-                        :disabled="isFinalDraft"
+                        :disabled="isFinalDraft || isReadOnly"
                         :options="vatTreatmentOptions"
                         :placeholder="t('invoices.vatTreatmentAuto')"
-                        clearable
+                        :clearable="!isReadOnly"
                       />
                     </n-form-item>
                   </n-gi>
@@ -859,7 +1238,7 @@ function handleReceiptSent(log: EmailLogRead) {
                         v-model:value="documentVatRateId"
                         :options="vatRateOptions"
                         :placeholder="t('invoices.selectVatRate')"
-                        clearable
+                        :clearable="!isReadOnly"
                       />
                     </n-form-item>
                   </n-gi>
@@ -991,7 +1370,7 @@ function handleReceiptSent(log: EmailLogRead) {
                         <n-select
                           :value="line.product_id"
                           filterable
-                          clearable
+                          :clearable="!isReadOnly"
                           remote
                           :options="productOptions.map(p => ({ label: p.name, value: p.id }))"
                           :placeholder="t('invoices.productSearch')"
@@ -1071,7 +1450,7 @@ function handleReceiptSent(log: EmailLogRead) {
                           v-model:value="line.vat_rate_id"
                           :options="vatRateOptions"
                           :placeholder="t('invoices.selectVatRate')"
-                          clearable
+                          :clearable="!isReadOnly"
                           size="small"
                         />
                       </n-form-item>
@@ -1099,41 +1478,84 @@ function handleReceiptSent(log: EmailLogRead) {
                   <n-spin />
                 </div>
                 <n-alert v-else-if="previewError" type="error">{{ previewError }}</n-alert>
-                <div v-else-if="preview" class="totals-table">
+                <div v-else-if="displayPreview" class="totals-table">
                   <div class="total-row">
                     <span>{{ t('invoices.subtotalExclVat') }}</span>
-                    <n-text>{{ fmtMoney(preview.subtotal_excl_vat) }} </n-text>
+                    <n-text>{{ fmtMoney(displayPreview.subtotal_excl_vat) }} </n-text>
                   </div>
-                  <div v-if="Number(preview.line_discount_total) !== 0" class="total-row">
+                  <div v-if="Number(displayPreview.line_discount_total) !== 0" class="total-row">
                     <span>{{ t('invoices.lineDiscountTotal') }}</span>
-                    <n-text>-{{ fmtMoney(preview.line_discount_total) }}</n-text>
+                    <n-text>-{{ fmtMoney(displayPreview.line_discount_total) }}</n-text>
                   </div>
-                  <div v-if="Number(preview.document_discount_amount) !== 0" class="total-row">
+                  <div v-if="Number(displayPreview.document_discount_amount) !== 0" class="total-row">
                     <span>{{ t('invoices.documentDiscountAmount') }}</span>
-                    <n-text>-{{ fmtMoney(preview.document_discount_amount) }}</n-text>
+                    <n-text>-{{ fmtMoney(displayPreview.document_discount_amount) }}</n-text>
                   </div>
                   <div class="total-row">
                     <span>{{ t('invoices.taxableAmount') }}</span>
-                    <n-text>{{ fmtMoney(preview.taxable_amount) }}</n-text>
+                    <n-text>{{ fmtMoney(displayPreview.taxable_amount) }}</n-text>
                   </div>
                   <div class="total-row">
                     <span>{{ t('invoices.vatTotal') }}</span>
-                    <n-text>{{ fmtMoney(preview.vat_total) }}</n-text>
+                    <n-text>{{ fmtMoney(displayPreview.vat_total) }}</n-text>
                   </div>
                   <n-divider style="margin: 8px 0" />
                   <div class="total-row total-row--bold">
                     <span>{{ t('invoices.totalInclVat') }}</span>
-                    <n-text strong>{{ fmtMoney(preview.total_incl_vat) }}</n-text>
+                    <n-text strong>{{ fmtMoney(displayPreview.total_incl_vat) }}</n-text>
                   </div>
-                  <div v-if="preview.vat_treatment_snapshot" class="total-row" style="font-size: 12px; color: var(--n-text-color-3)">
+                  <div v-if="displayPreview.vat_treatment_snapshot" class="total-row" style="font-size: 12px; color: var(--n-text-color-3)">
                     <span>{{ t('invoices.vatTreatmentApplied') }}</span>
-                    <span>{{ preview.vat_treatment_snapshot.code }}</span>
+                    <span>{{ displayPreview.vat_treatment_snapshot.code }}</span>
                   </div>
                 </div>
                 <n-text v-else depth="3">{{ t('invoices.totalsPlaceholder') }}</n-text>
               </n-card>
 
             </n-form>
+
+            <n-card v-if="revisionMode && existingInvoice" :title="t('invoices.revision.confirmTitle')" style="margin-bottom: 24px">
+              <div v-if="revisionSummary.length">
+                <div v-for="change in revisionSummary" :key="change.key" class="revision-change">
+                  <strong>{{ change.label }}:</strong> {{ change.before }} → {{ change.after }}
+                </div>
+              </div>
+              <n-text v-else depth="3">{{ t('invoices.revision.noChanges') }}</n-text>
+              <n-alert v-if="crossesReportPeriod" type="warning" style="margin: 12px 0">
+                {{ t('invoices.revision.periodChange', {
+                  oldPeriod: reportPeriod(existingInvoice.invoice_date), newPeriod: reportPeriod(invoiceDate),
+                }) }}
+              </n-alert>
+              <n-form-item :label="t('invoices.revision.reasonLabel')" required>
+                <n-input v-model:value="revisionReason" type="textarea" :autosize="{ minRows: 2 }" :disabled="saving" />
+              </n-form-item>
+              <n-checkbox v-model:checked="confirmUndelivered" :disabled="saving">
+                {{ t('invoices.revision.confirmUndelivered') }}
+              </n-checkbox>
+            </n-card>
+
+            <n-card v-if="isEdit && existingInvoice?.document_kind === 'STANDARD'" :title="t('invoices.revision.historyTitle')" style="margin-bottom: 24px">
+              <n-spin :show="historyLoading">
+                <n-alert v-if="historyError" type="error">
+                  {{ t('invoices.revision.historyFailed') }}
+                  <n-button text type="primary" :disabled="historyLoading" @click="loadRevisionHistory">{{ t('invoices.revision.retry') }}</n-button>
+                </n-alert>
+                <n-empty v-else-if="!historyLoading && !revisionHistory.length" :description="t('invoices.revision.noHistory')" size="small" />
+                <n-card v-for="revision in revisionHistory" :key="revision.id" size="small" style="margin-top: 10px">
+                  <div><strong>{{ t('invoices.revision.revisionNumber', { number: revision.revision_order }) }}</strong> · {{ new Date(revision.created_at).toLocaleString() }} · {{ revision.actor_user_id ?? t('invoices.revision.unknownActor') }}</div>
+                  <div><strong>{{ t('invoices.revision.reasonLabel') }}:</strong> {{ revision.reason }}</div>
+                  <div v-for="row in historyRows(revision)" :key="row.key" class="revision-change">
+                    <strong>{{ row.label }}:</strong> {{ row.before }} → {{ row.after }}
+                  </div>
+                  <div v-if="JSON.stringify(revision.before_snapshot.invoice.lines) !== JSON.stringify(revision.after_snapshot.invoice.lines)" class="revision-lines">
+                    <strong>{{ t('invoices.revision.linesBefore') }}</strong>
+                    <div v-for="line in historyLines(revision, 'before_snapshot')" :key="`b-${line}`">{{ line }}</div>
+                    <strong>{{ t('invoices.revision.linesAfter') }}</strong>
+                    <div v-for="line in historyLines(revision, 'after_snapshot')" :key="`a-${line}`">{{ line }}</div>
+                  </div>
+                </n-card>
+              </n-spin>
+            </n-card>
 
             <!-- Payment panel (only for existing SENT/COMPLETED/DRAFT/CANCELLED invoices – panel guards internally) -->
             <InvoicePaymentPanel
@@ -1162,14 +1584,15 @@ function handleReceiptSent(log: EmailLogRead) {
 
             <!-- Action buttons -->
             <n-space justify="end" style="margin-bottom: 24px">
-              <n-button @click="router.push('/invoices')">{{ t('invoices.backToList') }}</n-button>
+              <n-button v-if="revisionMode" :disabled="saving" @click="cancelRevision">{{ t('invoices.revision.cancel') }}</n-button>
+              <n-button v-else @click="router.push('/invoices')">{{ t('invoices.backToList') }}</n-button>
               <n-button
-                v-if="!isReadOnly"
+                v-if="!isReadOnly || revisionMode"
                 type="primary"
-                :loading="saving"
+                :loading="saving" :disabled="revisionMode && (!hasRevisionChanges || !revisionReason.trim() || !confirmUndelivered || saving)"
                 @click="handleSave"
               >
-                {{ isEdit ? t('invoices.save') : t('invoices.create') }}
+                {{ revisionMode ? t('invoices.revision.save') : isEdit ? t('invoices.save') : t('invoices.create') }}
               </n-button>
             </n-space>
 

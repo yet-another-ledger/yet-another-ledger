@@ -11,6 +11,9 @@ type InvoiceListItem = components['schemas']['InvoiceListItem']
 type InvoiceStatusWrite = components['schemas']['InvoiceStatusWrite']
 type InvoiceCalculationRequest = components['schemas']['InvoiceCalculationRequest']
 type InvoiceCalculationRead = components['schemas']['InvoiceCalculationRead']
+type InvoiceRevisionCalculateRequest = components['schemas']['InvoiceRevisionCalculateRequest']
+type InvoiceRevisionCreate = components['schemas']['InvoiceRevisionCreate']
+type InvoiceRevisionListRead = components['schemas']['InvoiceRevisionListRead']
 type ProductInvoiceOptionListResponse = components['schemas']['ProductInvoiceOptionListResponse']
 type ProductInvoiceOptionRead = components['schemas']['ProductInvoiceOptionRead']
 
@@ -108,6 +111,25 @@ export const useInvoicesStore = defineStore('invoices', () => {
     return await post<InvoiceCalculationRead>('/api/v1/invoices/calculate', data)
   }
 
+  async function calculateRevision(id: string, data: InvoiceRevisionCalculateRequest): Promise<InvoiceCalculationRead> {
+    return await post<InvoiceCalculationRead>(`/api/v1/invoices/${id}/revisions/calculate`, data)
+  }
+
+  async function saveRevision(id: string, data: InvoiceRevisionCreate): Promise<InvoiceRead> {
+    saving.value = true
+    error.value = null
+    try {
+      return await post<InvoiceRead>(`/api/v1/invoices/${id}/revisions`, data)
+    } finally {
+      saving.value = false
+    }
+  }
+
+  async function fetchRevisions(id: string, pagination?: { offset: number; limit: number }): Promise<InvoiceRevisionListRead> {
+    const query = pagination ? `?offset=${pagination.offset}&limit=${pagination.limit}` : ''
+    return await get<InvoiceRevisionListRead>(`/api/v1/invoices/${id}/revisions${query}`)
+  }
+
   async function fetchProductOptions(q?: string): Promise<ProductInvoiceOptionRead[]> {
     const params = new URLSearchParams()
     if (q) params.set('q', q)
@@ -141,6 +163,9 @@ export const useInvoicesStore = defineStore('invoices', () => {
     deleteInvoice,
     transitionStatus,
     calculatePreview,
+    calculateRevision,
+    saveRevision,
+    fetchRevisions,
     fetchProductOptions,
   }
 })

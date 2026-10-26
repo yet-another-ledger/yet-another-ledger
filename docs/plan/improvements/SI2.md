@@ -166,7 +166,7 @@ Add `invoice_revision` with:
 
 ### Step 4 · Revision editor and history workflow
 
-- **Status**: Not started; depends on Steps 1–3.
+- **Status**: Automated implementation, full local gates and independent blind review complete (2026-10-27); author walkthrough pending.
 - **Goal**: complete revision in the existing Invoice workspace and distinguish it clearly from post-delivery corrections.
 - **Contract**: consume generated eligibility, preview, save and history types; no new calculation logic in Vue.
 - **Backend**: reuse the completed eligibility, calculation, save and history services; no additional business endpoint or calculation algorithm.
