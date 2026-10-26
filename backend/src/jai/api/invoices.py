@@ -46,7 +46,7 @@ from jai.schemas.invoice import (
     InvoiceWrite,
     ProductInvoiceOptionListResponse,
 )
-from jai.schemas.invoice_revision import InvoiceRevisionListRead
+from jai.schemas.invoice_revision import InvoiceRevisionCalculateRequest, InvoiceRevisionListRead
 from jai.services.advance import (
     AdvanceConflictError,
     AdvanceStaleError,
@@ -81,7 +81,12 @@ from jai.services.invoice import (
     transition_status,
     update_invoice,
 )
-from jai.services.invoice_revision import list_invoice_revisions
+from jai.services.invoice_revision import (
+    InvoiceRevisionConflictError,
+    InvoiceRevisionStaleError,
+    calculate_invoice_revision,
+    list_invoice_revisions,
+)
 from jai.services.numbering import NumberSequenceExhaustedError
 from jai.services.pricing import calculate_invoice
 
@@ -469,6 +474,37 @@ async def list_invoice_revisions_endpoint(
         offset=offset,
         limit=limit,
     )
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
+    return result
+
+
+@router.post(
+    "/invoices/{invoice_id}/revisions/calculate", response_model=InvoiceCalculationRead
+)
+async def calculate_invoice_revision_endpoint(
+    invoice_id: uuid.UUID,
+    body: InvoiceRevisionCalculateRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoiceCalculationRead:
+    _owner_only(user)
+    try:
+        result = await calculate_invoice_revision(
+            session, invoice_id=invoice_id, company_id=_require_company_id(user), request=body
+        )
+    except InvoiceRevisionStaleError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail={"code": "STALE_VERSION"}
+        ) from exc
+    except InvoiceRevisionConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail={"code": exc.reason_code}
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
     return result

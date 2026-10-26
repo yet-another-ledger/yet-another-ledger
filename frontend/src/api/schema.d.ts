@@ -1259,6 +1259,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/invoices/{invoice_id}/revisions/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Calculate Invoice Revision Endpoint */
+        post: operations["calculate_invoice_revision_endpoint_api_v1_invoices__invoice_id__revisions_calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices/{invoice_id}/document-chain": {
         parameters: {
             query?: never;
@@ -6464,6 +6481,60 @@ export interface components {
             /** Country Code */
             country_code: string | null;
         };
+        /** InvoiceRevisionCalculateRequest */
+        InvoiceRevisionCalculateRequest: {
+            /**
+             * Expected Updated At
+             * Format: date-time
+             */
+            expected_updated_at: string;
+            changes: components["schemas"]["InvoiceRevisionChanges"];
+        };
+        /**
+         * InvoiceRevisionChanges
+         * @description Closed patch; model_fields_set distinguishes omission from explicit null.
+         */
+        InvoiceRevisionChanges: {
+            /** Invoice Date */
+            invoice_date?: string | null;
+            /** Due Date */
+            due_date?: string | null;
+            /** Supply Or Advance Date */
+            supply_or_advance_date?: string | null;
+            /** Reference Number */
+            reference_number?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Warranty Text */
+            warranty_text?: string | null;
+            /** Terms Text */
+            terms_text?: string | null;
+            /** Bank Text */
+            bank_text?: string | null;
+            /** Payment Terms Text */
+            payment_terms_text?: string | null;
+            tax_mode?: components["schemas"]["InvoiceTaxMode"] | null;
+            /** Amounts Include Vat */
+            amounts_include_vat?: boolean | null;
+            /** Vat Treatment Id */
+            vat_treatment_id?: string | null;
+            /** Document Vat Rate Id */
+            document_vat_rate_id?: string | null;
+            discount?: components["schemas"]["InvoiceRevisionDiscountInput"] | null;
+            /** Lines */
+            lines?: components["schemas"]["InvoiceRevisionLineInput"][] | null;
+        };
+        /** InvoiceRevisionDiscountInput */
+        InvoiceRevisionDiscountInput: {
+            /** @default NONE */
+            type?: components["schemas"]["DiscountType"];
+            /**
+             * Value
+             * @description Discount value. Ignored when type=NONE.
+             * @default 0
+             */
+            value?: number | string;
+        };
         /**
          * InvoiceRevisionDocumentSnapshot
          * @description Frozen business fields, independent from the evolving API read model.
@@ -6604,6 +6675,37 @@ export interface components {
             available: boolean;
             /** Reason Code */
             reason_code?: string | null;
+        };
+        /**
+         * InvoiceRevisionLineInput
+         * @description Raw line input with identity for a retained original row.
+         */
+        InvoiceRevisionLineInput: {
+            /** Product Id */
+            product_id?: string | null;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Quantity
+             * @description Must be > 0.
+             */
+            quantity: number | string;
+            /** Unit Id */
+            unit_id?: string | null;
+            /** Unit Name */
+            unit_name?: string | null;
+            /**
+             * Unit Price
+             * @description Per-unit price (excl or incl VAT depending on flag).
+             */
+            unit_price: number | string;
+            discount?: components["schemas"]["InvoiceRevisionDiscountInput"];
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+            /** Line Id */
+            line_id?: string | null;
         };
         /** InvoiceRevisionLineSnapshot */
         InvoiceRevisionLineSnapshot: {
@@ -12735,6 +12837,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoiceRevisionListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    calculate_invoice_revision_endpoint_api_v1_invoices__invoice_id__revisions_calculate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceRevisionCalculateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceCalculationRead"];
                 };
             };
             /** @description Validation Error */

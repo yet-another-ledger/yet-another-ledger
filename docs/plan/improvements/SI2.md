@@ -136,7 +136,7 @@ Add `invoice_revision` with:
 
 ### Step 2 · Revision preview with preserved tax snapshots
 
-- **Status**: Not started; depends on Step 1.
+- **Status**: Automated implementation, full local gates and independent blind review complete (2026-10-26); author walkthrough pending.
 - **Goal**: preview revisions with the same merge and calculation rules later used by Save.
 - **Contract**: implement `InvoiceRevisionChanges`, original-line identity and `/revisions/calculate`; regenerate types.
 - **Backend**: consistently read the original and merge whitelisted changes. Determine actual field changes: preserve amounts for header/text-only edits, otherwise invoke the existing pricing core.

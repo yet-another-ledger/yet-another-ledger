@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from jai.models._enums import (
     DiscountType,
@@ -18,6 +18,63 @@ from jai.models._enums import (
     InvoiceStatus,
     InvoiceTaxMode,
 )
+from jai.schemas.invoice import DiscountInput, InvoiceLineInput
+
+
+class InvoiceRevisionDiscountInput(DiscountInput):
+    model_config = ConfigDict(extra="forbid")
+
+
+class InvoiceRevisionLineInput(InvoiceLineInput):
+    """Raw line input with identity for a retained original row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    line_id: uuid.UUID | None = None
+    discount: InvoiceRevisionDiscountInput = Field(default_factory=InvoiceRevisionDiscountInput)
+
+
+class InvoiceRevisionChanges(BaseModel):
+    """Closed patch; model_fields_set distinguishes omission from explicit null."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    invoice_date: date | None = None
+    due_date: date | None = None
+    supply_or_advance_date: date | None = None
+    reference_number: str | None = None
+    notes: str | None = None
+    warranty_text: str | None = None
+    terms_text: str | None = None
+    bank_text: str | None = None
+    payment_terms_text: str | None = None
+    tax_mode: InvoiceTaxMode | None = None
+    amounts_include_vat: bool | None = None
+    vat_treatment_id: uuid.UUID | None = None
+    document_vat_rate_id: uuid.UUID | None = None
+    discount: InvoiceRevisionDiscountInput | None = None
+    lines: list[InvoiceRevisionLineInput] | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_patch_nulls(self) -> InvoiceRevisionChanges:
+        for name in (
+            "invoice_date",
+            "tax_mode",
+            "amounts_include_vat",
+            "vat_treatment_id",
+            "discount",
+            "lines",
+        ):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
+class InvoiceRevisionCalculateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_updated_at: datetime
+    changes: InvoiceRevisionChanges
 
 
 class InvoiceCreditBasisSnapshot(BaseModel):
