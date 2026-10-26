@@ -13,6 +13,7 @@ from jai.models._enums import DiscountType, InvoiceTaxMode
 from jai.schemas.invoice_revision import (
     InvoiceRevisionCalculateRequest,
     InvoiceRevisionChanges,
+    InvoiceRevisionCreate,
 )
 
 
@@ -81,3 +82,29 @@ def test_calculate_request_keeps_expected_version_and_exact_decimal_inputs() -> 
     assert request.changes.lines is not None
     assert request.changes.lines[0].quantity == Decimal("1.250")
     assert request.changes.lines[0].unit_price == Decimal("1.2345")
+
+
+@pytest.mark.parametrize("confirmation", [False, 1, "true"])
+def test_revision_save_requires_explicit_boolean_confirmation(confirmation: object) -> None:
+    with pytest.raises(ValidationError):
+        InvoiceRevisionCreate.model_validate(
+            {
+                "expected_updated_at": datetime(2026, 10, 26, tzinfo=UTC).isoformat(),
+                "changes": {},
+                "reason": "Valid reason",
+                "confirm_not_delivered": confirmation,
+            }
+        )
+
+
+@pytest.mark.parametrize("reason", ["", "  \n "])
+def test_revision_save_requires_non_whitespace_reason(reason: str) -> None:
+    with pytest.raises(ValidationError):
+        InvoiceRevisionCreate.model_validate(
+            {
+                "expected_updated_at": datetime(2026, 10, 26, tzinfo=UTC).isoformat(),
+                "changes": {},
+                "reason": reason,
+                "confirm_not_delivered": True,
+            }
+        )

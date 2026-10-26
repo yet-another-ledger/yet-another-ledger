@@ -150,7 +150,7 @@ Add `invoice_revision` with:
 
 ### Step 3 · Atomic revision save and concurrency protection
 
-- **Status**: Not started; depends on Steps 1–2.
+- **Status**: Automated implementation, full local gates and independent blind review complete (2026-10-26); author walkthrough pending.
 - **Goal**: commit one fully audited revision with consistent amounts, receivables and future credit basis.
 - **Contract**: implement `POST /revisions` with reason, undelivered confirmation and version checking; regenerate types.
 - **Backend**: follow existing Quote -> Invoice lock order, then reread the Invoice/version, payments, successful email and dependent documents. Reuse Step 2's merge/pricing implementation.

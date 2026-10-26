@@ -418,6 +418,6 @@ Separately numbered improvements:
 | Improvement | Content | Status |
 | --- | --- | --- |
 | SI1 | Document ordering, Quote duplication and server-side Sent copies | 🟢 Done (2026-10-25; four steps and independent blind reviews complete; Quote action refinement accepted; representative author walkthrough accepted with skipped paths recorded); see [implementation plan](improvements/SI1.md) |
-| SI2 | Audited revision of undelivered, unpaid Standard Invoices | 🟡 In progress (Steps 1–2 automated gates and independent review complete; Steps 3–5 and author acceptance pending); see [implementation plan](improvements/SI2.md) |
+| SI2 | Audited revision of undelivered, unpaid Standard Invoices | 🟡 In progress (Steps 1–3 automated gates and independent review complete; Steps 4–5 and author acceptance pending); see [implementation plan](improvements/SI2.md) |
 
 > Legend: ⬜ Not started | 🟡 In progress | 🟢 Done (deployment smoke test passed) | ⏸️ In development but paused (not the active milestone)

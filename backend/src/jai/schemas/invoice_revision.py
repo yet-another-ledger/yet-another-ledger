@@ -7,7 +7,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 from jai.models._enums import (
     DiscountType,
@@ -75,6 +75,23 @@ class InvoiceRevisionCalculateRequest(BaseModel):
 
     expected_updated_at: datetime
     changes: InvoiceRevisionChanges
+
+
+class InvoiceRevisionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_updated_at: datetime
+    changes: InvoiceRevisionChanges
+    reason: str = Field(min_length=1)
+    confirm_not_delivered: StrictBool
+
+    @model_validator(mode="after")
+    def validate_reason(self) -> InvoiceRevisionCreate:
+        if not self.reason.strip():
+            raise ValueError("reason must not be blank")
+        if self.confirm_not_delivered is not True:
+            raise ValueError("confirm_not_delivered must be true")
+        return self
 
 
 class InvoiceCreditBasisSnapshot(BaseModel):

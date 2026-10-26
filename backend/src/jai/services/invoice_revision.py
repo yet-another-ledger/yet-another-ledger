@@ -1,5 +1,7 @@
 """Read-only SI2 history and eligibility projections."""
 
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 import uuid
@@ -26,6 +28,7 @@ from jai.models.dictionary import Unit
 from jai.models.document import (
     FinalAdvanceApplication,
     InvoiceCorrection,
+    InvoiceCreditBasisLine,
     InvoiceRelation,
     InvoiceRevision,
 )
@@ -39,17 +42,22 @@ from jai.schemas.invoice import (
     DiscountInput,
     InvoiceCalculationRead,
     InvoiceLineInput,
+    InvoiceRead,
     InvoiceRevisionEligibilityRead,
     VatTreatmentSnapshot,
 )
 from jai.schemas.invoice_revision import (
+    InvoiceBusinessSnapshot,
+    InvoiceCreditBasisSnapshot,
     InvoiceRevisionCalculateRequest,
     InvoiceRevisionChanges,
+    InvoiceRevisionCreate,
     InvoiceRevisionListRead,
     InvoiceRevisionRead,
 )
 from jai.services.document_actions import invoice_revision_eligibility
-from jai.services.pricing import compute_pricing
+from jai.services.money import quantize_money
+from jai.services.pricing import _distribute_fixed_discount, compute_pricing
 
 
 class InvoiceRevisionConflictError(Exception):
@@ -87,6 +95,12 @@ class MergedInvoiceRevision:
     lines: list[tuple[InvoiceLine | None, InvoiceLineInput]]
 
 
+def _normalize_persisted_money(value: Decimal) -> Decimal:
+    """Round only values that PostgreSQL NUMERIC(18, 3) would change."""
+    quantized = quantize_money(value)
+    return quantized if quantized != value else value
+
+
 def merge_invoice_revision_changes(
     invoice: Invoice, changes: InvoiceRevisionChanges
 ) -> MergedInvoiceRevision:
@@ -107,12 +121,20 @@ def merge_invoice_revision_changes(
                 existing = by_id.get(entry.line_id)
                 if existing is None:
                     raise ValueError("Unknown line_id for this Invoice.")
-            lines.append(
-                (
-                    existing,
-                    InvoiceLineInput.model_validate(entry.model_dump(exclude={"line_id"})),
-                )
-            )
+            raw = InvoiceLineInput.model_validate(entry.model_dump(exclude={"line_id"}))
+            # InvoiceLine stores these inputs at NUMERIC scale 3. Normalize the
+            # accepted request once, before preview/pricing and Save share it,
+            # so the audit and later reads describe the priced inputs exactly.
+            raw = raw.model_copy(update={
+                "quantity": _normalize_persisted_money(raw.quantity),
+                "unit_price": _normalize_persisted_money(raw.unit_price),
+                "discount": raw.discount.model_copy(
+                    update={"value": _normalize_persisted_money(raw.discount.value)}
+                ),
+            })
+            if raw.quantity <= 0:
+                raise ValueError("quantity must remain > 0 at NUMERIC(18, 3) precision.")
+            lines.append((existing, raw))
     else:
         lines = [(line, _line_input(line)) for line in old_lines]
     discount = (
@@ -134,6 +156,20 @@ def merge_invoice_revision_changes(
         raise ValueError("Required revision fields cannot be null.")
     if discount is None:
         raise ValueError("discount cannot be null.")
+    if "discount" in fields:
+        discount = discount.model_copy(
+            update={"value": _normalize_persisted_money(discount.value)}
+        )
+    document_vat_rate_id = (
+        changes.document_vat_rate_id
+        if "document_vat_rate_id" in fields
+        else invoice.document_vat_rate_id
+    )
+    # A document rate is not persisted in LINE mode. Treat a supplied value as
+    # validation-only (validated by calculation below), so preview and Save see
+    # the same effective state and cannot trigger repricing of legacy amounts.
+    if tax_mode == InvoiceTaxMode.LINE and "document_vat_rate_id" in fields:
+        document_vat_rate_id = invoice.document_vat_rate_id
     return MergedInvoiceRevision(
         invoice_date=invoice_date,
         due_date=changes.due_date if "due_date" in fields else invoice.due_date,
@@ -159,11 +195,7 @@ def merge_invoice_revision_changes(
         tax_mode=tax_mode,
         amounts_include_vat=include_vat,
         vat_treatment_id=treatment_id,
-        document_vat_rate_id=(
-            changes.document_vat_rate_id
-            if "document_vat_rate_id" in fields
-            else invoice.document_vat_rate_id
-        ),
+        document_vat_rate_id=document_vat_rate_id,
         discount=discount,
         lines=lines,
     )
@@ -305,6 +337,11 @@ async def calculate_invoice_revision(
     document_rate_id = merged.document_vat_rate_id
     merged_invoice_date = merged.invoice_date
     merged_due_date = merged.due_date
+    supplied_document_rate_id = (
+        changes.document_vat_rate_id
+        if "document_vat_rate_id" in fields
+        else None
+    )
     if merged_due_date is not None and merged_due_date < merged_invoice_date:
         raise ValueError("due_date cannot be before invoice_date.")
     if (
@@ -389,6 +426,23 @@ async def calculate_invoice_revision(
             )
             if found != len(ids):
                 raise ValueError(message)
+    # LINE mode ignores document VAT rates for persisted pricing, but a newly
+    # supplied reference still follows the same tenant/active validation as
+    # the ordinary invoice merge path.
+    if (
+        tax_mode == InvoiceTaxMode.LINE
+        and supplied_document_rate_id is not None
+        and supplied_document_rate_id != invoice.document_vat_rate_id
+    ):
+        valid_document_rate = await session.scalar(
+            select(VatRate.id).where(
+                VatRate.id == supplied_document_rate_id,
+                VatRate.company_id == company_id,
+                VatRate.active.is_(True),
+            )
+        )
+        if valid_document_rate is None:
+            raise ValueError("Document VAT rate not found or inactive.")
     if not financial_changed:
         # Reorder output snapshots by requested array while preserving exact values.
         reordered = [prior for prior, _ in target]
@@ -406,6 +460,7 @@ async def calculate_invoice_revision(
                 row.unit_price = raw.unit_price
             return response
         return _stored_calculation(invoice, old_lines)
+
 
     if tax_mode != invoice.tax_mode and tax_mode is None:
         raise ValueError("tax_mode cannot be null")
@@ -612,3 +667,315 @@ async def list_invoice_revisions(
         offset=offset,
         limit=limit,
     )
+
+
+def _revision_snapshot(invoice: Invoice) -> dict[str, object]:
+    """Serialize the complete current business state into the closed audit schema."""
+    from jai.schemas.invoice_revision import InvoiceRevisionDocumentSnapshot
+
+    address_fields = (
+        "street", "house_number", "house_number_addition", "postal_code",
+        "city", "province", "country_code",
+    )
+    party = invoice.party_snapshot
+    party_data: dict[str, object] | None = None
+    if party is not None:
+        party_data = {
+            key: getattr(party, key)
+            for key in (
+                "provenance", "seller_name", "seller_legal_name", "seller_vat_id",
+                "seller_coc_number", "seller_email", "seller_phone", "buyer_name",
+                "buyer_company_name", "buyer_contact_name", "buyer_vat_id",
+                "buyer_email", "buyer_phone", "locale", "logo_id",
+            )
+        }
+        party_data["seller_address"] = {key: (party.seller_address or {}).get(key) for key in address_fields}
+        party_data["buyer_address"] = {key: (party.buyer_address or {}).get(key) for key in address_fields}
+    doc = {
+        key: getattr(invoice, key)
+        for key in InvoiceRevisionDocumentSnapshot.model_fields
+        if key not in {"invoice_date", "due_date", "supply_or_advance_date"}
+    }
+    doc.update(
+        invoice_date=invoice.invoice_date.isoformat(),
+        due_date=invoice.due_date.isoformat() if invoice.due_date else None,
+        supply_or_advance_date=(invoice.supply_or_advance_date.isoformat() if invoice.supply_or_advance_date else None),
+    )
+    def tax_data(tax: object) -> dict[str, object]:
+        return {name: getattr(tax, name) for name in (
+            "id", "vat_rate_id", "vat_rate_label", "vat_rate_percent",
+            "effective_vat_percent", "taxable_amount", "tax_amount",
+        )}
+    lines = []
+    for line in sorted(invoice.lines, key=lambda row: (row.sort_order, str(row.id))):
+        lines.append({
+            key: getattr(line, key) for key in (
+                "id", "sort_order", "product_id", "name", "description", "quantity",
+                "unit_id", "unit_name", "unit_price", "discount_type", "discount_value",
+                "vat_rate_id", "vat_rate_label", "vat_rate_percent", "subtotal_excl_vat",
+                "subtotal_incl_vat", "line_discount_amount", "document_discount_share",
+                "taxable_amount", "vat_total", "total_incl_vat",
+            )
+        } | {"line_taxes": [tax_data(tax) for tax in line.line_taxes]})
+    return InvoiceBusinessSnapshot.model_validate({
+        "invoice": doc | {"party_snapshot": party_data, "lines": lines, "taxes": [tax_data(tax) for tax in invoice.taxes]},
+        "credit_basis": [
+            {key: getattr(row, key) for key in InvoiceCreditBasisSnapshot.model_fields}
+            for row in invoice.credit_basis_lines
+        ],
+    }).model_dump(mode="json")
+
+
+async def save_invoice_revision(
+    session: AsyncSession, *, invoice_id: uuid.UUID, company_id: uuid.UUID,
+    actor_user_id: uuid.UUID, request: InvoiceRevisionCreate,
+) -> InvoiceRead | None:
+    """Atomically revise the current Standard Invoice under canonical chain locks."""
+    from jai.models._enums import (
+        DocumentChainEventType,
+        InvoiceCreditStatus,
+        InvoiceSettlementStatus,
+        InvoiceStatus,
+    )
+    from jai.models.invoice import InvoiceLineTax, InvoiceTax
+    from jai.services.document_chain import append_document_chain_event
+    from jai.services.invoice import _credit_basis_rows, _load_invoice_read
+    from jai.services.money import quantize_to_minor_unit
+    from jai.services.payment import (
+        _write_invoice_state,
+        lock_settlement_chain,
+        recompute_payment_state,
+    )
+
+    await set_rls_company(session, company_id)
+    # The lock helper serializes Quote-origin conversion/payment/Credit operations.
+    try:
+        chain = await lock_settlement_chain(
+            session, anchor_invoice_id=invoice_id, company_id=company_id
+        )
+    except LookupError as exc:
+        # The shared lock helper signals an absent or RLS-invisible anchor via
+        # LookupError. Keep that boundary as the revision API's documented 404.
+        if str(exc) == "Invoice not found.":
+            return None
+        raise
+    if chain.anchor is None or chain.anchor.id != invoice_id:
+        return None
+    invoice = (await session.scalars(
+        select(Invoice).where(Invoice.id == invoice_id, Invoice.company_id == company_id)
+        .options(selectinload(Invoice.lines).selectinload(InvoiceLine.line_taxes),
+                 selectinload(Invoice.taxes), selectinload(Invoice.party_snapshot),
+                 selectinload(Invoice.credit_basis_lines))
+        .execution_options(populate_existing=True).with_for_update()
+    )).unique().one_or_none()
+    if invoice is None:
+        return None
+    if invoice.updated_at != request.expected_updated_at:
+        raise InvoiceRevisionStaleError("STALE_VERSION")
+    eligibility = await get_revision_eligibility(session, invoice, company_id)
+    if not eligibility.available:
+        raise InvoiceRevisionConflictError(eligibility.reason_code or "REVISION_UNAVAILABLE")
+    before = _revision_snapshot(invoice)
+    calc = await calculate_invoice_revision(session, invoice_id=invoice_id, company_id=company_id,
+        request=InvoiceRevisionCalculateRequest(expected_updated_at=request.expected_updated_at,
+                                                changes=request.changes))
+    if calc is None:
+        return None
+    merged = merge_invoice_revision_changes(invoice, request.changes)
+    # A no-op is defined by the merged editable state, including line order/content.
+    target_state = [(raw.quantity, raw.unit_price, raw.discount.type,
+                     raw.discount.value, raw.vat_rate_id) for _, raw in merged.lines]
+    target_ids = [prior.id if prior is not None else None for prior, _ in merged.lines]
+    target_document_rate_id = (
+        merged.document_vat_rate_id if merged.tax_mode == InvoiceTaxMode.DOCUMENT else None
+    )
+    old_state = [
+        (Decimal(str(line.quantity)), Decimal(str(line.unit_price)),
+         line.discount_type, Decimal(str(line.discount_value)), line.vat_rate_id)
+        for line in sorted(invoice.lines, key=lambda row: row.sort_order)
+    ]
+    header_fields = ("invoice_date", "due_date", "supply_or_advance_date", "reference_number",
+                     "notes", "warranty_text", "terms_text", "bank_text", "payment_terms_text")
+    target_text = [(raw.product_id, raw.name, raw.description, raw.unit_id, raw.unit_name)
+                   for _, raw in merged.lines]
+    old_text = [(line.product_id, line.name, line.description, line.unit_id, line.unit_name)
+                for line in sorted(invoice.lines, key=lambda row: row.sort_order)]
+    old_ids = [line.id for line in sorted(invoice.lines, key=lambda row: row.sort_order)]
+    changed = target_state != old_state or target_text != old_text or target_ids != old_ids or any(
+        getattr(merged, name) != getattr(invoice, name) for name in header_fields
+    ) or any((merged.tax_mode != invoice.tax_mode, merged.amounts_include_vat != invoice.amounts_include_vat,
+              merged.vat_treatment_id != invoice.vat_treatment_id,
+              target_document_rate_id != invoice.document_vat_rate_id,
+              merged.discount.type != invoice.discount_type,
+              merged.discount.value != Decimal(str(invoice.discount_value))))
+    if not changed:
+        read_result = await _load_invoice_read(session, invoice)
+        return read_result.model_copy(update={"revision_eligibility": eligibility})
+    # Name/description/product/unit text changes keep all persisted pricing/tax
+    # snapshots byte-for-byte while retaining the existing line identities.
+    for i, (prior, raw) in enumerate(merged.lines):
+        if prior is not None:
+            row = next(item for item in invoice.lines if item.id == prior.id)
+            row.sort_order = i
+            row.product_id, row.name, row.description = raw.product_id, raw.name, raw.description
+            row.unit_id, row.unit_name = raw.unit_id, raw.unit_name
+            basis = next(
+                (item for item in invoice.credit_basis_lines if item.invoice_line_id == row.id),
+                None,
+            )
+            if basis is not None:
+                basis.name, basis.description = raw.name, raw.description
+                basis.quantity, basis.unit_name, basis.sort_order = raw.quantity, raw.unit_name, i
+    financial = (merged.tax_mode != invoice.tax_mode or merged.amounts_include_vat != invoice.amounts_include_vat
+        or merged.vat_treatment_id != invoice.vat_treatment_id
+        or target_document_rate_id != invoice.document_vat_rate_id
+        or merged.discount.type != invoice.discount_type
+        or merged.discount.value != Decimal(str(invoice.discount_value))
+        or target_state != old_state or target_ids != old_ids)
+    async with session.begin_nested():
+        # Child-only line edits still advance the optimistic concurrency token.
+        invoice.updated_at = func.now()
+        for name in header_fields:
+            setattr(invoice, name, getattr(merged, name))
+        if financial:
+            old_by_id = {row.id: row for row in invoice.lines}
+            new_lines = []
+            for i, ((prior, raw), result) in enumerate(zip(merged.lines, calc.lines, strict=True)):
+                row = old_by_id.pop(prior.id) if prior is not None else InvoiceLine()
+                row.invoice_id = invoice.id
+                row.sort_order = i
+                for name in ("product_id", "name", "description", "quantity", "unit_id", "unit_name", "unit_price"):
+                    setattr(row, name, getattr(raw, name))
+                row.discount_type, row.discount_value, row.vat_rate_id = raw.discount.type, raw.discount.value, raw.vat_rate_id
+                row.vat_rate_label, row.vat_rate_percent = result.vat_rate_label, result.vat_rate_percent
+                for name in ("subtotal_excl_vat", "subtotal_incl_vat", "line_discount_amount", "document_discount_share", "taxable_amount", "vat_total", "total_incl_vat"):
+                    setattr(row, name, getattr(result, name))
+                tax = calc.line_taxes[i] if i < len(calc.line_taxes) else None
+                row.line_taxes = ([InvoiceLineTax(vat_rate_id=tax.vat_rate_id,
+                    vat_rate_label=tax.vat_rate_label, vat_rate_percent=tax.vat_rate_percent,
+                    effective_vat_percent=tax.effective_vat_percent, taxable_amount=tax.taxable_amount,
+                    tax_amount=tax.tax_amount)] if merged.tax_mode == InvoiceTaxMode.LINE and tax else [])
+                new_lines.append(row)
+            invoice.lines = new_lines
+            invoice.taxes = [InvoiceTax(invoice_id=invoice.id, vat_rate_id=t.vat_rate_id,
+                vat_rate_label=t.vat_rate_label, vat_rate_percent=t.vat_rate_percent,
+                effective_vat_percent=t.effective_vat_percent, taxable_amount=t.taxable_amount,
+                tax_amount=t.tax_amount) for t in calc.document_taxes]
+            await session.flush()
+            await session.refresh(invoice, attribute_names=["credit_basis_lines"])
+            invoice.tax_mode, invoice.amounts_include_vat = merged.tax_mode, merged.amounts_include_vat
+            invoice.vat_treatment_id = merged.vat_treatment_id
+            invoice.document_vat_rate_id = target_document_rate_id
+            snap = calc.vat_treatment_snapshot
+            assert snap is not None
+            invoice.vat_treatment_code, invoice.vat_treatment_label = snap.code, snap.label
+            invoice.vat_treatment_effect, invoice.vat_treatment_requires_icp = snap.effect, snap.requires_icp
+            invoice.discount_type, invoice.discount_value = merged.discount.type, merged.discount.value
+            invoice.document_discount_amount = calc.document_discount_amount
+            for name in ("subtotal_excl_vat", "line_discount_total", "taxable_amount", "vat_total", "total_incl_vat"):
+                setattr(invoice, name, getattr(calc, name))
+            # SENT invoices are eligible only without payments/credits. Preserve the historical
+            # receivable state and update the outstanding cache to the new amount.
+            rate = Decimal(str(invoice.exchange_rate))
+            for name in ("subtotal_excl_vat", "line_discount_total", "taxable_amount", "vat_total", "total_incl_vat"):
+                setattr(invoice, f"base_{name}", quantize_to_minor_unit(getattr(calc, name) * rate))
+            # Update retained basis rows in place.  Their invoice_line_id has a
+            # unique constraint, so delete-then-insert is both wasteful and
+            # vulnerable to ORM unit-of-work ordering.
+            old_basis_by_line: dict[uuid.UUID, InvoiceCreditBasisLine] = {
+                basis.invoice_line_id: basis for basis in invoice.credit_basis_lines
+            }
+            rebuilt_basis = await _credit_basis_rows(session, invoice)
+            if (
+                InvoiceTaxMode(invoice.tax_mode) == InvoiceTaxMode.DOCUMENT
+                and invoice.amounts_include_vat
+            ):
+                # In inclusive DOCUMENT mode line snapshots retain gross line
+                # values while document tax stores the aggregate net/VAT split.
+                # Allocate that frozen VAT over discounted line gross shares so
+                # the refreshed Credit basis conserves the legal invoice total.
+                ordered_lines = sorted(invoice.lines, key=lambda row: (row.sort_order, str(row.id)))
+                gross_shares = [
+                    Decimal(str(line.total_incl_vat))
+                    - Decimal(str(line.document_discount_share))
+                    for line in ordered_lines
+                ]
+                vat_shares = _distribute_fixed_discount(
+                    gross_shares, Decimal(str(invoice.vat_total))
+                )
+                for basis_row, gross, vat in zip(rebuilt_basis, gross_shares, vat_shares, strict=True):
+                    basis_row.gross_amount = gross
+                    basis_row.vat_amount = vat
+                    basis_row.net_amount = gross - vat
+                    basis_row.base_gross_amount = quantize_to_minor_unit(
+                        gross * Decimal(str(invoice.exchange_rate))
+                    )
+                    basis_row.base_vat_amount = quantize_to_minor_unit(
+                        vat * Decimal(str(invoice.exchange_rate))
+                    )
+                    basis_row.base_net_amount = quantize_to_minor_unit(
+                        (gross - vat) * Decimal(str(invoice.exchange_rate))
+                    )
+            current_basis: list[InvoiceCreditBasisLine] = []
+            for desired in rebuilt_basis:
+                basis = old_basis_by_line.pop(desired.invoice_line_id, None)
+                if basis is None:
+                    basis = desired
+                else:
+                    for column in (
+                        "sort_order", "name", "description", "quantity", "unit_name",
+                        "vat_rate_id", "vat_rate_label", "vat_rate_percent",
+                        "effective_vat_percent", "vat_treatment_code",
+                        "vat_treatment_effect", "vat_treatment_requires_icp",
+                        "net_amount", "vat_amount", "gross_amount", "base_net_amount",
+                        "base_vat_amount", "base_gross_amount",
+                    ):
+                        setattr(basis, column, getattr(desired, column))
+                current_basis.append(basis)
+            invoice.credit_basis_lines = current_basis
+            state = recompute_payment_state(
+                Decimal(str(invoice.total_incl_vat)),
+                Decimal(str(invoice.base_total_incl_vat)),
+                [],
+                InvoiceStatus.SENT,
+            )
+            _write_invoice_state(invoice, state)
+            # A zero-total revision is still an issued legal Invoice.
+            invoice.status = InvoiceStatus.SENT
+            invoice.credited_total = invoice.base_credited_total = Decimal("0")
+            invoice.refunded_total = invoice.base_refunded_total = Decimal("0")
+            invoice.credit_status = InvoiceCreditStatus.NOT_CREDITED
+            invoice.settlement_status = (
+                InvoiceSettlementStatus.SETTLED if invoice.due_amount == 0
+                else InvoiceSettlementStatus.OPEN
+            )
+        await session.flush()
+        # PostgreSQL applies NUMERIC scale coercion on write without updating
+        # the ORM identity map's Decimal values. Build the immutable audit from
+        # a fresh database projection so its values match detail reads and the
+        # next revision's before_snapshot exactly.
+        invoice = (await session.scalars(
+            select(Invoice)
+            .where(Invoice.id == invoice_id, Invoice.company_id == company_id)
+            .options(
+                selectinload(Invoice.lines).selectinload(InvoiceLine.line_taxes),
+                selectinload(Invoice.taxes),
+                selectinload(Invoice.party_snapshot),
+                selectinload(Invoice.credit_basis_lines),
+            )
+            .execution_options(populate_existing=True)
+        )).unique().one()
+        after = _revision_snapshot(invoice)
+        revision = InvoiceRevision(company_id=company_id, invoice_id=invoice.id,
+            actor_user_id=actor_user_id, reason=request.reason.strip(),
+            undelivered_confirmed=True, before_snapshot=before, after_snapshot=after)
+        session.add(revision)
+        await session.flush()
+        await append_document_chain_event(session, company_id=company_id, invoice_id=invoice.id,
+            quote_id=invoice.quote_id, actor_user_id=actor_user_id,
+            event_type=DocumentChainEventType.INVOICE_REVISED,
+            metadata={"revision_id": str(revision.id)})
+        await session.flush()
+    read_result = await _load_invoice_read(session, invoice)
+    await session.commit()
+    return read_result.model_copy(update={"revision_eligibility": eligibility})

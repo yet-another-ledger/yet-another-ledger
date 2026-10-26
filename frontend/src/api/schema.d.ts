@@ -1252,7 +1252,8 @@ export interface paths {
         /** List Invoice Revisions Endpoint */
         get: operations["list_invoice_revisions_endpoint_api_v1_invoices__invoice_id__revisions_get"];
         put?: never;
-        post?: never;
+        /** Create Invoice Revision Endpoint */
+        post: operations["create_invoice_revision_endpoint_api_v1_invoices__invoice_id__revisions_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6523,6 +6524,19 @@ export interface components {
             discount?: components["schemas"]["InvoiceRevisionDiscountInput"] | null;
             /** Lines */
             lines?: components["schemas"]["InvoiceRevisionLineInput"][] | null;
+        };
+        /** InvoiceRevisionCreate */
+        InvoiceRevisionCreate: {
+            /**
+             * Expected Updated At
+             * Format: date-time
+             */
+            expected_updated_at: string;
+            changes: components["schemas"]["InvoiceRevisionChanges"];
+            /** Reason */
+            reason: string;
+            /** Confirm Not Delivered */
+            confirm_not_delivered: boolean;
         };
         /** InvoiceRevisionDiscountInput */
         InvoiceRevisionDiscountInput: {
@@ -12837,6 +12851,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoiceRevisionListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_invoice_revision_endpoint_api_v1_invoices__invoice_id__revisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceRevisionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
                 };
             };
             /** @description Validation Error */
