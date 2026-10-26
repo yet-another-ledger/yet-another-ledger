@@ -426,6 +426,13 @@ describe('InvoiceEdit reused route', () => {
 })
 
 describe('InvoiceEdit revision workflow', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    let reject!: (error: unknown) => void
+    const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail })
+    return { promise, resolve, reject }
+  }
+
   function mountDetail(inv: any, blocks: any[] = []) {
     for (const mock of Object.values(store)) mock.mockClear()
     dialogs.warning.mockClear()
@@ -450,13 +457,64 @@ describe('InvoiceEdit revision workflow', () => {
     return { router, ready: async () => {
       await router.push(`/invoices/${inv.id}/edit`); await router.isReady()
       const wrapper = mount(defineComponent({ template: '<router-view v-slot="{ Component, route }"><component :is="Component" :key="route.fullPath" /></router-view>' }), { global: { plugins: [router, i18n], stubs: {
-        InvoicePaymentPanel: { template: '<div />' }, DocumentWorkflowPanel: { template: '<div />' },
+        InvoicePaymentPanel: { template: '<div />' }, DocumentWorkflowPanel: { props: ['documentChain'], template: '<div data-workflow :data-due="documentChain?.totals?.due_amount ?? \'none\'" />' },
         DocumentSendDialog: { template: '<div />' }, PdfPreviewDialog: { template: '<div />' }, EmailLogPanel: { template: '<div />' },
       } } })
       await flushPromises()
       return wrapper
     } }
   }
+
+  it('ignores a late post-revision chain response from invoice A after the page moves to B', async () => {
+    const lateRevisionChain = deferred<any>()
+    const invA = { ...invoice('A', 'STANDARD'), status: 'SENT', revision_eligibility: { available: true, reason_code: null } }
+    const invB = { ...invoice('B', 'STANDARD'), status: 'SENT' }
+    const revisedA = { ...invA, notes: 'Saved A', updated_at: '2026-08-31T11:00:00Z' }
+    let aChainReads = 0
+    for (const mock of Object.values(store)) mock.mockClear()
+    store.fetchProductOptions.mockResolvedValue([])
+    store.fetchInvoice.mockImplementation((id: string) => Promise.resolve(id === 'A' ? invA : invB))
+    store.fetchRevisions.mockResolvedValue({ items: [], total: 0 })
+    store.saveRevision.mockResolvedValue(revisedA)
+    store.calculateRevision.mockResolvedValue({ lines: [], subtotal_excl_vat: '10', line_discount_total: '0', document_discount_amount: '0', taxable_amount: '10', vat_total: '0', total_incl_vat: '10' })
+    http.get.mockImplementation((url: string) => {
+      if (url === '/api/v1/vat-rates' || url.startsWith('/api/v1/vat-treatments')) return Promise.resolve({ items: [] })
+      if (url === '/api/v1/document-templates' || url === '/api/v1/content-blocks' || url === '/api/v1/note-templates') return Promise.resolve([])
+      if (url.startsWith('/api/v1/customers?q=')) return Promise.resolve({ items: [] })
+      if (url === '/api/v1/customers/customer-A' || url === '/api/v1/customers/customer-B') return Promise.resolve({ id: url.endsWith('A') ? 'customer-A' : 'customer-B', name: 'Customer' })
+      if (url === '/api/v1/invoices/A/document-chain') {
+        aChainReads += 1
+        return aChainReads === 1
+          ? Promise.resolve({ quote_id: 'quote-A-v1', nodes: [], relations: [], events: [], totals: { due_amount: '121.00' }, available_actions: [] })
+          : lateRevisionChain.promise
+      }
+      if (url === '/api/v1/invoices/B/document-chain') return Promise.resolve({ quote_id: 'quote-B', nodes: [], relations: [], events: [], totals: { due_amount: '55.00' }, available_actions: [] })
+      throw new Error(`unexpected GET ${url}`)
+    })
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/invoices/:id/edit', component: InvoiceEdit }] })
+    await router.push('/invoices/A/edit'); await router.isReady()
+    const wrapper = mount(InvoiceEdit, { global: { plugins: [router, i18n], stubs: {
+      DocumentWorkflowPanel: { props: ['invoice', 'documentChain'], template: '<div data-workflow :data-invoice="invoice.id" :data-chain="documentChain?.quote_id ?? \'pending\'" />' },
+      InvoicePaymentPanel: { template: '<div />' }, DocumentSendDialog: { template: '<div />' }, PdfPreviewDialog: { template: '<div />' }, EmailLogPanel: { template: '<div />' },
+    } } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('Revise invoice'))!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('input').find(input => input.element.value === 'notes-A')!.setValue('Saved A')
+    await wrapper.findAll('input').filter(input => input.attributes('type') !== 'checkbox').at(-1)!.setValue('Correction A')
+    await wrapper.find('input[type="checkbox"]').setValue(true)
+    await wrapper.findAll('button').find(button => button.text().includes('Save revision'))!.trigger('click')
+    await flushPromises()
+    expect(aChainReads).toBe(2)
+
+    await router.push('/invoices/B/edit'); await flushPromises()
+    expect(wrapper.find('[data-workflow]').attributes()).toMatchObject({ 'data-invoice': 'B', 'data-chain': 'quote-B' })
+    lateRevisionChain.resolve({ quote_id: 'quote-A-revision', nodes: [], relations: [], events: [], totals: { due_amount: '242.00' }, available_actions: [] })
+    await flushPromises()
+    expect(wrapper.find('[data-workflow]').attributes()).toMatchObject({ 'data-invoice': 'B', 'data-chain': 'quote-B' })
+    expect(wrapper.text()).toContain('INV-B')
+    expect(wrapper.text()).not.toContain('INV-A')
+  })
 
   it('gates revision by backend eligibility, locks customer, and sends explicit clears and retained line IDs with reason and confirmation', async () => {
     const inv = { ...invoice('A', 'STANDARD'), status: 'SENT', revision_eligibility: { available: true, reason_code: null } }
@@ -588,6 +646,18 @@ describe('InvoiceEdit revision workflow', () => {
       after_snapshot: { invoice: { ...inv, notes: reason }, credit_basis: [] },
     })
     const { ready } = mountDetail(inv)
+    let chainReads = 0
+    http.get.mockImplementation((url: string) => {
+      if (url.includes('/document-chain')) {
+        chainReads += 1
+        return Promise.resolve({ quote_id: null, nodes: [], relations: [], events: [], totals: { due_amount: chainReads === 1 ? '121.00' : '242.00' }, available_actions: [] })
+      }
+      if (url === '/api/v1/vat-rates' || url.startsWith('/api/v1/vat-treatments')) return Promise.resolve({ items: [] })
+      if (url === '/api/v1/content-blocks' || url === '/api/v1/document-templates' || url === '/api/v1/note-templates') return Promise.resolve([])
+      if (url.startsWith('/api/v1/customers?q=')) return Promise.resolve({ items: [] })
+      if (url.startsWith('/api/v1/customers/')) return Promise.resolve({ id: 'customer-A', name: 'Customer' })
+      throw new Error(`unexpected GET ${url}`)
+    })
     store.fetchInvoice.mockResolvedValueOnce(inv).mockResolvedValueOnce(inv).mockResolvedValueOnce(updated1)
     store.saveRevision.mockResolvedValueOnce(updated1).mockResolvedValueOnce(updated2)
     store.fetchRevisions.mockResolvedValueOnce({ items: [revision(1, 'First correction')], total: 1 })
@@ -596,12 +666,14 @@ describe('InvoiceEdit revision workflow', () => {
     const wrapper = await ready()
     await wrapper.findAll('button').find(button => button.text().includes('Revise invoice'))!.trigger('click')
     await flushPromises()
+    expect(wrapper.find('[data-workflow]').attributes('data-due')).toBe('121.00')
     await wrapper.findAll('input').find(input => input.element.value === 'notes-A')!.setValue('First change')
     let fields = wrapper.findAll('input').filter(input => input.attributes('type') !== 'checkbox')
     await fields.at(-1)!.setValue('First correction')
     await wrapper.find('input[type="checkbox"]').setValue(true)
     await wrapper.findAll('button').find(button => button.text().includes('Save revision'))!.trigger('click')
     await flushPromises()
+    expect(wrapper.find('[data-workflow]').attributes('data-due')).toBe('242.00')
     expect(store.fetchRevisions).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('First correction')
 
@@ -617,6 +689,44 @@ describe('InvoiceEdit revision workflow', () => {
     expect(store.saveRevision.mock.calls[1]?.[1].expected_updated_at).toBe(updated1.updated_at)
     expect(store.fetchRevisions).toHaveBeenCalledTimes(3)
     expect(wrapper.text()).toContain('Second correction')
+  })
+
+  it('retains a saved revision when its chain refresh fails and retries the current projection', async () => {
+    const inv = { ...invoice('A', 'STANDARD'), status: 'SENT', revision_eligibility: { available: true, reason_code: null } }
+    const updated = { ...inv, notes: 'Saved change', due_amount: '242.00', updated_at: '2026-08-31T11:00:00Z' }
+    const { ready } = mountDetail(inv)
+    let chainReads = 0
+    http.get.mockImplementation((url: string) => {
+      if (url.includes('/document-chain')) {
+        chainReads += 1
+        if (chainReads === 2) return Promise.reject(new Error('projection unavailable'))
+        return Promise.resolve({ quote_id: null, nodes: [], relations: [], events: [], totals: { due_amount: chainReads === 1 ? '121.00' : '242.00' }, available_actions: [] })
+      }
+      if (url === '/api/v1/vat-rates' || url.startsWith('/api/v1/vat-treatments')) return Promise.resolve({ items: [] })
+      if (url === '/api/v1/content-blocks' || url === '/api/v1/document-templates' || url === '/api/v1/note-templates') return Promise.resolve([])
+      if (url.startsWith('/api/v1/customers?q=')) return Promise.resolve({ items: [] })
+      if (url.startsWith('/api/v1/customers/')) return Promise.resolve({ id: 'customer-A', name: 'Customer' })
+      throw new Error(`unexpected GET ${url}`)
+    })
+    store.saveRevision.mockResolvedValue(updated)
+    const wrapper = await ready()
+    await wrapper.findAll('button').find(button => button.text().includes('Revise invoice'))!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('input').find(input => input.element.value === 'notes-A')!.setValue('Saved change')
+    await wrapper.findAll('input').filter(input => input.attributes('type') !== 'checkbox').at(-1)!.setValue('Correction')
+    await wrapper.find('input[type="checkbox"]').setValue(true)
+    await wrapper.findAll('button').find(button => button.text().includes('Save revision'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Your revision was saved, but the document chain below could not be refreshed')
+    expect(wrapper.text()).toContain('Due: EUR 242.00')
+    expect(wrapper.find('[data-workflow]').attributes('data-due')).toBe('121.00')
+    expect(messages.success).toHaveBeenCalledWith('Invoice revised. Its status and number are unchanged.')
+    expect(messages.error).not.toHaveBeenCalled()
+    await wrapper.findAll('button').find(button => button.text() === 'Retry')!.trigger('click')
+    await flushPromises()
+    expect(chainReads).toBe(3)
+    expect(wrapper.find('[data-workflow]').attributes('data-due')).toBe('242.00')
+    expect(wrapper.text()).not.toContain('Your revision was saved, but the document chain below could not be refreshed')
   })
 
   it('blocks a second save and preserves the entire form when the backend reports a stale conflict', async () => {

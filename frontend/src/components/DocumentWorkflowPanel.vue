@@ -30,6 +30,8 @@ type DocumentArtifactValidationRead = components['schemas']['DocumentArtifactVal
 const props = defineProps<{
   quoteId?: string | null
   invoice?: InvoiceRead | null
+  /** Invoice updated_at binds child previews/resources to the saved revision. */
+  invoiceVersion?: string
   /** Parent Quote mode-card request; a monotonic signal avoids stale booleans. */
   openAdvanceSignal?: number
   /** Page-owned authoritative chain.  Keeps payment and workflow refreshes aligned. */
@@ -478,12 +480,26 @@ async function refresh(): Promise<void> {
 // Keeping the status case in this watcher also prevents a second watcher from
 // invalidating that new read when two issued invoices are swapped in place.
 watch(
-  () => [documentOwnerKey.value, props.invoice?.status] as const,
-  ([owner, status], previous) => {
+  () => [documentOwnerKey.value, props.invoice?.status, props.invoiceVersion ?? props.invoice?.updated_at] as const,
+  ([owner, status, version], previous) => {
     if (!previous || owner !== previous[0]) {
       expandedNames.value = []
       resetWorkflowState(props.invoice)
       if (owner) void load()
+      return
+    }
+    if (status === previous[1] && version !== previous[2]) {
+      // A same-id SENT invoice can be revised in place. Existing credit
+      // source/calculation previews and original-PDF advice/confirmation are
+      // version-bound and must be discarded. Keep the selected File so the
+      // user can explicitly recheck or reconfirm it for the new version.
+      invalidateCreditMode()
+      invalidateArtifactUpload()
+      validation.value = null
+      uploadError.value = null
+      uploadNotice.value = null
+      error.value = null
+      if (hasIssuedOutput.value) void loadIssuedOutput(++issuedOutputGeneration)
       return
     }
     if (status === previous[1]) return

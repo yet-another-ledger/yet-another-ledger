@@ -110,8 +110,10 @@ const {
   chainRefreshing,
   initialChainError,
   paymentRefreshError,
+  revisionRefreshError,
   loadInitialDocumentChain,
   refreshAfterPayment,
+  refreshAfterRevision,
   resetDocumentChain,
 } = useDocumentChainRefresh<DocumentChainRead>(async () => {
   const invoiceId = existingInvoice.value?.id
@@ -713,6 +715,10 @@ async function handleSaveRevision(): Promise<void> {
     revisionReason.value = ''
     confirmUndelivered.value = false
     message.success(t('invoices.revision.saved'))
+    // Saving has committed. Refresh each parent-owned/current projection as a
+    // follow-up read; a failure must not turn the successful revision into a
+    // save error or overwrite the retained current invoice/history.
+    await refreshAfterRevision()
     await loadRevisionHistory()
   } catch (e: unknown) {
     if (saveContext !== saveGeneration || existingInvoice.value?.id !== invoiceId || route.params.id !== invoiceId) return
@@ -929,6 +935,11 @@ async function retryPaymentDocumentChain(): Promise<void> {
   await refreshAfterPayment()
 }
 
+async function retryRevisionDocumentChain(): Promise<void> {
+  if (chainRefreshing.value) return
+  await refreshAfterRevision()
+}
+
 const fmtMoney = (v: string | number) => Number(v).toFixed(2)
 
 // ---- PDF download ----
@@ -1120,10 +1131,17 @@ function handleReceiptSent(log: EmailLogRead) {
                 {{ t('chain.retry') }}
               </n-button>
             </n-alert>
+            <n-alert v-if="revisionRefreshError" type="warning" style="margin-bottom: 16px">
+              {{ t('chain.revisionRefreshFailed') }}
+              <n-button text type="primary" :loading="chainRefreshing" :disabled="chainRefreshing" @click="retryRevisionDocumentChain">
+                {{ t('chain.retry') }}
+              </n-button>
+            </n-alert>
 
             <DocumentWorkflowPanel
               v-if="existingInvoice && documentChain"
               :invoice="existingInvoice"
+              :invoice-version="existingInvoice.updated_at"
               :document-chain="documentChain"
               :refresh-chain="loadInitialDocumentChain"
               :chain-loading="chainRefreshing"
@@ -1562,6 +1580,7 @@ function handleReceiptSent(log: EmailLogRead) {
               v-if="showPaymentPanel && existingInvoice"
               :invoice-id="existingInvoice.id"
               :invoice-status="existingInvoice.status"
+              :invoice-version="existingInvoice.updated_at"
               :customer-email="receiptCustomer?.email ?? null"
               :customer-locale="receiptCustomer?.locale ?? null"
               @payments-changed="handlePaymentsChanged"

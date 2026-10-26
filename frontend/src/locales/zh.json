@@ -8,6 +8,7 @@
     "readOnly": "单据链时间线（只读）",
     "initialLoadFailed": "无法读取单据链。",
     "paymentRefreshFailed": "付款已保存，但下方单据链可能不是最新状态。",
+    "revisionRefreshFailed": "修订已保存，但无法刷新下方单据链。请重试以读取最新金额和事件。",
     "relations": "单据关系",
     "retry": "重试"
   },
@@ -1232,6 +1233,7 @@
   "payments": {
     "title": "收款",
     "panelTitle": "收款记录",
+    "aggregateRefreshFailed": "无法刷新当前付款余额。请重试以读取最新应收金额。",
     "quotePanelTitle": "报价定金",
     "search": "搜索收款…",
     "empty": "暂无收款记录。",

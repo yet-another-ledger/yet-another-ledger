@@ -1,7 +1,7 @@
 import { getCurrentScope, onScopeDispose, ref } from 'vue'
 import type { Ref } from 'vue'
 
-export type DocumentChainRefreshSource = 'initial' | 'payment'
+export type DocumentChainRefreshSource = 'initial' | 'payment' | 'revision'
 
 /**
  * A small, injectable page behaviour: payment panels emit only after their
@@ -30,6 +30,7 @@ export function useDocumentChainRefresh<T>(loadDocumentChain: () => Promise<T>) 
   const chainRefreshing = ref(false)
   const initialChainError = ref<unknown | null>(null)
   const paymentRefreshError = ref<unknown | null>(null)
+  const revisionRefreshError = ref<unknown | null>(null)
   let requestVersion = 0
   let disposed = false
 
@@ -47,18 +48,21 @@ export function useDocumentChainRefresh<T>(loadDocumentChain: () => Promise<T>) 
     const currentRequest = ++requestVersion
     chainRefreshing.value = true
     if (source === 'initial') initialChainError.value = null
-    else paymentRefreshError.value = null
+    else if (source === 'payment') paymentRefreshError.value = null
+    else revisionRefreshError.value = null
     try {
       const chain = await loadDocumentChain()
       if (disposed || currentRequest !== requestVersion) return false
       documentChain.value = chain
       initialChainError.value = null
       paymentRefreshError.value = null
+      revisionRefreshError.value = null
       return true
     } catch (error: unknown) {
       if (!disposed && currentRequest === requestVersion) {
         if (source === 'initial') initialChainError.value = error
-        else paymentRefreshError.value = error
+        else if (source === 'payment') paymentRefreshError.value = error
+        else revisionRefreshError.value = error
       }
       return false
     } finally {
@@ -74,6 +78,10 @@ export function useDocumentChainRefresh<T>(loadDocumentChain: () => Promise<T>) 
     return refreshDocumentChain('payment')
   }
 
+  function refreshAfterRevision(): Promise<boolean> {
+    return refreshDocumentChain('revision')
+  }
+
   /** Invalidate a reused page's old owner before its replacement loads. */
   function resetDocumentChain(): void {
     requestVersion += 1
@@ -81,6 +89,7 @@ export function useDocumentChainRefresh<T>(loadDocumentChain: () => Promise<T>) 
     chainRefreshing.value = false
     initialChainError.value = null
     paymentRefreshError.value = null
+    revisionRefreshError.value = null
   }
 
   return {
@@ -88,8 +97,10 @@ export function useDocumentChainRefresh<T>(loadDocumentChain: () => Promise<T>) 
     chainRefreshing,
     initialChainError,
     paymentRefreshError,
+    revisionRefreshError,
     loadInitialDocumentChain,
     refreshAfterPayment,
+    refreshAfterRevision,
     resetDocumentChain,
   }
 }

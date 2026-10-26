@@ -1,7 +1,7 @@
 # SI2 · Revising Undelivered Standard Invoices
 > 🌐 **English** · [中文](SI2_zh.md)
 
-> **Status**: Design agreed on 2026-10-26; orchestrated implementation is in progress. Author walkthrough remains pending. SI2 is a separately numbered small improvement, not a milestone. It follows the milestone implementation-plan format. M15 remains paused; SI2 neither depends on nor resumes its development branch.
+> **Status**: Design agreed on 2026-10-26; all five steps completed automated implementation, full local gates and independent blind review on 2026-10-27. Author walkthrough and acceptance remain pending. SI2 is a separately numbered small improvement, not a milestone. It follows the milestone implementation-plan format. M15 remains paused; SI2 neither depends on nor resumes its development branch.
 
 ## Goals & Scope
 
@@ -183,7 +183,7 @@ Add `invoice_revision` with:
 
 ### Step 5 · Output/reporting regression, documentation and acceptance closure
 
-- **Status**: Not started; depends on Steps 1–4.
+- **Status**: Automated implementation, full local gates and independent blind review complete (2026-10-27); author walkthrough pending.
 - **Goal**: finish cross-module verification and provide one complete author walkthrough.
 - **Output regression**: existing artifact bytes/hashes/associations remain identical. Current preview and later Download/Send use revised content under M12/M13 fingerprints, including uploaded-artifact behavior and reuse for an unchanged presentation.
 - **Business regression**: payment, partial/full Credit and replacement after a revision use the correct current basis. Excluded Advance/Final/other chains retain their prior behavior.
@@ -215,12 +215,13 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 The issue report must distinguish author-exercised checks from automated-only coverage; never record an unperformed check as passed.
 
-## Acceptance Conclusion (Fill at Closure)
+## Acceptance Conclusion
 
-- Implementation completion date: pending.
-- Automated gates: pending implementation.
-- Author walkthrough: pending.
-- Paths accepted on automated evidence rather than manual walkthrough: to be recorded.
-- Known carryovers/deferred items: to be recorded.
+- Implementation completion date: 2026-10-27 (automated implementation of Steps 1–5).
+- Automated gates: local Ruff, strict mypy, 1,411 default backend tests, all 1,150 PostgreSQL integration tests (three disjoint file shards on isolated databases, including migration/runtime-role RLS), OpenAPI→TS freshness, 26 Node tests, 234 component tests, frontend build, EN/ZH 1,586-key symmetry and Docker build passed. All independent review findings are closed.
+- Remote CI: not run; no push was performed. Local checks do not claim a remote GitHub Actions result.
+- Author walkthrough: pending; none of the ten deployment points has been recorded as author-passed in this run. An isolated Compose/mail-substitute walkthrough is provided in the local issue report.
+- Paths accepted on automated evidence rather than manual walkthrough: none accepted by the author yet; automated coverage is not author acceptance.
+- Known carryovers/deferred items: author walkthrough and remote CI remain outstanding; M15 stays paused. No unresolved implementation/review findings; the existing Vite chunk-size warning is non-blocking.
 
-SI2 remains unimplemented until the atomic steps are completed, and unaccepted until the author walkthrough is settled. M15 remains paused.
+All five atomic steps are implemented and independently reviewed. SI2 remains unaccepted until the author walkthrough is settled. Completed milestones' historical acceptance is unchanged; M15 remains paused.

@@ -130,7 +130,134 @@ describe('DocumentWorkflowPanel target action projection', () => {
     expect(wrapper.text()).not.toContain('No retained documents yet.')
   })
 
+  it('refreshes retained artifacts after a same-id invoice revision while keeping historical entries', async () => {
+    http.get.mockReset()
+    http.get.mockResolvedValueOnce({ items: [{ id: 'old', filename: 'before.pdf', locale: 'en', creation_reason: 'DOWNLOAD' }] })
+      .mockResolvedValueOnce({ items: [
+        { id: 'old', filename: 'before.pdf', locale: 'en', creation_reason: 'DOWNLOAD' },
+        { id: 'new', filename: 'after.pdf', locale: 'en', creation_reason: 'DOWNLOAD' },
+      ] })
+    const wrapper = mount(DocumentWorkflowPanel, {
+      props: {
+        invoice: { ...invoice, document_kind: 'STANDARD', status: 'SENT', updated_at: 'v1' },
+        invoiceVersion: 'v1', documentChain: baseChain,
+      },
+      global: { plugins: [i18n], stubs },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('before.pdf')
+    await wrapper.setProps({ invoice: { ...invoice, document_kind: 'STANDARD', status: 'SENT', updated_at: 'v2' }, invoiceVersion: 'v2' })
+    await flushPromises()
+    expect(http.get.mock.calls.filter(([url]) => url === '/api/v1/invoices/source/artifacts')).toHaveLength(2)
+    expect(wrapper.text()).toContain('before.pdf')
+    expect(wrapper.text()).toContain('after.pdf')
+  })
+
+  it('clears completed AI advice and an open upload confirmation after a same-version owner changes', async () => {
+    http.get.mockReset().mockResolvedValue({ items: [] })
+    http.postFile.mockReset().mockResolvedValueOnce({ file_sha256: 'a'.repeat(64), status: 'MATCH', confidence: 'HIGH', summary: 'Version one matches', total_pages: 1, checked_pages: [1], checks: [] })
+    const wrapper = mount(DocumentWorkflowPanel, {
+      props: { invoice: { ...invoice, document_kind: 'STANDARD', status: 'SENT', updated_at: 'v1' }, invoiceVersion: 'v1', documentChain: baseChain },
+      global: { plugins: [i18n], stubs },
+    })
+    await flushPromises()
+    const file = new File(['%PDF-1.7'], 'original.pdf', { type: 'application/pdf' })
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [file] })
+    await input.trigger('change')
+    await action(wrapper, 'Check with AI').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Version one matches')
+    await action(wrapper, 'Upload as original artifact').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.findAll('[data-positive]')).toHaveLength(1)
+
+    await wrapper.setProps({ invoice: { ...invoice, document_kind: 'STANDARD', status: 'SENT', updated_at: 'v2' }, invoiceVersion: 'v2' })
+    await flushPromises()
+    expect((wrapper.vm as any).uploadFile.name).toBe(file.name)
+    expect((wrapper.vm as any).validation).toBeNull()
+    expect((wrapper.vm as any).showArtifactUploadConfirm).toBe(false)
+    expect(wrapper.text()).not.toContain('Version one matches')
+    expect(wrapper.findAll('[data-positive]')).toHaveLength(0)
+    expect(http.postFile).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+    http.postFile.mockClear()
+  })
+
+  it.each(['resolve', 'reject'] as const)('ignores a pending old-version AI %s and its finally while a new check is pending', async outcome => {
+    http.get.mockReset().mockResolvedValue({ items: [] })
+    http.postFile.mockReset()
+    const old = deferred<any>()
+    const current = deferred<any>()
+    http.postFile.mockImplementationOnce(() => old.promise).mockImplementationOnce(() => current.promise)
+    const wrapper = mount(DocumentWorkflowPanel, {
+      props: { invoice: { ...invoice, document_kind: 'STANDARD', status: 'SENT', updated_at: 'v1' }, invoiceVersion: 'v1', documentChain: baseChain },
+      global: { plugins: [i18n], stubs },
+    })
+    await flushPromises()
+    const file = new File(['%PDF-1.7'], 'original.pdf', { type: 'application/pdf' })
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [file] })
+    await input.trigger('change')
+    const oldCheck = action(wrapper, 'Check with AI').trigger('click')
+    await wrapper.setProps({ invoice: { ...invoice, document_kind: 'STANDARD', status: 'SENT', updated_at: 'v2' }, invoiceVersion: 'v2' })
+    await flushPromises()
+    expect((wrapper.vm as any).validatingUpload).toBe(false)
+    const currentCheck = action(wrapper, 'Check with AI').trigger('click')
+    await flushPromises()
+    expect((wrapper.vm as any).validatingUpload).toBe(true)
+    if (outcome === 'resolve') old.resolve({ file_sha256: 'b'.repeat(64), status: 'MATCH', confidence: 'HIGH', summary: 'Old version result', total_pages: 1, checked_pages: [1], checks: [] })
+    else old.reject(new Error('old version failed'))
+    await oldCheck
+    await flushPromises()
+    expect((wrapper.vm as any).validatingUpload).toBe(true)
+    expect((wrapper.vm as any).validation).toBeNull()
+    expect(wrapper.text()).not.toContain('Old version result')
+    current.resolve({ file_sha256: 'c'.repeat(64), status: 'MATCH', confidence: 'HIGH', summary: 'Current version result', total_pages: 1, checked_pages: [1], checks: [] })
+    await currentCheck
+    await flushPromises()
+    expect((wrapper.vm as any).validatingUpload).toBe(false)
+    expect(wrapper.text()).toContain('Current version result')
+    expect(http.postFile).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('discards an open partial-credit source preview when the same invoice is revised', async () => {
+    http.get.mockReset().mockResolvedValue({ items: [] })
+    http.post.mockReset()
+      .mockResolvedValueOnce({ lines: [{ source_basis_line_id: 'line-v1', name: 'Before revision', quantity: '1.000', gross_amount: '121.00' }] })
+      .mockResolvedValueOnce({ lines: [{ source_basis_line_id: 'line-v2', name: 'After revision', quantity: '1.000', gross_amount: '242.00' }] })
+    const wrapper = mount(DocumentWorkflowPanel, {
+      props: {
+        invoice: { ...invoice, id: 'source', document_kind: 'STANDARD', status: 'SENT', updated_at: 'v1' },
+        invoiceVersion: 'v1',
+        documentChain: { ...baseChain, available_actions: [{ code: 'CREATE_CREDIT_NOTE', available: true, target_id: 'source', target_type: 'INVOICE' }] },
+      },
+      global: { plugins: [i18n], stubs },
+    })
+    await flushPromises()
+    await action(wrapper, 'Create credit note').trigger('click')
+    await action(wrapper, 'Selected source lines').trigger('click')
+    await flushPromises()
+    expect(http.post).toHaveBeenCalledTimes(1)
+    expect((wrapper.vm as any).creditSourcePreview.lines[0].gross_amount).toBe('121.00')
+    await wrapper.setProps({
+      invoice: { ...invoice, id: 'source', document_kind: 'STANDARD', status: 'SENT', updated_at: 'v2' },
+      invoiceVersion: 'v2',
+    })
+    await flushPromises()
+    expect((wrapper.vm as any).creditSourcePreview).toBeNull()
+    await action(wrapper, 'Selected source lines').trigger('click')
+    await flushPromises()
+    expect((wrapper.vm as any).creditSourcePreview.lines[0].gross_amount).toBe('242.00')
+    expect(http.post.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/invoices/source/credit-notes/calculate',
+      '/api/v1/invoices/source/credit-notes/calculate',
+    ])
+  })
+
   it('keeps the original-upload workflow explicit, advisory, and refreshes after upload', async () => {
+    http.get.mockReset(); http.postFile.mockReset()
     http.get.mockResolvedValue({ items: [] })
     http.postFile.mockResolvedValueOnce({ file_sha256: 'a'.repeat(64), status: 'MATCH', confidence: 'HIGH', summary: 'Looks consistent', total_pages: 1, checked_pages: [1], checks: [{ field: 'DOCUMENT_NUMBER', status: 'MATCH', expected_value: 'INV-1', observed_value: 'INV-1', note: null }] })
       .mockResolvedValueOnce({ id: 'uploaded' })

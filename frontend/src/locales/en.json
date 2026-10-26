@@ -8,6 +8,7 @@
     "readOnly": "Document-chain timeline (read-only)",
     "initialLoadFailed": "Could not load the document chain.",
     "paymentRefreshFailed": "Your payment was saved, but the document chain below may be out of date.",
+    "revisionRefreshFailed": "Your revision was saved, but the document chain below could not be refreshed. Retry to load current totals and events.",
     "relations": "Document relations",
     "retry": "Retry"
   },
@@ -1232,6 +1233,7 @@
   "payments": {
     "title": "Payments",
     "panelTitle": "Payments",
+    "aggregateRefreshFailed": "Could not refresh the current payment balance. Retry to load the latest amount due.",
     "quotePanelTitle": "Quote deposits",
     "search": "Search payments…",
     "empty": "No payments recorded yet.",
