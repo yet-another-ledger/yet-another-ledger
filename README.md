@@ -6,13 +6,13 @@ Self-hosted invoicing and small-business administration for freelancers and smal
 
 Built with **FastAPI + Vue 3 + PostgreSQL**.
 
-> **Status — pre-1.0 (`v0.8.0`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and possible breaking changes before `v1.0`.
+> **Status — pre-1.0 (`v0.9.0`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and possible breaking changes before `v1.0`.
 
 ## Features
 
 - **Invoices** — Standard, Advance, Final and source-bound Credit Notes; backend pricing, concurrency-safe numbering, independent lifecycle/settlement/credit states, and an auditable document chain.
 - **Quotes** — reusable content blocks/templates, auto-expiry, and an immutable choice between direct invoicing, receipt-only deposits, or formal staged Advance/Final invoicing.
-- **Editing and reuse** — drag-to-reorder lines in Invoice, Quote and Estimate editors; duplicate a Quote into an independent draft with a fresh number and dates.
+- **Editing and reuse** — audited revisions for eligible undelivered, unpaid Standard Invoices, retaining SENT, the original number, unchanged tax/identity snapshots and historical PDFs; drag-to-reorder lines in Invoice, Quote and Estimate editors; duplicate a Quote into an independent draft with a fresh number and dates.
 - **Cost estimation → quote** — internal margin-based costing that never leaks cost/margin to the customer.
 - **Payments & refunds** — partial payments, Quote deposits, automatic settlement states, Credit-linked Refunds, and Refund Confirmations.
 - **Expenses** — receipt inbox for review before posting, AI extraction from image/PDF originals, recurring expenses, bookkeeping fields (paid-by / business-use % / depreciation years).
@@ -56,7 +56,7 @@ Open **http://localhost:8000**, register the first (owner) account, and set up T
 
 To stop: `docker compose down` (add `-v` to also drop the database volume).
 
-> `:latest` tracks the newest non-prerelease release; pin this release by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.8.0` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
+> `:latest` tracks the newest non-prerelease release; pin this release by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.9.0` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
 
 ## Configuration
 

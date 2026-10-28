@@ -70,7 +70,7 @@ services:
       # Leave this empty for internal Compose: Settings uses URL.create() on
       # the raw role fields, so reserved URI characters in passwords are safe.
       DATABASE_URL: ${DATABASE_URL:-}
-      APP_VERSION: ${APP_VERSION:-0.8.0}
+      APP_VERSION: ${APP_VERSION:-0.9.0}
       # Cookies are HTTPS-only by default (production runs behind a TLS reverse
       # proxy).  Set COOKIE_SECURE=false in .env if you expose the app over
       # plain HTTP.
