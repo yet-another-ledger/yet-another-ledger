@@ -48,6 +48,100 @@ function invoice(id: string) {
   }
 }
 
+async function mountWithVat(inv: any, rates: () => any[]) {
+  for (const mock of Object.values(store)) mock.mockReset()
+  api.get.mockClear()
+  messages.error.mockClear()
+  store.fetchInvoice.mockResolvedValue(inv)
+  store.fetchProductOptions.mockResolvedValue([])
+  store.fetchRevisions.mockResolvedValue({ items: [], total: 0 })
+  const preview = { lines: [], subtotal_excl_vat: '10', line_discount_total: '0', document_discount_amount: '0', taxable_amount: '10', vat_total: '0', total_incl_vat: '10' }
+  store.calculatePreview.mockResolvedValue(preview)
+  store.calculateRevision.mockResolvedValue(preview)
+  api.get.mockImplementation((url: string) => {
+    if (url === '/api/v1/vat-rates') return Promise.resolve({ items: rates() })
+    if (url.startsWith('/api/v1/vat-treatments')) return Promise.resolve({ items: [] })
+    if (url === '/api/v1/content-blocks' || url === '/api/v1/document-templates' || url === '/api/v1/note-templates') return Promise.resolve([])
+    if (url.startsWith('/api/v1/customers?q=')) return Promise.resolve({ items: [] })
+    if (url.includes('/document-chain')) return Promise.resolve({ quote_id: null, nodes: [], relations: [], events: [], totals: {}, available_actions: [] })
+    if (url === `/api/v1/customers/${inv.customer_id}`) return Promise.resolve({ id: inv.customer_id, name: 'Customer' })
+    throw new Error(`unexpected GET ${url}`)
+  })
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/invoices/:id/edit', component: InvoiceEdit }] })
+  await router.push(`/invoices/${inv.id}/edit`)
+  await router.isReady()
+  const wrapper = mount({ template: '<router-view />' }, { global: { plugins: [router, i18n], stubs: {
+    InvoicePaymentPanel: true, DocumentWorkflowPanel: true, DocumentSendDialog: true, PdfPreviewDialog: true, EmailLogPanel: true,
+  } } })
+  await flushPromises()
+  return wrapper
+}
+
+describe('InvoiceEdit VAT selection labels', () => {
+  const rate = { id: 'rate-A', label: 'SI2 test rate', percent: '23', active: true }
+  function frozenInvoice() {
+    const inv = invoice('A')
+    return { ...inv, taxes: [], lines: [{ ...inv.lines[0], vat_rate_id: rate.id, vat_rate_label: 'Original rate', vat_rate_percent: '21' }] }
+  }
+
+  it.each(['LINE', 'DOCUMENT'])('shows the issued %s tax snapshot before and during revision', async mode => {
+    const inv = { ...frozenInvoice(), tax_mode: mode, document_vat_rate_id: mode === 'DOCUMENT' ? rate.id : null,
+      taxes: mode === 'DOCUMENT' ? [{ vat_rate_id: rate.id, vat_rate_label: 'Original rate', vat_rate_percent: '21' }] : [] }
+    const wrapper = await mountWithVat(inv, () => [rate, { ...rate, id: 'rate-B', label: 'Reduced', percent: '9' }])
+    const selectedRate = () => wrapper.findAllComponents(NSelect).find(select => select.props('value') === rate.id)!
+    expect(selectedRate().text()).toContain('Original rate (21%)')
+    expect(selectedRate().text()).not.toContain('SI2 test rate')
+    await wrapper.findAll('button').find(button => button.text().includes('Revise invoice'))!.trigger('click')
+    await flushPromises()
+    expect(selectedRate().text()).toContain('Original rate (21%)')
+    const select = selectedRate()
+    await select.vm.$emit('update:value', 'rate-B')
+    await flushPromises()
+    expect(select.text()).toContain('Reduced (9%)')
+    await select.vm.$emit('update:value', rate.id)
+    await flushPromises()
+    expect(select.text()).toContain('Original rate (21%)')
+    wrapper.unmount()
+  })
+
+  it('keeps different snapshots of one rate distinct while new lines use the current dictionary', async () => {
+    const inv = frozenInvoice()
+    inv.lines.push({ ...inv.lines[0]!, id: 'line-B', name: 'Another line', vat_rate_label: 'Older rate', vat_rate_percent: '19' })
+    const wrapper = await mountWithVat(inv, () => [rate])
+    const selectedRates = () => wrapper.findAllComponents(NSelect).filter(select => select.props('value') === rate.id)
+    expect(selectedRates().map(select => select.text())).toEqual(['Original rate (21%)', 'Older rate (19%)'])
+    await wrapper.findAll('button').find(button => button.text().includes('Revise invoice'))!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('Add line'))!.trigger('click')
+    const newRate = wrapper.findAllComponents(NSelect).find(select => select.props('value') == null
+      && select.props('options')?.some((option: any) => option.value === rate.id))!
+    await newRate.vm.$emit('update:value', rate.id)
+    await flushPromises()
+    expect(selectedRates().map(select => select.text())).toEqual(['Original rate (21%)', 'Older rate (19%)', 'SI2 test rate (23%)'])
+    wrapper.unmount()
+  })
+
+  it('uses current dictionary choices for a draft', async () => {
+    const wrapper = await mountWithVat({ ...frozenInvoice(), status: 'DRAFT' }, () => [rate])
+    const select = wrapper.findAllComponents(NSelect).find(select => select.props('value') === rate.id)!
+    expect(select.text()).toContain('SI2 test rate (23%)')
+    wrapper.unmount()
+  })
+
+  it('refreshes choices on entering revision after another tab restores the dictionary', async () => {
+    let rates = [rate]
+    const wrapper = await mountWithVat(frozenInvoice(), () => rates)
+    rates = [{ ...rate, label: 'Restored dictionary', percent: '21' }, { ...rate, id: 'rate-new', label: 'New choice', percent: '9' }]
+    await wrapper.findAll('button').find(button => button.text().includes('Revise invoice'))!.trigger('click')
+    await flushPromises()
+    const select = wrapper.findAllComponents(NSelect).find(select => select.props('value') === rate.id)!
+    expect(select.props('options')).toContainEqual({ value: 'rate-new', label: 'New choice (9%)' })
+    expect(select.text()).toContain('Original rate (21%)')
+    expect(api.get.mock.calls.filter(([url]) => url === '/api/v1/vat-rates')).toHaveLength(2)
+    wrapper.unmount()
+  })
+})
+
 describe('InvoiceEdit with actual Naive UI controls', () => {
   it('freezes every editor control during a pending save and unlocks them after failure', async () => {
     const inv = invoice('A')

@@ -168,11 +168,12 @@ const previewError = ref<string | null>(null)
 
 // ------------------------------------------------------------------ fetch ref data
 
-async function loadReferenceData() {
+async function loadReferenceData(isCurrent: () => boolean) {
   const [ratesRes, treatsRes] = await Promise.all([
     get<{ items: VatRateRead[] }>('/api/v1/vat-rates'),
     get<{ items: VatTreatmentRead[] }>('/api/v1/vat-treatments?side=SALES'),
   ])
+  if (!isCurrent()) return
   vatRates.value = ratesRes.items
   vatTreatments.value = treatsRes.items
 }
@@ -275,6 +276,37 @@ const vatRateOptions = computed(() => vatRates.value.map(r => ({
   label: `${r.label} (${r.percent}%)`,
   value: r.id,
 })))
+
+function withFrozenRateOption(snapshot: {
+  vat_rate_id?: string | null
+  vat_rate_label?: string | null
+  vat_rate_percent?: string | number | null
+} | undefined) {
+  const options = vatRateOptions.value
+  if (!snapshot?.vat_rate_id || snapshot.vat_rate_label == null || snapshot.vat_rate_percent == null) return options
+  const frozen = { value: snapshot.vat_rate_id, label: `${snapshot.vat_rate_label} (${snapshot.vat_rate_percent}%)` }
+  return options.some(option => option.value === frozen.value)
+    ? options.map(option => option.value === frozen.value ? frozen : option)
+    : [...options, frozen]
+}
+
+function lineVatRateOptions(line: LineRow) {
+  const current = existingInvoice.value
+  if (!current || current.status === 'DRAFT') return vatRateOptions.value
+  const saved = current.lines?.find(row => row.id === line._lineId)
+  // Retained selections use their own frozen label/rate, including when two
+  // lines share a dictionary ID but have different historical percentages.
+  return saved && saved.vat_rate_id === line.vat_rate_id
+    ? withFrozenRateOption(saved)
+    : vatRateOptions.value
+}
+
+const documentVatRateOptions = computed(() => {
+  const current = existingInvoice.value
+  if (!current || current.status === 'DRAFT' || !current.document_vat_rate_id
+    || documentVatRateId.value !== current.document_vat_rate_id) return vatRateOptions.value
+  return withFrozenRateOption(current.taxes?.find(tax => tax.vat_rate_id === current.document_vat_rate_id))
+})
 
 const vatTreatmentOptions = computed(() => vatTreatments.value
   .filter(t => t.active)
@@ -672,7 +704,11 @@ async function enterRevision(): Promise<void> {
   const invoiceId = current.id
   eligibilityChecking.value = true
   try {
-    const fresh = await store.fetchInvoice(invoiceId)
+    const [fresh] = await Promise.all([
+      store.fetchInvoice(invoiceId),
+      loadReferenceData(() => context === eligibilityGeneration
+        && existingInvoice.value?.id === invoiceId && route.params.id === invoiceId),
+    ])
     if (context !== eligibilityGeneration || existingInvoice.value?.id !== invoiceId || route.params.id !== invoiceId) return
     populateFromInvoice(fresh)
     if (!fresh.revision_eligibility?.available) {
@@ -845,7 +881,7 @@ async function loadPage(id = route.params.id as string | undefined): Promise<voi
   pageLoading.value = true
   try {
     await Promise.all([
-      loadReferenceData(),
+      loadReferenceData(() => generation === loadGeneration),
       loadContentLibraries(),
       searchCustomers(''),
       store.fetchProductOptions().then(opts => { productOptions.value = opts }),
@@ -1254,7 +1290,7 @@ function handleReceiptSent(log: EmailLogRead) {
                     <n-form-item :label="t('invoices.documentVatRate')" required>
                       <n-select
                         v-model:value="documentVatRateId"
-                        :options="vatRateOptions"
+                        :options="documentVatRateOptions"
                         :placeholder="t('invoices.selectVatRate')"
                         :clearable="!isReadOnly"
                       />
@@ -1466,7 +1502,7 @@ function handleReceiptSent(log: EmailLogRead) {
                       <n-form-item :label="t('invoices.vatRate')" size="small">
                         <n-select
                           v-model:value="line.vat_rate_id"
-                          :options="vatRateOptions"
+                          :options="lineVatRateOptions(line)"
                           :placeholder="t('invoices.selectVatRate')"
                           :clearable="!isReadOnly"
                           size="small"

@@ -736,6 +736,7 @@ describe('InvoiceEdit revision workflow', () => {
     const wrapper = await ready()
     store.saveRevision.mockReturnValue(new Promise((_resolve, reject) => { rejectSave = reject }))
     await wrapper.findAll('button').find(button => button.text().includes('Revise invoice'))!.trigger('click')
+    await flushPromises()
     const lineName = wrapper.findAll('input').find(input => input.element.value === 'line-A')!
     await lineName.setValue('Kept local line')
     const textInputs = wrapper.findAll('input').filter(input => input.attributes('type') !== 'checkbox')
@@ -801,6 +802,7 @@ describe('InvoiceEdit revision workflow', () => {
     const { ready } = mountDetail(inv, [block])
     const wrapper = await ready()
     await wrapper.findAll('button').find(button => button.text().includes('Revise invoice'))!.trigger('click')
+    await flushPromises()
     const selector = wrapper.findAll('select').find(select => Array.from(select.element.options).some(option => option.text === 'Current terms'))!
     await selector.setValue('terms-1')
     expect(wrapper.findAll('input').some(input => input.element.value === 'Copied term text')).toBe(true)
@@ -821,6 +823,7 @@ describe('InvoiceEdit revision workflow', () => {
     const { ready } = mountDetail(inv)
     const wrapper = await ready()
     await wrapper.findAll('button').find(button => button.text().includes('Revise invoice'))!.trigger('click')
+    await flushPromises()
     ;(wrapper.findComponent(InvoiceEdit).vm.$.setupState as any).invoiceDate = '2026-10-01'
     await flushPromises()
     expect(wrapper.text()).toContain('Q3 2026')
@@ -833,6 +836,7 @@ describe('InvoiceEdit revision workflow', () => {
     const { ready } = mountDetail(inv)
     const wrapper = await ready()
     await wrapper.findAll('button').find(button => button.text().includes('Revise invoice'))!.trigger('click')
+    await flushPromises()
     await wrapper.findAll('button').find(button => button.text().includes('Cancel revision'))!.trigger('click')
     await flushPromises()
     expect(dialogs.warning).not.toHaveBeenCalled()
@@ -849,6 +853,7 @@ describe('InvoiceEdit revision workflow', () => {
     })
     const wrapper = await ready()
     await wrapper.findAll('button').find(button => button.text().includes('Revise invoice'))!.trigger('click')
+    await flushPromises()
     await wrapper.findAll('input').find(input => input.element.value === 'line-A')!.setValue('Unsaved line')
     dialogs.warning.mockImplementationOnce((options: any) => options.onNegativeClick())
     await router.push('/invoices/B/edit')

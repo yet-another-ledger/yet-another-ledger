@@ -44,14 +44,16 @@ export function formatDate(value: string | number | Date | null | undefined): st
 }
 
 /**
- * Format a datetime value for display as `YYYY-MM-DD HH:mm` (local time, 24h).
+ * Format a datetime as `YYYY-MM-DD HH:mm`, optionally including seconds
+ * (local time, 24h).
  * Deterministic counterpart to `formatDate` for timestamps that carry a time.
  */
-export function formatDateTime(value: string | number | Date | null | undefined): string {
+export function formatDateTime(value: string | number | Date | null | undefined, includeSeconds = false): string {
   if (value == null || value === '') return ''
   const d = value instanceof Date ? value : new Date(value)
   if (Number.isNaN(d.getTime())) return ''
   const hh = String(d.getHours()).padStart(2, '0')
   const mm = String(d.getMinutes()).padStart(2, '0')
-  return `${localDateStr(d)} ${hh}:${mm}`
+  const result = `${localDateStr(d)} ${hh}:${mm}`
+  return includeSeconds ? `${result}:${String(d.getSeconds()).padStart(2, '0')}` : result
 }
