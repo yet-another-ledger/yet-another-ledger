@@ -10,6 +10,8 @@
 
 ---
 
+> **M16 supplement (2026-10-30)**: [§7](#7-m16-supplement--home-batteries-and-external-sales-originals) separately records official web guidance for home batteries and self-billing. It supplements the original PDF review; it does not imply that the PDF established the detailed five-year battery calculation. Implementation boundaries are in [M16](../plan/milestones/M16.md).
+
 ## 0. One-line conclusion (for the time-pressed)
 
 - Of our 10-row mapping proposal: **7 rows ✅ align with the official guidance**, **2 rows ⚠️ diverge or require additional conditions**, and **1 row ❓ the PDF explicitly states should not be included in the Dutch return (i.e. "leave blank / do not report" is correct)**.
@@ -363,3 +365,27 @@ Key point: **In reverse-charge situations, both the "net amount (base)" and the 
 7. **Specific apportionment algorithm for gemengd / privé (§3.5)**: The PDF only states the principle (belaste:vrijgestelde omzet ratio, or actual use). **The vehicle forfait and specific business% calculation must be looked up on belastingdienst.nl/btw-gebruik / the vehicle hulpmiddel**.
 8. **Which services fall within 3b**: The special services listed on p. 14 that are excluded from 3b/ICP (immovable property, passenger transport, admission to cultural/sporting/entertainment events, catering, short-term hire, etc.) have special place-of-supply rules. **If the author will sell such cross-border B2B services, each category must be checked individually** (most do not go into 3b).
 9. **Margeregeling, KOR, OSS**: None implemented/enabled in v1. If the author's business reaches any of these situations in the future (second-hand goods margin scheme, annual turnover ≤ €20k and wish to use KOR, EU distance sales), a separate milestone must be established and the relevant sections of this guide revisited.
+
+---
+
+## 7. M16 supplement · Home batteries and external sales originals
+
+> Added on 2026-10-30 from the official web sources below, separately from the original PDF analysis. M16 is planned, not implemented. Earlier milestone acceptance records remain historical.
+
+### 7.1 Home battery under the ordinary VAT regime
+
+The Tax Administration's [home-battery guidance](https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/thuisbatterij-btw) makes deduction conditional on qualifying electricity trading, EMS, a dynamic contract, correctly named documents and ordinary VAT status. Purely private use does not qualify. Eligible fully attributed acquisitions can have purchase VAT deducted; electricity-sale remuneration attracts output VAT. The page also notes solar-electricity sales where applicable.
+
+For a fully deducted battery also used privately, determine annual private use using EMS information, optionally with energy statements. The official example allocates acquisition net cost over the in-service calendar year and four following years. Multiply that annual cost by that year's private-use percentage and the acquisition VAT rate. Report private-use base and VAT in Q4 box 1d. No such acquisition adjustment remains from year six; continuing sales remain separately taxable.
+
+Example: €10,000 net cost, €2,100 purchase VAT and 45% private use give annual base `10,000 / 5 × 45% = 900` and VAT `900 × 21% = 189`. This is not an instruction to deduct only one fifth of purchase VAT initially.
+
+### 7.2 Externally issued sales and numbering
+
+Under the [official self-billing rules](https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/btw/administratie_bijhouden/facturen_maken/factuureisen/aangepaste_regels_facturen/factuur_uitgereikt_door_afnemer), prior agreement, correct supplier/customer identities, the self-billing statement and valid invoice content matter; the supplier remains responsible for VAT. The supplier records the document as a sale and can retain the customer's number or assign an internal consecutive number. The general [invoice requirements](https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/btw/administratie_bijhouden/facturen_maken/factuureisen/factuureisen) require consecutive numbering in one or more series and unique invoice numbers; uniqueness alone is not the complete rule.
+
+### 7.3 Application boundary and unresolved-case handling
+
+[M16](../plan/milestones/M16.md) freezes a bounded ordinary-VAT implementation: full initial deduction, separate annual inputs, known subtotals plus explicit missing-data warnings, and a reliable 1d base. It does not generalize M10's current-year percentage adjustment to a battery or infer a base for legacy contributions when it cannot determine one reliably. KOR, partial initial deduction, disposal/special use changes and general capital-goods adjustments remain outside M16.
+
+External sales recognition requires the actual sales evidence and tax breakdown, not a platform's net payout or the net payable on a mixed household energy statement. Excluding an activity from company P/L is a bookkeeping selection, not a ruling on income-tax liability; [income-tax activities are assessed separately, including their relationship](https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/winst/inkomstenbelasting/wanneer_bent_u_ondernemer_voor_de_inkomstenbelasting/).

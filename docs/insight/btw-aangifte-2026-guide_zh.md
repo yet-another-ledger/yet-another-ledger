@@ -10,6 +10,8 @@
 
 ---
 
+> **M16 补充（2026-10-30）**：[§7](#7-m16-补充家用储能与外部销售原件) 单独记录储能及 self-billing 的官方网页口径，补充原 PDF 解读，不表示 PDF 已确认储能五年详细算法。实施边界见 [M16](../plan/milestones/M16_zh.md)。
+
 ## 0. 一句话结论（给赶时间的人）
 
 - 我们 10 行映射提案里：**7 行 ✅ 与官方一致**、**2 行 ⚠️ 有出入或需补条件**、**1 行 ❓ PDF 明确说不进荷兰申报（即“留空/不报”是对的）**。
@@ -363,3 +365,27 @@ PDF 区分三个场景，**净效果都是「自核 + 同额抵扣 = 净零」�
 7. **gemengd / privé 拆分的具体比例算法（§3.5）**：PDF 只给原则（按 belaste:vrijgestelde omzet 比例，或按实际使用）。**汽车 forfait、business% 的具体计算须查 belastingdienst.nl/btw-gebruik / 汽车 hulpmiddel**。
 8. **3b 含哪些「服务」**：第 14 页那串「不进 3b/ICP」的特殊服务（不动产、客运、文体娱入场、餐饮、短租等）地点规则特殊。**若作者会卖这类跨境 B2B 服务，需逐类核对落点**（多数不进 3b）。
 9. **margeregeling、KOR、OSS**：v1 均不实现/不启用；若将来作者业务触及（二手货差额征税、年营业额 ≤€20k 想用 KOR、EU 远程销售），需另立里程碑并复核本指南相关段落。
+
+---
+
+## 7. M16 补充：家用储能与外部销售原件
+
+> 2026-10-30 根据下列官方网页补充，独立于原 PDF 分析。M16 已规划但尚未实施，既有里程碑验收记录仍为历史。
+
+### 7.1 普通 VAT 制度下的家用储能
+
+税务局[储能指南](https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/thuisbatterij-btw) 要求符合条件的电力交易、EMS、动态合同、正确抬头凭证及普通 VAT 状态。纯私人使用不符合条件；符合全额归属条件的购置可抵扣采购 VAT，售电报酬产生销项 VAT。网页还提示适用时应处理光伏卖电。
+
+全额抵扣且兼有私人使用时，每年根据 EMS 信息、必要时结合能源账单确定私人使用。官方示例把未税购置成本分摊到投入使用当年及随后四个日历年，用年度基础乘当年私人比例及购置 VAT 税率，在 Q4 的 1d 填基础和税额。第六年起不再产生这项购置调整，持续卖电仍单独纳税。
+
+示例：未税 €10,000、购置 VAT €2,100、私人比例 45%，年度基础为 `10,000 ÷ 5 × 45% = 900`，VAT 为 `900 × 21% = 189`。这不表示最初购置 VAT 只能抵扣五分之一。
+
+### 7.2 外部销售原件与编号
+
+按[官方 self-billing 规则](https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/btw/administratie_bijhouden/facturen_maken/factuureisen/aangepaste_regels_facturen/factuur_uitgereikt_door_afnemer)，须注意事先约定、正确供需双方身份、self-billing 标注和有效发票内容；供应方仍对 VAT 负责。供应方将其记为销售，可保留买方原编号或赋予内部连续编号。通用[发票要求](https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/btw/administratie_bijhouden/facturen_maken/factuureisen/factuureisen) 要求一个或多个连续编号系列及唯一发票号，唯一性不是完整规则。
+
+### 7.3 应用边界与未覆盖情形
+
+[M16](../plan/milestones/M16_zh.md) 冻结受限的普通 VAT 实现：最初全额抵扣、年度单独输入、已知小计及明确缺项提示、可靠的 1d 基础。不将 M10 的当年百分比算法推广到储能，也不在无法可靠确定时推断旧贡献的计税基础。KOR、部分初始抵扣、处置／特殊用途变化和通用资本品调整仍不属于 M16。
+
+外部销售确认须依据真实销售证据及税额拆分，不根据平台净打款或混合家庭能源账单的净应付额。排除公司 P/L 只是记账选择，不是所得税免责结论；[所得税会分别判断活动及其关联](https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/winst/inkomstenbelasting/wanneer_bent_u_ondernemer_voor_de_inkomstenbelasting/)。
