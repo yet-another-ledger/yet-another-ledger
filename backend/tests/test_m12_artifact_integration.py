@@ -658,7 +658,7 @@ async def test_refund_delete_tombstones_cash_but_retains_artifact_and_email_audi
         assert hashlib.sha256(retained.pdf_bytes).hexdigest() == artifact["sha256"]
         # The 0040 downgrade guard aborts before running its DDL, so a failed
         # attempt must retain whichever head was active before the attempt.
-        assert (await session.scalar(text("SELECT version_num FROM alembic_version"))) == "0045"
+        assert (await session.scalar(text("SELECT version_num FROM alembic_version"))) == "0046"
 
 
 @pytest.mark.parametrize("output_action", ["preview", "download", "send"])

@@ -137,6 +137,7 @@ async def compute_expense_report(
     company_id: uuid.UUID,
     date_from: date,
     date_to: date,
+    include_in_pl: bool | None = None,
 ) -> ExpenseReport:
     """Compute an expense report aggregated by category.
 
@@ -168,6 +169,8 @@ async def compute_expense_report(
         )
         .order_by(Expense.expense_date, Expense.id)
     )
+    if include_in_pl is not None:
+        stmt = stmt.where(Expense.include_in_pl.is_(include_in_pl))
     result = await session.execute(stmt)
     expenses = result.scalars().all()
 

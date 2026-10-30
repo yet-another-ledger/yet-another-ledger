@@ -10,6 +10,7 @@ export type PurchaseExpenseFields = {
   expense_date: string; category_id: string; supplier_name: string | null; vat_treatment_id: string; vat_rate_id: string
   net_amount: number | string; vat_amount: number | string; deductible?: boolean | null; reference: string | null; note: string | null
   paid_by: components['schemas']['PaidBy']; business_percentage: number | string; depreciation_years: number
+  include_in_pl: boolean; pl_cost_basis: components['schemas']['PlCostBasis']
 }
 
 /** Build the raw contract payload shared by the Expense editor and inbox review form. */

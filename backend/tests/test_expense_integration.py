@@ -114,6 +114,8 @@ async def _create_expense(
     deductible: bool | None = None,
     reference: str | None = None,
     note: str | None = None,
+    include_in_pl: bool | None = None,
+    pl_cost_basis: str | None = None,
 ) -> dict:
     """Create an expense and return its JSON."""
     body: dict = {
@@ -132,6 +134,10 @@ async def _create_expense(
         body["reference"] = reference
     if note is not None:
         body["note"] = note
+    if include_in_pl is not None:
+        body["include_in_pl"] = include_in_pl
+    if pl_cost_basis is not None:
+        body["pl_cost_basis"] = pl_cost_basis
 
     resp = await client.post("/api/v1/expenses", json=body)
     assert resp.status_code == 201, resp.text
@@ -701,6 +707,8 @@ class TestExpenseCRUD:
             supplier_name="GitHub BV",
             reference="INV-2026-001",
             note="Annual subscription",
+            include_in_pl=False,
+            pl_cost_basis="GROSS",
         )
         from decimal import Decimal
 
@@ -739,6 +747,22 @@ class TestExpenseCRUD:
         assert Decimal(updated["gross_amount"]) == Decimal("181.50")
         assert updated["supplier_name"] == "KLM BV"
         assert updated["category_name"] == "Business Travel Expenses"
+        # Old clients omit these fields on PUT and keep the stored settings.
+        assert updated["include_in_pl"] is False
+        assert updated["pl_cost_basis"] == "GROSS"
+
+        all_report = await db_client.get(
+            "/api/v1/reports/expenses?from=2026-01-01&to=2026-12-31"
+        )
+        included_report = await db_client.get(
+            "/api/v1/reports/expenses?from=2026-01-01&to=2026-12-31&include_in_pl=true"
+        )
+        excluded_report = await db_client.get(
+            "/api/v1/reports/expenses?from=2026-01-01&to=2026-12-31&include_in_pl=false"
+        )
+        assert all_report.json()["total_net"] == "150.00"
+        assert included_report.json()["total_net"] == "0"
+        assert excluded_report.json()["total_net"] == "150.00"
 
         # DELETE
         del_resp = await db_client.delete(f"/api/v1/expenses/{exp_id}")
@@ -1130,6 +1154,56 @@ class TestExpenseCalculate:
             Decimal("21"), abs=Decimal("0.01")
         )
 
+    async def test_cost_preview_handles_nonrecoverable_and_reverse_charge_vat(
+        self, db_client: AsyncClient
+    ) -> None:
+        """AUTO includes EU consumer VAT but excludes reverse-charge self-assessment."""
+        from decimal import Decimal
+
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        purchase = seeds["purch_treatments"]
+        common = {
+            "net_amount": "100.00",
+            "vat_amount": "21.00",
+            "deductible": True,
+            "pl_cost_basis": "AUTO",
+            "include_in_pl": True,
+            "business_percentage": "100",
+            "depreciation_years": 1,
+        }
+        eu_vat = await db_client.post(
+            "/api/v1/expenses/cost-preview",
+            json={
+                **common,
+                "vat_treatment_id": purchase["EU_B2C_PURCH"]["id"],
+            },
+        )
+        assert eu_vat.status_code == 200, eu_vat.text
+        assert Decimal(eu_vat.json()["cost_basis_amount"]) == Decimal("121.00")
+        assert Decimal(eu_vat.json()["annual_cost"]) == Decimal("121.00")
+
+        reverse_charge = await db_client.post(
+            "/api/v1/expenses/cost-preview",
+            json={
+                **common,
+                "vat_treatment_id": purchase["EU_B2B_REVERSE_PURCH"]["id"],
+            },
+        )
+        assert reverse_charge.status_code == 200, reverse_charge.text
+        assert Decimal(reverse_charge.json()["cost_basis_amount"]) == Decimal("100.00")
+
+        excluded = await db_client.post(
+            "/api/v1/expenses/cost-preview",
+            json={
+                **common,
+                "vat_treatment_id": purchase["EU_B2C_PURCH"]["id"],
+                "include_in_pl": False,
+            },
+        )
+        assert excluded.status_code == 200, excluded.text
+        assert Decimal(excluded.json()["annual_cost"]) == Decimal("0.00")
+
     def _setup_and_get_rate_id_sync(self) -> None:
         """Helper placeholder – actual setup uses async helpers above."""
 
@@ -1197,3 +1271,123 @@ class TestExpenseCalculate:
                 json={"net_amount": "100.00", "vat_rate_id": rate["id"]},
             )
         assert resp.status_code == 401
+
+
+@pytest.mark.integration
+class TestCostPreviewPersistenceParity:
+    @pytest.mark.parametrize(
+        ("basis", "deductible", "percentage", "years", "included", "expected"),
+        [
+            ("NET", True, "50", 1, True, "50.01"),
+            ("NET", True, "49.9995", 1, True, "50.01"),
+            ("NET", True, "49.9994", 1, True, "50.00"),
+            ("AUTO", True, "50", 1, True, "50.01"),
+            ("AUTO", False, "50", 1, True, "60.51"),
+            ("GROSS", True, "50", 1, True, "60.51"),
+            ("AUTO", None, "50", 1, True, "60.51"),
+            ("AUTO", False, "75", 3, True, "30.26"),
+            ("AUTO", False, "0", 1, True, "0.00"),
+            ("NET", True, "50", 1, False, "0.00"),
+        ],
+    )
+    async def test_raw_preview_matches_saved_cost_and_report(
+        self, db_client: AsyncClient, basis: str, deductible: bool | None,
+        percentage: str, years: int, included: bool, expected: str,
+    ) -> None:
+        from decimal import Decimal
+
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        cat = await _create_expense_category(db_client, default_deductible=False)
+        body = {
+            "net_amount": "100.005", "vat_amount": "21.005",
+            "category_id": cat["id"],
+            "vat_treatment_id": seeds["purch_treatments"]["NL_DOMESTIC_PURCH"]["id"],
+            "deductible": deductible, "pl_cost_basis": basis, "include_in_pl": included,
+            "business_percentage": percentage, "depreciation_years": years,
+        }
+        preview = await db_client.post("/api/v1/expenses/cost-preview", json=body)
+        assert preview.status_code == 200, preview.text
+        saved = await db_client.post("/api/v1/expenses", json={
+            **body, "expense_date": "2026-06-13",
+            "vat_rate_id": seeds["rates"]["NL standard (21%)"]["id"],
+        })
+        assert saved.status_code == 201, saved.text
+        assert Decimal(saved.json()["net_amount"]) == Decimal("100.010")
+        current = await db_client.get(f"/api/v1/expenses/{saved.json()['id']}/cost-preview")
+        report = await db_client.get("/api/v1/reports/profit-loss?from=2026-01-01&to=2026-12-31")
+        assert current.status_code == report.status_code == 200
+        for result in (preview, current):
+            assert Decimal(result.json()["annual_cost"]) == Decimal(expected)
+        assert Decimal(report.json()["expense_actual"]) == Decimal(expected)
+
+    @pytest.mark.parametrize("changed_field", ["effect", "code"])
+    async def test_current_preview_uses_persisted_tax_snapshot(
+        self, db_client: AsyncClient, changed_field: str,
+    ) -> None:
+        from decimal import Decimal
+
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        cat = await _create_expense_category(db_client)
+        treatment = seeds["purch_treatments"]["NL_DOMESTIC_PURCH"]
+        # Changing a normal deductible treatment's code to EU_B2C makes proposed VAT
+        # irrecoverable; changing effect to ZERO_REVERSE removes irrecoverable VAT.
+        deductible = changed_field == "code"
+        original, proposed = ("100.00", "121.00") if deductible else ("121.00", "100.00")
+        expense = await _create_expense(
+            db_client, category_id=cat["id"], vat_treatment_id=treatment["id"],
+            vat_rate_id=seeds["rates"]["NL standard (21%)"]["id"],
+            deductible=deductible, pl_cost_basis="AUTO",
+        )
+        path = f"/api/v1/expenses/{expense['id']}/cost-preview"
+        before = await db_client.get(path)
+        report_path = "/api/v1/reports/profit-loss?from=2026-01-01&to=2026-12-31"
+        report_before = await db_client.get(report_path)
+        if changed_field == "code":
+            # Free the seeded unique code through the public API first.
+            eu = seeds["purch_treatments"]["EU_B2C_PURCH"]
+            renamed = await db_client.put(f"/api/v1/vat-treatments/{eu['id']}", json={
+                **eu, "code": "OLD_EU_B2C_PURCH",
+            })
+            assert renamed.status_code == 200, renamed.text
+        changed = await db_client.put(f"/api/v1/vat-treatments/{treatment['id']}", json={
+            **treatment, changed_field: "EU_B2C_PURCH" if deductible else "ZERO_REVERSE",
+        })
+        assert changed.status_code == 200, changed.text
+        after = await db_client.get(path)
+        raw = {
+            "net_amount": expense["net_amount"], "vat_amount": expense["vat_amount"],
+            "vat_treatment_id": treatment["id"], "deductible": deductible,
+            "pl_cost_basis": "AUTO", "business_percentage": "100", "depreciation_years": 1,
+        }
+        proposal = await db_client.post("/api/v1/expenses/cost-preview", json=raw)
+        assert proposal.status_code == 200, proposal.text
+        assert before.json() == after.json()
+        assert Decimal(after.json()["annual_cost"]) == Decimal(original)
+        assert Decimal(proposal.json()["annual_cost"]) == Decimal(proposed)
+        report_after = await db_client.get(report_path)
+        assert report_before.json() == report_after.json()
+        assert Decimal(report_after.json()["expense_actual"]) == Decimal(original)
+        # Preview is read-only; a subsequent real update explicitly snapshots the new treatment.
+        updated = await db_client.put(f"/api/v1/expenses/{expense['id']}", json={
+            **raw, "expense_date": expense["expense_date"], "category_id": cat["id"],
+            "vat_rate_id": seeds["rates"]["NL standard (21%)"]["id"],
+        })
+        assert updated.status_code == 200, updated.text
+        current = await db_client.get(path)
+        for field in ("annual_cost", "cost_basis_amount"):
+            assert Decimal(current.json()[field]) == Decimal(proposal.json()[field])
+        assert current.json()["included_in_pl"] == proposal.json()["included_in_pl"]
+
+    async def test_current_cost_preview_guards(self, db_client: AsyncClient) -> None:
+        paths = [
+            f"/api/v1/{resource}/{uuid.uuid4()}/cost-preview"
+            for resource in ("expenses", "recurring-expenses")
+        ]
+        for path in paths:
+            assert (await db_client.get(path)).status_code == 401
+        await _full_auth(db_client)
+        await _setup_company(db_client)
+        for path in paths:
+            assert (await db_client.get(path)).status_code == 404

@@ -43,6 +43,14 @@ class VatTreatmentEffect(enum.StrEnum):
     EXEMPT = "EXEMPT"
 
 
+class PlCostBasis(enum.StrEnum):
+    """Source amount used to recognize an Expense in profit and loss."""
+
+    NET = "NET"
+    GROSS = "GROSS"
+    AUTO = "AUTO"
+
+
 class InvoiceStatus(enum.StrEnum):
     """Lifecycle status of an invoice."""
 

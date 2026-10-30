@@ -30,22 +30,25 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jai.models._enums import ExpenseKind, PaidBy, VatTreatmentSide
+from jai.models._enums import ExpenseKind, PaidBy, PlCostBasis, VatTreatmentEffect, VatTreatmentSide
 from jai.models.company import Company
 from jai.models.dictionary import ExpenseCategory
 from jai.models.expense import Expense
 from jai.models.expense_attachment import ExpenseAttachment
+from jai.models.recurring_expense import RecurringExpense
 from jai.models.vat import VatRate, VatTreatment
 from jai.schemas.expense import (
     ExpenseAttachmentListResponse,
     ExpenseAttachmentRead,
     ExpenseCalculateRequest,
     ExpenseCalculateResult,
+    ExpenseCostPreviewRequest,
+    ExpenseCostPreviewResult,
     ExpenseInput,
     ExpenseListItem,
     ExpenseListResponse,
@@ -135,6 +138,48 @@ def compute_expense_vat_from_rate(
     vat_q = quantize_to_minor_unit(net_q * vat_rate_percent / Decimal("100"))
     gross_q = quantize_to_minor_unit(net_q + vat_q)
     return net_q, vat_q, gross_q
+
+
+def compute_pl_cost_basis(
+    net: Decimal,
+    vat: Decimal,
+    effect: VatTreatmentEffect,
+    deductible: bool,
+    basis: PlCostBasis,
+    treatment_code: str = "",
+    gross: Decimal | None = None,
+) -> Decimal:
+    """Select the expense basis without counting self-assessed VAT twice."""
+    if basis == PlCostBasis.NET:
+        return net
+    if basis == PlCostBasis.GROSS:
+        if gross is not None:
+            return gross
+        return compute_expense_amounts(net, vat)[2]
+    irrecoverable = treatment_code == "EU_B2C_PURCH" or (
+        effect == VatTreatmentEffect.APPLY_RATE and not deductible
+    )
+    if basis == PlCostBasis.AUTO and irrecoverable:
+        if gross is not None:
+            # Persisted net and VAT are the source snapshots; summing here
+            # avoids introducing another pre-allocation rounding boundary.
+            return net + vat
+        net_q, vat_q, _ = compute_expense_amounts(net, vat)
+        return net_q + vat_q
+    return net
+
+
+def compute_annual_pl_cost(
+    cost_basis: Decimal,
+    business_percentage: Decimal,
+    depreciation_years: int,
+    include_in_pl: bool,
+) -> Decimal:
+    """Apply the existing business-use/depreciation rules to one expense."""
+    if not include_in_pl:
+        return Decimal("0.00")
+    amount = cost_basis * business_percentage / Decimal("100") / Decimal(depreciation_years)
+    return quantize_to_minor_unit(amount)
 
 
 def resolve_deductible(
@@ -293,6 +338,8 @@ def _expense_to_read(exp: Expense, attachment_count: int = 0) -> ExpenseRead:
         paid_by=PaidBy(exp.paid_by),
         business_percentage=Decimal(str(exp.business_percentage)),
         depreciation_years=int(exp.depreciation_years),
+        include_in_pl=exp.include_in_pl,
+        pl_cost_basis=PlCostBasis(exp.pl_cost_basis),
         is_draft=exp.is_draft,
         recurring_expense_id=getattr(exp, "recurring_expense_id", None),
         attachment_count=attachment_count,
@@ -367,6 +414,10 @@ async def _apply_body(
     exp.paid_by = body.paid_by.value
     exp.business_percentage = body.business_percentage
     exp.depreciation_years = body.depreciation_years
+    if "include_in_pl" in body.model_fields_set or exp.id is None:
+        exp.include_in_pl = body.include_in_pl
+    if "pl_cost_basis" in body.model_fields_set or exp.id is None:
+        exp.pl_cost_basis = body.pl_cost_basis.value
 
 
 # ---------------------------------------------------------------------------
@@ -639,6 +690,8 @@ async def list_expenses(
             paid_by=PaidBy(exp.paid_by),
             business_percentage=Decimal(str(exp.business_percentage)),
             depreciation_years=int(exp.depreciation_years),
+            include_in_pl=exp.include_in_pl,
+            pl_cost_basis=PlCostBasis(exp.pl_cost_basis),
         )
         for exp in expenses
     ]
@@ -685,6 +738,92 @@ async def calculate_expense_preview(
         gross_amount=gross_q,
         vat_rate_percent=percent,
     )
+
+
+async def calculate_expense_cost_preview(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    request: ExpenseCostPreviewRequest,
+) -> ExpenseCostPreviewResult:
+    """Return the annual P/L cost implied by raw values, without persistence."""
+    treatment = await _load_vat_treatment(session, request.vat_treatment_id, company_id)
+    category = (
+        await _load_category(session, request.category_id, company_id)
+        if request.category_id is not None
+        else None
+    )
+    deductible = resolve_deductible(
+        request.deductible, category.default_deductible if category is not None else None
+    )
+    # This is a proposed write: normalize exactly where _apply_body does.
+    # Stored-history previews below deliberately do not add this rounding boundary.
+    net, vat, gross = compute_expense_amounts(request.net_amount, request.vat_amount)
+    basis = compute_pl_cost_basis(
+        net,
+        vat,
+        VatTreatmentEffect(treatment.effect),
+        deductible,
+        request.pl_cost_basis,
+        str(treatment.code),
+        gross,
+    )
+    annual = compute_annual_pl_cost(
+        basis,
+        # The proposed write also passes through NUMERIC(6,3) storage. Mirror
+        # that positive-value rounding here without touching stored history.
+        request.business_percentage.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP),
+        request.depreciation_years,
+        request.include_in_pl,
+    )
+    return ExpenseCostPreviewResult(
+        cost_basis_amount=basis,
+        annual_cost=annual,
+        included_in_pl=request.include_in_pl,
+    )
+
+
+def compute_stored_cost_preview(snapshot: Expense | RecurringExpense) -> ExpenseCostPreviewResult:
+    """Use persisted amounts/tax semantics, just as P/L and template generation do."""
+    if isinstance(snapshot, Expense):
+        net = Decimal(str(snapshot.base_net_amount))
+        vat = Decimal(str(snapshot.base_vat_amount))
+        gross = Decimal(str(snapshot.base_gross_amount))
+    else:
+        net = Decimal(str(snapshot.net_amount))
+        vat = Decimal(str(snapshot.vat_amount))
+        gross = Decimal(str(snapshot.gross_amount))
+    if isinstance(snapshot, Expense) and ExpenseKind(snapshot.kind) == ExpenseKind.MILEAGE:
+        basis = net
+    else:
+        basis = compute_pl_cost_basis(
+            net,
+            vat,
+            VatTreatmentEffect(snapshot.vat_treatment_effect),
+            snapshot.deductible,
+            PlCostBasis(snapshot.pl_cost_basis),
+            snapshot.vat_treatment_code,
+            gross,
+        )
+    return ExpenseCostPreviewResult(
+        cost_basis_amount=basis,
+        annual_cost=compute_annual_pl_cost(
+            basis,
+            Decimal(str(snapshot.business_percentage)),
+            snapshot.depreciation_years,
+            snapshot.include_in_pl,
+        ),
+        included_in_pl=snapshot.include_in_pl,
+    )
+
+
+async def get_expense_cost_preview(
+    session: AsyncSession,
+    expense_id: uuid.UUID,
+    company_id: uuid.UUID,
+) -> ExpenseCostPreviewResult:
+    """Read authoritative current cost without reinterpreting mutable dictionaries."""
+    expense = await _load_expense(session, expense_id, company_id)
+    return compute_stored_cost_preview(expense)
 
 
 # ---------------------------------------------------------------------------

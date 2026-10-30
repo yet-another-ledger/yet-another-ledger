@@ -197,6 +197,7 @@ async def compute_dashboard(
         company_id=company_id,
         date_from=year_start,
         date_to=year_end,
+        include_in_pl=True,
     )
 
     sorted_categories = sorted(

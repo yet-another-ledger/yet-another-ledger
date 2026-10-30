@@ -79,6 +79,7 @@ async def seed(session: AsyncSession) -> tuple[uuid.UUID, uuid.UUID, ExpenseInpu
         expense_date=date(2026, 9, 10), category_id=category_id, supplier_name="Shop",
         vat_treatment_id=treatment_id, vat_rate_id=rate_id,
         net_amount=Decimal("10.005"), vat_amount=Decimal("2.105"),
+        include_in_pl=False, pl_cost_basis="AUTO",
     )
 
 
@@ -110,6 +111,8 @@ async def test_confirmation_transfers_originals_once_and_delete_keeps_history(
         assert result.expense.net_amount == Decimal("10.01")
         assert result.expense.vat_amount == Decimal("2.11")
         assert result.expense.gross_amount == Decimal("12.12")
+        assert result.expense.include_in_pl is False
+        assert result.expense.pl_cost_basis.value == "AUTO"
         assert result.expense.attachment_count == 2
         assert result.inbox.status.value == "CONFIRMED"
         assert result.inbox.expense_id == result.expense.id

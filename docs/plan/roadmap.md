@@ -276,7 +276,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **Walkthrough repair (2026-10-01)**: the real PDF remote-transfer failure triggered the frozen local adapter/upload route, which was implemented and installed. The author subsequently confirmed real PDF/valid-image intake, replay and the single-Expense path. Work is now paused; see the resume checkpoint in `milestones/M15.md` for remaining and author-skipped checks. Adapter instructions are preserved on the development branch.
 
 ### M16 · External sales bookkeeping and VAT / P&L separation | completed Expense/report/receipt foundations
-- **Status**: ⬜ [Design](milestones/M16.md) agreed on 2026-10-30; implementation not started and not the active milestone. M15 remains paused.
+- **Status**: 🟡 Step 1 of nine completed local automated gates and independent review on 2026-10-31 under the agreed [design](milestones/M16.md); Step 2 is next. Author acceptance remains pending. M15 remains paused.
 - **Goal**: book original sales documents from platforms and energy companies, independently control VAT/company P&L effects, and support annual battery private use plus the SI3 mileage/profit breakdown.
 - **Key content**: retained external source/number/originals, tax-rate summaries, manual/advisory-AI entry and explicit atomic posting; audited revisions/credits/settlement adjustments/mistaken-entry voids; Expense P&L inclusion and NET/GROSS/AUTO cost basis with legacy defaults; five-year battery annual inputs, Q4 1d base/VAT and missing-input status; traceable P&L/VAT/Dashboard consistency.
 - **Frozen boundary**: Dutch domestic ordinary sales in the existing single EUR/VAT-return context; no duplicate JAI issuance/native numbering, KOR, external EU/export/reverse-charge sales, platform/bank/EMS integrations, full settlement, income-tax classification or automatic filing. Source changes never rewrite history; upgrades do not recalculate old Expenses or discover old assets.
@@ -422,7 +422,7 @@ Small improvements use the same implementation-plan structure and quality gates,
 | M13 | Document Artifact Backfill | 🟢 Done (2026-09-05; orchestrated Steps 1–4 and blind reviews converged; AI output-budget walkthrough fix re-reviewed with no findings; Ruff/mypy/default 1243/integration 1074, migrations, codegen, frontend 148 + build + EN/ZH 1458, Docker/CJK PDF all green; author Standard-Invoice Happy Path passed, remaining manual paths accepted on automated evidence) |
 | M14 | Receipt inbox and review | 🟢 Done (2026-09-29; author PDF walkthrough accepted; browser concurrency and images accepted on automated evidence; non-blocking carryovers in `milestones/M14.md`) |
 | M15 | Agent receipt intake and business drafts (MCP; Hermes/Telegram first) | ⏸️ In development, paused by the author on 2026-10-24; implementation preserved on `wip/m15-agent-accounting-paused`, outside main; walkthrough stopped at 3/6 preparation, not accepted; see `milestones/M15.md` |
-| M16 | External sales bookkeeping and VAT / P&L separation (including SI3) | ⬜ Design agreed on 2026-10-30; nine atomic steps, implementation not started; see [M16](milestones/M16.md), M15 remains paused |
+| M16 | External sales bookkeeping and VAT / P&L separation (including SI3) | 🟡 In progress; Step 1/9 completed local automated gates and independent review (2026-10-31), Step 2 next; author walkthrough pending; see [M16](milestones/M16.md), M15 remains paused |
 
 Separately numbered improvements:
 

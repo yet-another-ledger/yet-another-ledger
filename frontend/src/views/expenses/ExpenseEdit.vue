@@ -18,6 +18,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { localDateStr } from '../../utils/date'
+import { useExpenseCostPreview } from '../../composables/useExpenseCostPreview'
 import { toExpenseInput, usePurchaseExpenseDictionaries } from '../../composables/usePurchaseExpenseDictionaries'
 import {
   NForm, NFormItem, NInput, NInputNumber, NSelect, NCheckbox,
@@ -35,6 +36,7 @@ import { post, ApiError } from '../../api/http'
 import type { components } from '../../api/schema'
 
 type PaidBy = components['schemas']['PaidBy']
+type PlCostBasis = components['schemas']['PlCostBasis']
 type ExpenseCalculateResult = components['schemas']['ExpenseCalculateResult']
 
 const route = useRoute()
@@ -60,6 +62,25 @@ const note = ref('')
 const paidBy = ref<PaidBy>('BUSINESS')
 const businessPercentage = ref<number>(100)
 const depreciationYears = ref<number>(1)
+const includeInPl = ref(true)
+const plCostBasis = ref<PlCostBasis>('AUTO')
+const {
+  costPreview, originalCostPreview, costPreviewLoading, costPreviewError,
+  previewPlCost, resetCostPreview,
+} = useExpenseCostPreview(
+  () => vatTreatmentId.value ? {
+    net_amount: netAmount.value ?? 0,
+    vat_amount: vatAmount.value ?? 0,
+    vat_treatment_id: vatTreatmentId.value,
+    category_id: categoryId.value,
+    deductible: deductible.value,
+    pl_cost_basis: plCostBasis.value,
+    include_in_pl: includeInPl.value,
+    business_percentage: businessPercentage.value,
+    depreciation_years: depreciationYears.value,
+  } : null,
+  () => expenseId.value ? `/api/v1/expenses/${expenseId.value}/cost-preview` : null,
+)
 
 // ---- Backend-computed display fields (red-line 1: read from response only) ----
 const grossAmountDisplay = ref<string | null>(null)
@@ -91,6 +112,7 @@ const lastAiAttachmentId = ref<string | null>(null)
 // ---- Options ----
 // ---- Load data ----
 function fillFromExpense(expense: ExpenseRead) {
+  resetCostPreview()
   expenseDate.value = expense.expense_date
   categoryId.value = expense.category_id ?? null
   supplierName.value = expense.supplier_name ?? ''
@@ -105,6 +127,8 @@ function fillFromExpense(expense: ExpenseRead) {
   paidBy.value = expense.paid_by
   businessPercentage.value = Number(expense.business_percentage)
   depreciationYears.value = expense.depreciation_years
+  includeInPl.value = expense.include_in_pl
+  plCostBasis.value = expense.pl_cost_basis
   // Backend-computed display
   grossAmountDisplay.value = expense.gross_amount
   isDraft.value = expense.is_draft
@@ -153,6 +177,7 @@ async function handleSave() {
     pageError.value = t('expenses.validationError')
     return
   }
+  resetCostPreview()
   saving.value = true
   saveSuccess.value = false
   pageError.value = null
@@ -173,6 +198,8 @@ async function handleSave() {
       paid_by: paidBy.value,
       business_percentage: businessPercentage.value,
       depreciation_years: depreciationYears.value,
+      include_in_pl: includeInPl.value,
+      pl_cost_basis: plCostBasis.value,
     })
     let result: ExpenseRead
     if (isEdit.value && expenseId.value) {
@@ -476,6 +503,29 @@ async function handleAiExtract(attachmentId: string) {
                       style="width: 160px"
                       @update:value="(v: number | null) => { depreciationYears = v ?? 1 }"
                     />
+                  </n-form-item>
+
+                  <n-form-item :label="t('expenses.includeInPl')">
+                    <n-checkbox v-model:checked="includeInPl">{{ t('expenses.includeInPl') }}</n-checkbox>
+                  </n-form-item>
+                  <n-form-item :label="t('expenses.plCostBasis')">
+                    <n-select v-model:value="plCostBasis" :options="[
+                      { label: t('expenses.costBasisAuto'), value: 'AUTO' },
+                      { label: t('expenses.costBasisNet'), value: 'NET' },
+                      { label: t('expenses.costBasisGross'), value: 'GROSS' },
+                    ]" />
+                  </n-form-item>
+                  <n-form-item :label="t('expenses.costPreview')">
+                    <n-space align="center">
+                      <n-button secondary :loading="costPreviewLoading" @click="previewPlCost">
+                        {{ t('expenses.previewCost') }}
+                      </n-button>
+                      <n-text v-if="costPreviewError" type="error">{{ t('expenses.costPreviewError') }}</n-text>
+                      <n-text v-if="costPreview">
+                        <template v-if="originalCostPreview">{{ t('expenses.costPreviewBefore') }}: {{ originalCostPreview.annual_cost }} · </template>
+                        {{ t('expenses.costPreviewAfter') }}: {{ costPreview.annual_cost }}
+                      </n-text>
+                    </n-space>
                   </n-form-item>
 
                   <!-- Reference -->

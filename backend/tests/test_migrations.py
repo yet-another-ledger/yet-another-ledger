@@ -371,6 +371,69 @@ class TestMigrations:
             f"upgrade head failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
+    def test_0046_backfills_legacy_expense_modes_without_changing_amounts(self) -> None:
+        """The 0045→0046 production-shaped upgrade preserves NET/true legacy semantics."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_expense_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        try:
+            initial = _run_alembic("upgrade", "0045", url=isolated_url)
+            assert initial.returncode == 0, initial.stderr
+            ids = _insert_0025_expense_sentinel(isolated_url)
+            amount_columns = (
+                "net_amount, vat_amount, gross_amount, base_net_amount, "
+                "base_vat_amount, base_gross_amount, business_percentage, depreciation_years"
+            )
+            before_expense = _query(
+                isolated_url,
+                f"SELECT {amount_columns} FROM expense WHERE id=:expense_id",
+                {"expense_id": ids["expense_id"]},
+                company_id=ids["company_id"],
+            )
+            before_recurring = _query(
+                isolated_url,
+                "SELECT net_amount, vat_amount, gross_amount, business_percentage, "
+                "depreciation_years FROM recurring_expense WHERE id=:recurring_id",
+                {"recurring_id": ids["recurring_id"]},
+                company_id=ids["company_id"],
+            )
+            upgrade = _run_alembic("upgrade", "head", url=isolated_url)
+            assert upgrade.returncode == 0, upgrade.stderr
+            assert _query(
+                isolated_url,
+                "SELECT include_in_pl, pl_cost_basis FROM expense WHERE id=:expense_id",
+                {"expense_id": ids["expense_id"]},
+                company_id=ids["company_id"],
+            ) == [{"include_in_pl": True, "pl_cost_basis": "NET"}]
+            assert _query(
+                isolated_url,
+                "SELECT include_in_pl, pl_cost_basis FROM recurring_expense "
+                "WHERE id=:recurring_id",
+                {"recurring_id": ids["recurring_id"]},
+                company_id=ids["company_id"],
+            ) == [{"include_in_pl": True, "pl_cost_basis": "NET"}]
+            assert _query(
+                isolated_url,
+                f"SELECT {amount_columns} FROM expense WHERE id=:expense_id",
+                {"expense_id": ids["expense_id"]},
+                company_id=ids["company_id"],
+            ) == before_expense
+            assert _query(
+                isolated_url,
+                "SELECT net_amount, vat_amount, gross_amount, business_percentage, "
+                "depreciation_years FROM recurring_expense WHERE id=:recurring_id",
+                {"recurring_id": ids["recurring_id"]},
+                company_id=ids["company_id"],
+            ) == before_recurring
+        finally:
+            _drop_database(isolated_url)
+
     def test_0044_sent_copy_preserves_historical_logs(self) -> None:
         assert _run_alembic("upgrade", "head", url=self.url).returncode == 0
         assert _run_alembic("downgrade", "0043", url=self.url).returncode == 0

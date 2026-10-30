@@ -2190,6 +2190,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/expenses/cost-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Calculate Expense Cost Endpoint
+         * @description Preview the annual cost basis selected for P/L, without persistence.
+         */
+        post: operations["calculate_expense_cost_endpoint_api_v1_expenses_cost_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expenses/{expense_id}/cost-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Expense Cost Endpoint
+         * @description Read current P/L cost from the stored amounts and VAT snapshots.
+         */
+        get: operations["get_expense_cost_endpoint_api_v1_expenses__expense_id__cost_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses/ai-extract": {
         parameters: {
             query?: never;
@@ -2467,6 +2507,26 @@ export interface paths {
          * @description Create a new recurring expense template.
          */
         post: operations["create_recurring_expense_endpoint_api_v1_recurring_expenses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recurring-expenses/{recurring_id}/cost-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Recurring Expense Cost Endpoint
+         * @description Read the annual cost of one future Expense using the stored template snapshots.
+         */
+        get: operations["get_recurring_expense_cost_endpoint_api_v1_recurring_expenses__recurring_id__cost_preview_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5268,6 +5328,48 @@ export interface components {
             active?: boolean;
         };
         /**
+         * ExpenseCostPreviewRequest
+         * @description Raw inputs needed for a backend-authoritative annual P/L preview.
+         */
+        ExpenseCostPreviewRequest: {
+            /** Net Amount */
+            net_amount: number | string;
+            /** Vat Amount */
+            vat_amount: number | string;
+            /**
+             * Vat Treatment Id
+             * Format: uuid
+             */
+            vat_treatment_id: string;
+            /** Category Id */
+            category_id?: string | null;
+            /** Deductible */
+            deductible?: boolean | null;
+            /** @default AUTO */
+            pl_cost_basis?: components["schemas"]["PlCostBasis"];
+            /**
+             * Include In Pl
+             * @default true
+             */
+            include_in_pl?: boolean;
+            /** Business Percentage */
+            business_percentage: number | string;
+            /** Depreciation Years */
+            depreciation_years: number;
+        };
+        /**
+         * ExpenseCostPreviewResult
+         * @description Backend-calculated cost basis and annual recognized amount.
+         */
+        ExpenseCostPreviewResult: {
+            /** Cost Basis Amount */
+            cost_basis_amount: string;
+            /** Annual Cost */
+            annual_cost: string;
+            /** Included In Pl */
+            included_in_pl: boolean;
+        };
+        /**
          * ExpenseInput
          * @description Request body for POST/PUT /api/v1/expenses.
          *
@@ -5332,6 +5434,13 @@ export interface components {
              * @default 1
              */
             depreciation_years?: number;
+            /**
+             * Include In Pl
+             * @default true
+             */
+            include_in_pl?: boolean;
+            /** @default NET */
+            pl_cost_basis?: components["schemas"]["PlCostBasis"];
         };
         /**
          * ExpenseKind
@@ -5379,6 +5488,9 @@ export interface components {
             business_percentage: string;
             /** Depreciation Years */
             depreciation_years: number;
+            /** Include In Pl */
+            include_in_pl: boolean;
+            pl_cost_basis: components["schemas"]["PlCostBasis"];
         };
         /**
          * ExpenseListResponse
@@ -5453,6 +5565,9 @@ export interface components {
             business_percentage: string;
             /** Depreciation Years */
             depreciation_years: number;
+            /** Include In Pl */
+            include_in_pl: boolean;
+            pl_cost_basis: components["schemas"]["PlCostBasis"];
             /** Is Draft */
             is_draft: boolean;
             /** Recurring Expense Id */
@@ -7803,6 +7918,12 @@ export interface components {
             base_gross_amount: string;
         };
         /**
+         * PlCostBasis
+         * @description Source amount used to recognize an Expense in profit and loss.
+         * @enum {string}
+         */
+        PlCostBasis: "NET" | "GROSS" | "AUTO";
+        /**
          * ProductCategoryListResponse
          * @description List envelope for GET /api/v1/product-categories.
          */
@@ -8957,6 +9078,13 @@ export interface components {
              */
             depreciation_years?: number;
             /**
+             * Include In Pl
+             * @default true
+             */
+            include_in_pl?: boolean;
+            /** @default NET */
+            pl_cost_basis?: components["schemas"]["PlCostBasis"];
+            /**
              * Frequency
              * @description One of: MONTHLY, QUARTERLY, YEARLY.
              */
@@ -9038,6 +9166,9 @@ export interface components {
             business_percentage: string;
             /** Depreciation Years */
             depreciation_years: number;
+            /** Include In Pl */
+            include_in_pl: boolean;
+            pl_cost_basis: components["schemas"]["PlCostBasis"];
             /** Frequency */
             frequency: string;
             /**
@@ -14832,6 +14963,70 @@ export interface operations {
             };
         };
     };
+    calculate_expense_cost_endpoint_api_v1_expenses_cost_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseCostPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseCostPreviewResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_expense_cost_endpoint_api_v1_expenses__expense_id__cost_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseCostPreviewResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     ai_extract_endpoint_api_v1_expenses_ai_extract_post: {
         parameters: {
             query?: never;
@@ -15657,6 +15852,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RecurringExpenseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_recurring_expense_cost_endpoint_api_v1_recurring_expenses__recurring_id__cost_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recurring_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseCostPreviewResult"];
                 };
             };
             /** @description Validation Error */
@@ -16499,6 +16725,7 @@ export interface operations {
                 from: string;
                 /** @description Inclusive end date. */
                 to: string;
+                include_in_pl?: boolean | null;
             };
             header?: never;
             path?: never;

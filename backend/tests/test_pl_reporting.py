@@ -34,6 +34,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from jai.models._enums import ExpenseKind, PlCostBasis, VatTreatmentEffect
+from jai.services.expense import compute_annual_pl_cost, compute_pl_cost_basis
 from jai.services.reporting.pl import (
     _anniversary_date,
     _annual_slice,
@@ -112,8 +114,15 @@ class TestAnnualSlice:
     ) -> MagicMock:
         exp = MagicMock()
         exp.base_net_amount = Decimal(base_net)
+        exp.base_vat_amount = Decimal("0")
+        exp.base_gross_amount = Decimal(base_net)
         exp.business_percentage = Decimal(business_pct)
         exp.depreciation_years = dep_years
+        exp.kind = ExpenseKind.PURCHASE
+        exp.pl_cost_basis = PlCostBasis.NET
+        exp.vat_treatment_effect = VatTreatmentEffect.APPLY_RATE
+        exp.deductible = True
+        exp.include_in_pl = True
         return exp
 
     def test_full_business_single_year(self) -> None:
@@ -151,6 +160,50 @@ class TestAnnualSlice:
         # 1000 × 0.75 / 2 = 375
         assert result == Decimal("375.00")
 
+    def test_net_basis_keeps_persisted_precision_until_slice_rounding(self) -> None:
+        exp = self._make_expense("100.005", "50", 1)
+        assert _annual_slice(exp) == Decimal("50.00")
+
+    def test_gross_basis_uses_persisted_gross_snapshot(self) -> None:
+        exp = self._make_expense("100.005", "50", 1)
+        exp.pl_cost_basis = PlCostBasis.GROSS
+        exp.base_vat_amount = Decimal("21.005")
+        exp.base_gross_amount = Decimal("120.999")
+        assert _annual_slice(exp) == Decimal("60.50")
+
+
+class TestPlCostBasis:
+    def test_net_gross_and_auto_for_100_plus_21_deductible(self) -> None:
+        args = (Decimal("100"), Decimal("21"), VatTreatmentEffect.APPLY_RATE, True)
+        assert compute_pl_cost_basis(*args, PlCostBasis.NET) == Decimal("100.00")
+        assert compute_pl_cost_basis(*args, PlCostBasis.GROSS) == Decimal("121.00")
+        assert compute_pl_cost_basis(*args, PlCostBasis.AUTO) == Decimal("100.00")
+
+    def test_auto_adds_irrecoverable_charged_vat_only(self) -> None:
+        basis = compute_pl_cost_basis(
+            Decimal("100"), Decimal("21"), VatTreatmentEffect.APPLY_RATE,
+            False, PlCostBasis.AUTO,
+        )
+        assert basis == Decimal("121.00")
+        reverse = compute_pl_cost_basis(
+            Decimal("100"), Decimal("21"), VatTreatmentEffect.ZERO_REVERSE,
+            False, PlCostBasis.AUTO,
+        )
+        assert reverse == Decimal("100.00")
+        eu_consumer = compute_pl_cost_basis(
+            Decimal("100"), Decimal("21"), VatTreatmentEffect.APPLY_RATE,
+            True, PlCostBasis.AUTO, "EU_B2C_PURCH",
+        )
+        assert eu_consumer == Decimal("121.00")
+
+    def test_business_percentage_depreciation_and_exclusion(self) -> None:
+        assert compute_annual_pl_cost(
+            Decimal("121"), Decimal("50"), 2, True
+        ) == Decimal("30.25")
+        assert compute_annual_pl_cost(
+            Decimal("121"), Decimal("100"), 1, False
+        ) == Decimal("0.00")
+
 
 # ---------------------------------------------------------------------------
 # Integration: compute_profit_loss (mocked DB session)
@@ -184,8 +237,15 @@ def _make_expense_row(
     exp.is_draft = is_draft
     exp.expense_date = expense_date
     exp.base_net_amount = Decimal(base_net_amount)
+    exp.base_vat_amount = Decimal("0")
+    exp.base_gross_amount = Decimal(base_net_amount)
     exp.business_percentage = Decimal(business_percentage)
     exp.depreciation_years = depreciation_years
+    exp.kind = ExpenseKind.PURCHASE
+    exp.pl_cost_basis = PlCostBasis.NET
+    exp.vat_treatment_effect = VatTreatmentEffect.APPLY_RATE
+    exp.deductible = True
+    exp.include_in_pl = True
     return exp
 
 

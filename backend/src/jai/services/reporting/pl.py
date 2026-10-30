@@ -70,11 +70,18 @@ from typing import Literal
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jai.models._enums import InvoiceDocumentKind, InvoiceStatus
+from jai.models._enums import (
+    ExpenseKind,
+    InvoiceDocumentKind,
+    InvoiceStatus,
+    PlCostBasis,
+    VatTreatmentEffect,
+)
 from jai.models.document import InvoiceCorrection
 from jai.models.expense import Expense
 from jai.models.invoice import Invoice
 from jai.schemas.report import ProfitLossReport, ProfitLossSeriesItem
+from jai.services.expense import compute_annual_pl_cost, compute_pl_cost_basis
 from jai.services.money import quantize_to_minor_unit
 
 # ---------------------------------------------------------------------------
@@ -137,12 +144,22 @@ def _annual_slice(expense: Expense) -> Decimal:
     ROUND_HALF_UP) so that every per-expense slice entering the accumulation
     buckets is already at "to-the-cent" precision (M7.5 / D6).
     """
-    net = Decimal(str(expense.base_net_amount))
+    if ExpenseKind(expense.kind) == ExpenseKind.MILEAGE:
+        net = Decimal(str(expense.base_net_amount))
+    else:
+        net = compute_pl_cost_basis(
+            Decimal(str(expense.base_net_amount)),
+            Decimal(str(expense.base_vat_amount)),
+            VatTreatmentEffect(expense.vat_treatment_effect),
+            expense.deductible,
+            PlCostBasis(expense.pl_cost_basis),
+            expense.vat_treatment_code,
+            Decimal(str(expense.base_gross_amount)),
+        )
     biz_pct = Decimal(str(expense.business_percentage))
-    dep_years = Decimal(str(expense.depreciation_years))
-
-    raw = net * biz_pct / Decimal("100") / dep_years
-    return quantize_to_minor_unit(raw)
+    return compute_annual_pl_cost(
+        net, biz_pct, int(expense.depreciation_years), expense.include_in_pl
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +289,7 @@ async def compute_profit_loss(
         and_(
             Expense.company_id == company_id,
             Expense.is_draft.is_(False),
+            Expense.include_in_pl.is_(True),
         )
     )
     result_exp = await session.execute(stmt_exp)

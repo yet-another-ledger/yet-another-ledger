@@ -193,6 +193,13 @@ class Expense(Base):
         ),
     )
 
+    include_in_pl: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    pl_cost_basis: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'NET'")
+    )
+
     # -- Draft flag (D3: recurring expenses generate as draft) ----------------
     is_draft: Mapped[bool] = mapped_column(
         Boolean,
