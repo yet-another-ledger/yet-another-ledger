@@ -247,6 +247,19 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
               size="small"
             />
           </n-card>
+          <n-card
+            v-if="store.plReport && store.plReport.external_sales?.length"
+            :title="t('reports.pl.externalSales')"
+            class="series-card"
+          >
+            <ul>
+              <li v-for="sale in (store.plReport.external_sales ?? [])" :key="sale.external_sale_id">
+                <router-link :to="`/external-sales/${sale.external_sale_id}`">
+                  {{ sale.source_name }} · {{ sale.original_number }} · {{ sale.event_date }}
+                </router-link>
+              </li>
+            </ul>
+          </n-card>
     </div>
   </div>
 </template>

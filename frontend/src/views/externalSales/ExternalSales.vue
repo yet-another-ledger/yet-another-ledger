@@ -2,18 +2,24 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NCard, NCheckbox, NForm, NFormItem, NInput, NModal, NSelect, useMessage } from 'naive-ui'
-import { del, get, post, put } from '../../api/http'
+import { NAlert, NButton, NCard, NCheckbox, NForm, NFormItem, NInput, NModal, NSelect, useMessage } from 'naive-ui'
+import { ApiError, del, get, post, put } from '../../api/http'
+import type { components } from '../../api/schema'
 
-type Source = { id: string; name: string; kind: 'PLATFORM' | 'ENERGY' | 'OTHER'; default_include_in_pl: boolean | null; active: boolean }
-type Tax = { id?: string; treatment_id: string | null; treatment_code?: string | null; treatment_label?: string | null; rate_id: string | null; rate_label?: string | null; rate_percent?: string | null; net_amount: string | null; vat_amount: string | null }
-type Treatment = { id: string; code: string; label: string; side: string; effect: string; requires_icp: boolean; active: boolean }
-type Rate = { id: string; label: string; percent: string; active: boolean }
-type Original = { id: string; filename: string | null; mime_type: string; byte_size: number; sha256: string; duplicate_warning: boolean; created_at: string }
-type Sale = { id: string; source_id: string | null; source_name: string | null; original_number: string | null; document_date: string | null; covered_from: string | null; covered_to: string | null; counterparty: string | null; description: string | null; include_in_pl: boolean | null; status: 'PENDING'; tax_summaries: Tax[]; files: Original[]; created_at: string; updated_at: string }
-type SaleList = { items: Sale[]; total: number; limit: number; offset: number }
-type SourceList = { items: Source[]; total: number; limit: number; offset: number }
-type SaleDraft = Omit<Sale, 'id' | 'source_name' | 'status' | 'files' | 'created_at' | 'updated_at' | 'tax_summaries'> & { tax_summaries: Tax[] }
+type Source = components['schemas']['ExternalSalesSourceRead']
+type SourceInput = components['schemas']['ExternalSalesSourceInput']
+type SourceDraft = Required<SourceInput>
+type TaxDraft = Required<Pick<components['schemas']['ExternalSalesTaxInput'], 'treatment_id' | 'rate_id'>> & { net_amount: string | null; vat_amount: string | null }
+type Treatment = components['schemas']['VatTreatmentRead']
+type Rate = components['schemas']['VatRateRead']
+type Original = components['schemas']['ExternalSalesFileRead']
+type Sale = components['schemas']['ExternalSalesRead']
+type Calculation = components['schemas']['ExternalSalesCalculation']
+type CalculateRequest = components['schemas']['ExternalSalesCalculateRequest']
+type ConfirmRequest = components['schemas']['ExternalSalesConfirmRequest']
+type SaleList = components['schemas']['ExternalSalesListRead']
+type SourceList = components['schemas']['ExternalSalesSourceListRead']
+type SaleDraft = Required<Omit<components['schemas']['ExternalSalesInput'], 'tax_summaries'>> & { tax_summaries: TaxDraft[] }
 
 const { t } = useI18n()
 const route = useRoute()
@@ -27,36 +33,72 @@ const salesTotal = ref(0)
 const salesOffset = ref(0)
 const salesLimit = 50
 const current = ref<Sale | null>(null)
+const savedDraftSnapshot = ref<string | null>(null)
+const calculation = ref<Calculation | null>(null)
+const acknowledgeMismatch = ref(false)
+const mismatchReason = ref('')
+const postingBusy = ref(false)
 const loading = ref(false)
 let refreshGeneration = 0
+let draftRevision = 0
 const error = ref('')
 const pickedFiles = ref<File[]>([])
 const sourceModal = ref(false)
 const editingSource = ref<string | null>(null)
-const sourceDraft = reactive({ name: '', kind: 'OTHER' as Source['kind'], default_include_in_pl: null as boolean | null, active: true })
+const sourceDraft = reactive<SourceDraft>({ name: '', kind: 'OTHER', default_include_in_pl: null, active: true })
 const draft = reactive<SaleDraft>({ source_id: null, original_number: null, document_date: null, covered_from: null, covered_to: null, counterparty: null, description: null, include_in_pl: null, tax_summaries: [blankTax()] })
 const isDetail = computed(() => typeof route.params.id === 'string')
 const isNew = computed(() => route.name === 'external-sales-new')
 const isEditor = computed(() => isDetail.value || isNew.value)
+const isPosted = computed(() => current.value?.status === 'POSTED')
+const isDirty = computed(() => current.value !== null && savedDraftSnapshot.value !== JSON.stringify(payload()))
 const editorReady = computed(() => !loading.value && (isDetail.value ? current.value?.id === route.params.id : isNew.value && !current.value))
 const sourceOptions = computed(() => sources.value.filter((source) => source.active || source.id === draft.source_id).map((source) => ({ label: `${source.name} (${t(`externalSales.${source.kind}`)})${source.active ? '' : ` · ${t('externalSales.sourceDisabled')}`}`, value: source.id })))
 const treatmentOptions = computed(() => treatments.value.filter((row) => row.active && row.side === 'SALES' && row.code === 'NL_DOMESTIC' && row.effect === 'APPLY_RATE' && !row.requires_icp).map((row) => ({ label: `${row.label} (${row.code})`, value: row.id })))
 const rateOptions = computed(() => rates.value.filter((row) => row.active).map((row) => ({ label: `${row.label} (${row.percent}%)`, value: row.id })))
 const kindOptions = computed(() => (['PLATFORM', 'ENERGY', 'OTHER'] as const).map((kind) => ({ label: t(`externalSales.${kind}`), value: kind })))
 const includeOptions = computed(() => [{ label: t('common.yes'), value: 'true' }, { label: t('common.no'), value: 'false' }])
+const conflictMessages: Record<string, string> = {
+  EXTERNAL_SALE_VERSION_CONFLICT: 'versionConflict',
+  EXTERNAL_SALE_ALREADY_POSTED: 'alreadyPosted',
+  EXTERNAL_SALE_NOT_PENDING: 'notPending',
+  DUPLICATE_SOURCE_NUMBER: 'duplicateNumber',
+}
 
-function blankTax(): Tax { return { treatment_id: null, rate_id: null, net_amount: null, vat_amount: null } }
+function errorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 409 && error.detail && typeof error.detail === 'object') {
+    const detail = (error.detail as { detail?: unknown }).detail
+    if (detail && typeof detail === 'object' && 'code' in detail) {
+      const key = conflictMessages[String((detail as { code: unknown }).code)]
+      if (key) return t(`externalSales.conflicts.${key}`)
+    }
+  }
+  return error instanceof Error ? error.message : t('externalSales.error')
+}
+
+function blankTax(): TaxDraft { return { treatment_id: null, rate_id: null, net_amount: null, vat_amount: null } }
 function resetDraft() {
   Object.assign(draft, { source_id: null, original_number: null, document_date: null, covered_from: null, covered_to: null, counterparty: null, description: null, include_in_pl: null, tax_summaries: [blankTax()] })
   current.value = null
+  savedDraftSnapshot.value = null
+  calculation.value = null
+  acknowledgeMismatch.value = false
+  mismatchReason.value = ''
   pickedFiles.value = []
 }
 function loadDraft(sale: Sale) {
   Object.assign(draft, { source_id: sale.source_id, original_number: sale.original_number, document_date: sale.document_date, covered_from: sale.covered_from, covered_to: sale.covered_to, counterparty: sale.counterparty, description: sale.description, include_in_pl: sale.include_in_pl, tax_summaries: sale.tax_summaries.length ? sale.tax_summaries.map(({ treatment_id, rate_id, net_amount, vat_amount }) => ({ treatment_id, rate_id, net_amount: net_amount == null ? null : String(net_amount), vat_amount: vat_amount == null ? null : String(vat_amount) })) : [blankTax()] })
   current.value = sale
+  savedDraftSnapshot.value = JSON.stringify(payload())
+  calculation.value = null
+  acknowledgeMismatch.value = false
+  mismatchReason.value = ''
 }
 function updateFiles(sale: Sale, generation: number) {
-  if (generation === refreshGeneration && editorReady.value && current.value?.id === sale.id) current.value.files = sale.files
+  if (generation === refreshGeneration && editorReady.value && current.value?.id === sale.id) {
+    current.value.files = sale.files
+    current.value.version = sale.version
+  }
 }
 async function allSources(): Promise<Source[]> {
   const rows: Source[] = []
@@ -113,8 +155,9 @@ onUnmounted(() => { refreshGeneration++ })
 watch(() => draft.source_id, (id) => {
   if (!id) return
   const selected = sources.value.find((source) => source.id === id)
-  if (selected && draft.include_in_pl === null) draft.include_in_pl = selected.default_include_in_pl
+  if (selected && draft.include_in_pl === null) draft.include_in_pl = selected.default_include_in_pl ?? null
 })
+watch(draft, () => { draftRevision++; calculation.value = null }, { deep: true })
 function openSource(source?: Source) {
   editingSource.value = source?.id ?? null
   Object.assign(sourceDraft, source ? { name: source.name, kind: source.kind, default_include_in_pl: source.default_include_in_pl, active: source.active } : { name: '', kind: 'OTHER', default_include_in_pl: null, active: true })
@@ -130,11 +173,11 @@ async function saveSource() {
     sources.value = await allSources()
   } catch (e) { message.error(e instanceof Error ? e.message : t('externalSales.error')) }
 }
-function payload() {
+function payload(): components['schemas']['ExternalSalesInput'] {
   return { ...draft, document_date: draft.document_date || null, covered_from: draft.covered_from || null, covered_to: draft.covered_to || null, tax_summaries: draft.tax_summaries.map((row) => ({ treatment_id: row.treatment_id || null, rate_id: row.rate_id || null, net_amount: row.net_amount || null, vat_amount: row.vat_amount || null })) }
 }
 async function saveDraft() {
-  if (!editorReady.value) return
+  if (!editorReady.value || isPosted.value) return
   const generation = refreshGeneration
   const id = current.value?.id
   try {
@@ -145,11 +188,11 @@ async function saveDraft() {
     if (!id) await router.push(`/external-sales/${result.id}`)
     else await refresh()
   } catch (e) {
-    if (generation === refreshGeneration) message.error(e instanceof Error ? e.message : t('externalSales.error'))
+    if (generation === refreshGeneration) message.error(errorMessage(e))
   }
 }
 async function uploadFiles() {
-  if (!editorReady.value || !pickedFiles.value.length || !current.value) return
+  if (!editorReady.value || isPosted.value || !pickedFiles.value.length || !current.value) return
   const generation = refreshGeneration
   const id = current.value.id
   const form = new FormData()
@@ -158,6 +201,7 @@ async function uploadFiles() {
     const response = await fetch(`/api/v1/external-sales/${id}/files`, { method: 'POST', credentials: 'include', body: form })
     if (!response.ok) throw new Error(await response.text())
     updateFiles(await response.json() as Sale, generation)
+    calculation.value = null
     if (generation === refreshGeneration) pickedFiles.value = []
   } catch (e) {
     if (generation === refreshGeneration) message.error(e instanceof Error ? e.message : t('externalSales.error'))
@@ -182,16 +226,16 @@ async function downloadFile(file: Original) {
   }
 }
 async function removeFile(file: Original) {
-  if (!editorReady.value || !current.value) return
+  if (!editorReady.value || isPosted.value || !current.value) return
   const generation = refreshGeneration
   const id = current.value.id
-  try { updateFiles(await del<Sale>(`/api/v1/external-sales/${id}/files/${file.id}`), generation) }
+  try { updateFiles(await del<Sale>(`/api/v1/external-sales/${id}/files/${file.id}`), generation); calculation.value = null }
   catch (e) {
     if (generation === refreshGeneration) message.error(e instanceof Error ? e.message : t('externalSales.error'))
   }
 }
 async function discard() {
-  if (!editorReady.value || !current.value || !window.confirm(t('externalSales.confirmDiscard'))) return
+  if (!editorReady.value || isPosted.value || !current.value || !window.confirm(t('externalSales.confirmDiscard'))) return
   const generation = refreshGeneration
   const id = current.value.id
   try {
@@ -199,6 +243,48 @@ async function discard() {
     if (generation === refreshGeneration) await router.push('/external-sales')
   } catch (e) {
     if (generation === refreshGeneration) message.error(e instanceof Error ? e.message : t('externalSales.error'))
+  }
+}
+async function calculate() {
+  if (!editorReady.value || isPosted.value || !current.value) return
+  if (isDirty.value) {
+    message.error(t('externalSales.saveBeforeCalculate'))
+    return
+  }
+  const generation = refreshGeneration
+  const expectedVersion = current.value.version
+  const expectedDraftRevision = draftRevision
+  calculation.value = null
+  try {
+    const request: CalculateRequest = { expected_version: expectedVersion }
+    const result = await post<Calculation>(`/api/v1/external-sales/${current.value.id}/calculate`, request)
+    if (generation !== refreshGeneration || current.value?.version !== expectedVersion || draftRevision !== expectedDraftRevision) return
+    calculation.value = result
+    acknowledgeMismatch.value = false
+    mismatchReason.value = ''
+  } catch (e) {
+    if (generation === refreshGeneration) message.error(errorMessage(e))
+  }
+}
+async function confirmPosting() {
+  if (!editorReady.value || isPosted.value || !current.value || !calculation.value) return
+  if (calculation.value.expected_version !== current.value.version) { calculation.value = null; return }
+  const generation = refreshGeneration
+  postingBusy.value = true
+  try {
+    const request: ConfirmRequest = {
+      expected_version: calculation.value.expected_version,
+      acknowledge_vat_mismatch: acknowledgeMismatch.value,
+      mismatch_ack_reason: mismatchReason.value || null,
+    }
+    const result = await post<Sale>(`/api/v1/external-sales/${current.value.id}/confirm`, request)
+    if (generation !== refreshGeneration) return
+    loadDraft(result)
+    message.success(t('externalSales.posted'))
+  } catch (e) {
+    if (generation === refreshGeneration) message.error(errorMessage(e))
+  } finally {
+    if (generation === refreshGeneration) postingBusy.value = false
   }
 }
 </script>
@@ -228,7 +314,50 @@ async function discard() {
       </n-card>
     </template>
     <n-card v-else class="section">
-      <n-form label-placement="top" @submit.prevent="saveDraft">
+      <n-alert v-if="isPosted" type="success" :show-icon="true">
+        {{ t('externalSales.posted') }} · {{ current?.posted_at }} · {{ current?.posted_source_name }} ·
+        {{ current?.original_number }}
+        <div>{{ t('externalSales.originalTotals') }}: {{ current?.original_net_total }} / {{ current?.original_vat_total }}</div>
+        <div v-if="current?.mismatch_ack_reason">{{ t('externalSales.mismatchReason') }}: {{ current.mismatch_ack_reason }}</div>
+      </n-alert>
+      <section v-if="isPosted && current" class="posted-detail" data-testid="posted-detail">
+        <dl class="grid">
+          <div><dt>{{ t('externalSales.source') }}</dt><dd>{{ current.posted_source_name }}</dd></div>
+          <div><dt>{{ t('externalSales.number') }}</dt><dd>{{ current.original_number }}</dd></div>
+          <div><dt>{{ t('externalSales.date') }}</dt><dd>{{ current.document_date }}</dd></div>
+          <div><dt>{{ t('externalSales.counterparty') }}</dt><dd>{{ current.counterparty || t('externalSales.none') }}</dd></div>
+          <div><dt>{{ t('externalSales.coveredFrom') }}</dt><dd>{{ current.covered_from || t('externalSales.none') }}</dd></div>
+          <div><dt>{{ t('externalSales.coveredTo') }}</dt><dd>{{ current.covered_to || t('externalSales.none') }}</dd></div>
+          <div><dt>{{ t('externalSales.includePl') }}</dt><dd data-testid="posted-include-pl">{{ current.include_in_pl ? t('common.yes') : t('common.no') }}</dd></div>
+          <div><dt>{{ t('externalSales.version') }}</dt><dd>{{ current.version }}</dd></div>
+          <div class="description"><dt>{{ t('externalSales.description') }}</dt><dd>{{ current.description || t('externalSales.none') }}</dd></div>
+        </dl>
+        <h2>{{ t('externalSales.taxSummaries') }}</h2>
+        <div class="table-scroll">
+          <table data-testid="posted-tax-summaries">
+            <thead><tr><th>{{ t('externalSales.treatment') }}</th><th>{{ t('externalSales.rate') }}</th><th>{{ t('externalSales.net') }}</th><th>{{ t('externalSales.vat') }}</th></tr></thead>
+            <tbody><tr v-for="row in current.tax_summaries" :key="row.id">
+              <td>{{ row.treatment_label }} ({{ row.treatment_code }})</td>
+              <td>{{ row.rate_label }} ({{ row.rate_percent }}%)</td>
+              <td>{{ row.net_amount }}</td><td>{{ row.vat_amount }}</td>
+            </tr></tbody>
+          </table>
+        </div>
+        <h2>{{ t('externalSales.postingHistory') }}</h2>
+        <dl class="grid">
+          <div><dt>{{ t('externalSales.postedAt') }}</dt><dd>{{ current.posted_at }}</dd></div>
+          <div><dt>{{ t('externalSales.actor') }}</dt><dd>{{ current.posted_by }}</dd></div>
+        </dl>
+        <div class="table-scroll">
+          <table data-testid="posting-history">
+            <thead><tr><th>{{ t('externalSales.version') }}</th><th>{{ t('externalSales.actor') }}</th><th>{{ t('externalSales.postedAt') }}</th></tr></thead>
+            <tbody><tr v-for="posting in current.postings" :key="posting.id">
+              <td>{{ posting.version }}</td><td>{{ posting.actor_id || t('externalSales.none') }}</td><td>{{ posting.created_at }}</td>
+            </tr></tbody>
+          </table>
+        </div>
+      </section>
+      <n-form v-if="!isPosted" :disabled="postingBusy" label-placement="top" @submit.prevent="saveDraft">
         <div class="grid">
           <n-form-item :label="t('externalSales.source')"><n-select v-model:value="draft.source_id" clearable :options="sourceOptions" /></n-form-item>
           <n-form-item :label="t('externalSales.number')"><n-input v-model:value="draft.original_number" /></n-form-item>
@@ -250,11 +379,35 @@ async function discard() {
         <n-button size="small" @click="draft.tax_summaries.push(blankTax())">{{ t('externalSales.addTax') }}</n-button>
         <n-form-item class="actions"><n-button type="primary" attr-type="submit" :disabled="!editorReady">{{ t('externalSales.saveDraft') }}</n-button><n-button v-if="current" type="error" :disabled="!editorReady" @click="discard">{{ t('externalSales.discard') }}</n-button></n-form-item>
       </n-form>
+      <div v-if="current && !isPosted" class="posting-review">
+        <n-button :disabled="!editorReady || current.files.length === 0 || isDirty" @click="calculate">
+          {{ t('externalSales.calculate') }}
+        </n-button>
+        <p v-if="isDirty">{{ t('externalSales.saveBeforeCalculate') }}</p>
+        <template v-if="calculation">
+          <p>{{ t('externalSales.originalTotals') }}: {{ calculation.original_net_total }} / {{ calculation.original_vat_total }}</p>
+          <p>{{ t('externalSales.derivedVat') }}: {{ calculation.derived_vat_total }}</p>
+          <n-alert v-for="warning in calculation.warnings" :key="warning" type="warning" :show-icon="true">
+            {{ warning }}
+          </n-alert>
+          <n-checkbox v-if="calculation.mismatch" v-model:checked="acknowledgeMismatch">
+            {{ t('externalSales.acknowledgeMismatch') }}
+          </n-checkbox>
+          <n-form-item v-if="calculation.mismatch" :label="t('externalSales.mismatchReason')">
+            <n-input v-model:value="mismatchReason" type="textarea" />
+          </n-form-item>
+          <n-button type="primary" :disabled="!editorReady || (calculation.mismatch && (!acknowledgeMismatch || !mismatchReason.trim()))" @click="confirmPosting">
+            {{ t('externalSales.confirmPosting') }}
+          </n-button>
+        </template>
+      </div>
       <div v-if="current" class="files">
         <h2>{{ t('externalSales.files') }} ({{ current.files.length }}/5)</h2>
-        <div v-for="file in current.files" :key="file.id" class="file-row"><span>{{ file.filename || t('externalSales.none') }} · {{ file.byte_size }} bytes <strong v-if="file.duplicate_warning">{{ t('externalSales.duplicateWarning') }}</strong></span><n-button size="small" :disabled="!editorReady" @click="downloadFile(file)">{{ t('externalSales.download') }}</n-button><n-button size="small" :disabled="!editorReady" @click="removeFile(file)">{{ t('externalSales.removeFile') }}</n-button></div>
-        <input type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf" :disabled="!editorReady || current.files.length >= 5" @change="pickedFiles = Array.from(($event.target as HTMLInputElement).files || []).slice(0, 5 - current!.files.length)" />
-        <n-button :disabled="!editorReady || !pickedFiles.length" @click="uploadFiles">{{ t('externalSales.upload') }}</n-button>
+        <div v-for="file in current.files" :key="file.id" class="file-row"><span>{{ file.filename || t('externalSales.none') }} · {{ file.byte_size }} bytes <strong v-if="file.duplicate_warning">{{ t('externalSales.duplicateWarning') }}</strong></span><n-button size="small" :disabled="!editorReady" @click="downloadFile(file)">{{ t('externalSales.download') }}</n-button><n-button v-if="!isPosted" size="small" :disabled="!editorReady" @click="removeFile(file)">{{ t('externalSales.removeFile') }}</n-button></div>
+        <template v-if="!isPosted">
+          <input type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf" :disabled="!editorReady || current.files.length >= 5" @change="pickedFiles = Array.from(($event.target as HTMLInputElement).files || []).slice(0, 5 - current!.files.length)" />
+          <n-button :disabled="!editorReady || !pickedFiles.length" @click="uploadFiles">{{ t('externalSales.upload') }}</n-button>
+        </template>
       </div>
     </n-card>
     <n-modal v-model:show="sourceModal" preset="card" style="width: min(520px, 92vw)" :title="t('externalSales.editSource')">
@@ -282,6 +435,12 @@ async function discard() {
 .tax-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 8px; margin: 8px 0; }
 .actions { display: flex; gap: 12px; margin-top: 16px; }
 .files { margin-top: 24px; }
+.posted-detail dd { margin: 4px 0 16px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.posted-detail dt { font-weight: 600; }
+.description { grid-column: 1 / -1; }
+.table-scroll { overflow-x: auto; }
+.posted-detail table { width: 100%; border-collapse: collapse; }
+.posted-detail th, .posted-detail td { text-align: left; padding: 8px; border-bottom: 1px solid var(--n-border-color); }
 .error { color: #c33; }
 @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } .tax-row { grid-template-columns: 1fr 1fr; } .sale-row { align-items: flex-start; flex-direction: column; } }
 </style>

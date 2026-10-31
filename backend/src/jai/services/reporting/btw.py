@@ -59,6 +59,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from jai.db import set_rls_company
 from jai.models._enums import (
@@ -75,10 +76,12 @@ from jai.models.document import (
     InvoiceCreditBasisLine,
 )
 from jai.models.expense import Expense
+from jai.models.external_sales import ExternalSale
 from jai.models.invoice import Invoice
 from jai.models.payment import Payment, PaymentTax
 from jai.schemas.report import (
     ReportDocumentReference,
+    ReportSourceType,
     ReportTaxEventKind,
     ReportTaxEventRow,
     ReportWarning,
@@ -180,12 +183,11 @@ def _quarter_date_range(year: int, quarter: int) -> tuple[date, date]:
 
 def _classify_rate(rate_percent: Decimal, tiers: VatRateTiers) -> str:
     """Return the tier label ('hoog', 'laag', 'zero', 'other') for a rate value."""
-    rate_int = int(rate_percent)  # tier thresholds are integers; rate must match exactly
-    if rate_int == tiers.hoog:
+    if rate_percent == tiers.hoog:
         return "hoog"
-    if rate_int == tiers.laag:
+    if rate_percent == tiers.laag:
         return "laag"
-    if rate_int == tiers.zero:
+    if rate_percent == tiers.zero:
         return "zero"
     return "other"
 
@@ -479,6 +481,9 @@ async def compute_vat_return(
         source_document_kind: InvoiceDocumentKind | None = None,
         source_document_number: str | None = None,
         source_row_id: uuid.UUID | None = None,
+        external_sale_id: uuid.UUID | None = None,
+        external_source_name: str | None = None,
+        external_original_number: str | None = None,
     ) -> None:
         """Apply and expose one frozen invoice-side tax event exactly once."""
         if taxable == _ZERO and vat == _ZERO:
@@ -502,6 +507,14 @@ async def compute_vat_return(
             ),
             source_document_kind=source_document_kind,
             source_document_number=source_document_number,
+            source_type=(
+                ReportSourceType.EXTERNAL_SALE
+                if external_sale_id
+                else ReportSourceType.INVOICE
+            ),
+            external_sale_id=str(external_sale_id) if external_sale_id else None,
+            external_source_name=external_source_name,
+            external_original_number=external_original_number,
             taxable_amount=taxable,
             vat_amount=vat,
             vat_treatment_code=code,
@@ -528,6 +541,46 @@ async def compute_vat_return(
     )
     result_inv = await session.execute(stmt_inv)
     invoices = result_inv.scalars().all()
+
+    # Posted external sales are a distinct source family. Their confirmed
+    # original VAT is authoritative and is routed using the frozen data-driven rate.
+    external_sales = list(
+        (
+            await session.scalars(
+                select(ExternalSale)
+                .options(selectinload(ExternalSale.tax_summaries))
+                .where(
+                    ExternalSale.status == "POSTED",
+                    ExternalSale.document_date >= date_from,
+                    ExternalSale.document_date <= date_to,
+                )
+            )
+        ).all()
+    )
+    for sale in external_sales:
+        if sale.document_date is None:
+            continue
+        for external_tax in sale.tax_summaries:
+            if (
+                external_tax.net_amount is None
+                or external_tax.vat_amount is None
+                or external_tax.rate_percent is None
+            ):
+                continue
+            apply_tax_event(
+                event_kind=ReportTaxEventKind.DOCUMENT_TAX,
+                event_date=sale.document_date,
+                taxable=quantize_to_minor_unit(Decimal(str(external_tax.net_amount))),
+                vat=quantize_to_minor_unit(Decimal(str(external_tax.vat_amount))),
+                code="NL_DOMESTIC",
+                effect="APPLY_RATE",
+                requires_icp=False,
+                rate=Decimal(str(external_tax.rate_percent)),
+                source_row_id=external_tax.id,
+                external_sale_id=sale.id,
+                external_source_name=sale.posted_source_name or "External source",
+                external_original_number=sale.original_number or "",
+            )
 
     # Quote-origin advances are recognised on their payment date, whether or
     # not the quote has already been converted. These are locked PaymentTax

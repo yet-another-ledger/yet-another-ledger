@@ -30,6 +30,12 @@ def _result_scalars(items: list[object]) -> MagicMock:
     return result
 
 
+def _empty_scalar_rows(session: AsyncMock) -> None:
+    result = MagicMock()
+    result.all.return_value = []
+    session.scalars.return_value = result
+
+
 def _tax(rate: str, net: str, vat: str, rate_id: uuid.UUID | None = None) -> MagicMock:
     row = MagicMock()
     row.id = uuid.uuid4()
@@ -87,6 +93,7 @@ async def test_formal_advance_and_final_use_invoice_dates_and_final_residual() -
     application_tax.base_taxable_amount = Decimal("500")
     application_tax.base_vat_amount = Decimal("105")
     session = AsyncMock()
+    _empty_scalar_rows(session)
     ignored = MagicMock()
     payment_rows = MagicMock(); payment_rows.all.return_value = []
     formal = _result_scalars([advance, final])
@@ -117,6 +124,7 @@ async def test_cross_period_credit_emits_negative_icp_and_advisory_only() -> Non
     customer = MagicMock(); customer.id = customer_id; customer.name = "EU Buyer"; customer.vat_id = "DE123"
     address = MagicMock(); address.customer_id = customer_id; address.country_code = "DE"
     session = AsyncMock()
+    _empty_scalar_rows(session)
     credit_rows = MagicMock()
     credit_rows.all.return_value = [
         (
@@ -171,6 +179,7 @@ async def test_vat_event_rows_include_standard_receipt_payment_and_offset_once()
     offset_rows = MagicMock()
     offset_rows.all.return_value = [(standard.id, payment_id, payment_tax)]
     session = AsyncMock()
+    _empty_scalar_rows(session)
     session.execute.side_effect = [
         MagicMock(),
         _result_scalars([standard]),
@@ -217,6 +226,7 @@ async def test_event_rows_are_canonical_for_reversed_equal_amount_cent_tail_buck
     def session_for(taxes: list[MagicMock]) -> AsyncMock:
         standard.taxes = taxes
         session = AsyncMock()
+        _empty_scalar_rows(session)
         empty_rows = MagicMock()
         empty_rows.all.return_value = []
         session.execute.side_effect = [
@@ -309,6 +319,7 @@ async def test_multiline_credit_has_one_base_gross_warning_and_real_source_kind(
         (credit, correction, second, basis, "INV-1", source_date, InvoiceDocumentKind.FINAL),
     ]
     session = AsyncMock()
+    _empty_scalar_rows(session)
     session.execute.side_effect = [
         MagicMock(),
         _result_scalars([]),
@@ -377,8 +388,9 @@ async def test_profit_loss_uses_full_final_and_frozen_advance_credit_rule() -> N
     credit = _invoice(InvoiceDocumentKind.CREDIT_NOTE, date(2026, 5, 3), [], customer_id=final.customer_id)
     correction = MagicMock(); correction.issued_base_net_amount = Decimal("200")
     session = AsyncMock()
+    _empty_scalar_rows(session)
     credit_rows = MagicMock(); credit_rows.all.return_value = [(credit, correction)]
-    session.execute.side_effect = [_result_scalars([final]), credit_rows, _result_scalars([])]
+    session.execute.side_effect = [MagicMock(), _result_scalars([final]), credit_rows, _result_scalars([])]
 
     report = await compute_profit_loss(
         session, company_id, date(2026, 5, 1), date(2026, 5, 31), "month"

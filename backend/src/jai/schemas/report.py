@@ -38,6 +38,19 @@ class ReportTaxEventKind(enum.StrEnum):
     RECEIPT_ONLY_INVOICE_OFFSET = "RECEIPT_ONLY_INVOICE_OFFSET"
 
 
+class ReportSourceType(enum.StrEnum):
+    INVOICE = "INVOICE"
+    EXTERNAL_SALE = "EXTERNAL_SALE"
+
+
+class ExternalSaleReportReference(BaseModel):
+    source_type: ReportSourceType = ReportSourceType.EXTERNAL_SALE
+    external_sale_id: str
+    source_name: str
+    original_number: str
+    event_date: date
+
+
 class ReportDocumentReference(BaseModel):
     """Frozen document reference carried by a reporting event row."""
 
@@ -72,6 +85,10 @@ class ReportTaxEventRow(BaseModel):
     source_document_id: str | None = None
     source_document_kind: InvoiceDocumentKind | None = None
     source_document_number: str | None = None
+    source_type: ReportSourceType = ReportSourceType.INVOICE
+    external_sale_id: str | None = None
+    external_source_name: str | None = None
+    external_original_number: str | None = None
 
     taxable_amount: Decimal
     vat_amount: Decimal
@@ -97,6 +114,7 @@ class ReportWarning(BaseModel):
     amount: Decimal = Field(
         description="Signed frozen base-currency gross correction amount (EUR)."
     )
+
 
 # ---------------------------------------------------------------------------
 # Sub-models
@@ -155,6 +173,7 @@ class ProfitLossReport(BaseModel):
         default=None,
         description="Reserved for future per-category breakdown (step 1: always null).",
     )
+    external_sales: list[ExternalSaleReportReference] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

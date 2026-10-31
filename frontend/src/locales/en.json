@@ -1598,7 +1598,8 @@
       "expenseActual": "Actual Expenses",
       "profit": "Profit",
       "period": "Period",
-      "seriesTitle": "Time Series"
+      "seriesTitle": "Time Series",
+      "externalSales": "Posted external sales"
     },
     "vat": {
       "title": "BTW Return",
@@ -1634,7 +1635,9 @@
       "box5b": "5b – Voorbelasting (input VAT)",
       "outputVatTotal": "Output VAT total (≈ 5a)",
       "netPayable": "Totaal te betalen / terug te vragen",
-      "q4Note": "1d is non-zero only in Q4 (year-end private-use correction)."
+      "q4Note": "1d is non-zero only in Q4 (year-end private-use correction).",
+      "eventSources": "Auditable source records",
+      "externalSale": "External sale"
     },
     "icp": {
       "title": "ICP Report (Opgaaf ICP)",
@@ -1780,9 +1783,27 @@
     "pending": "Pending",
     "none": "Not set",
     "saved": "Pending entry saved.",
+    "calculate": "Review posting",
+    "saveBeforeCalculate": "Save your changes before reviewing the posting.",
+    "confirmPosting": "Confirm and post",
+    "posted": "Posted",
+    "version": "Version",
+    "postingHistory": "Posting history",
+    "postedAt": "Posted at",
+    "actor": "Actor",
+    "originalTotals": "Original net / VAT",
+    "derivedVat": "Rate-derived VAT",
+    "acknowledgeMismatch": "I reviewed and acknowledge the original VAT difference",
+    "mismatchReason": "Reason for VAT difference",
     "sourceSaved": "Source saved.",
     "sourceDisabled": "Inactive sources cannot be selected for new entries.",
     "duplicateWarning": "Matching original already exists; review possible duplicate.",
+    "conflicts": {
+      "versionConflict": "This entry changed. Reload it and review the current details before posting.",
+      "alreadyPosted": "This entry is already posted. Its current record has been retained.",
+      "notPending": "This entry is no longer pending. Reload it to review its current state.",
+      "duplicateNumber": "An entry with this source and original number already exists."
+    },
     "error": "Could not save the external sales entry. Check the fields and try again."
   },
   "sentCopy": {

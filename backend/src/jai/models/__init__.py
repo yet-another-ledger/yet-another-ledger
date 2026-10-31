@@ -29,6 +29,7 @@ from jai.models.expense_attachment import ExpenseAttachment  # noqa: F401
 from jai.models.external_sales import (  # noqa: F401
     ExternalSale,
     ExternalSaleFile,
+    ExternalSalePosting,
     ExternalSalesSource,
     ExternalSaleTax,
 )

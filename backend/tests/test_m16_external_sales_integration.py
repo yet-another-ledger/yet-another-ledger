@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
+from decimal import ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pyotp
 import pytest
@@ -326,6 +328,7 @@ async def test_external_sales_runtime_rls_and_cross_company_child_ownership(
             "external_sale",
             "external_sale_tax",
             "external_sale_file",
+            "external_sale_posting",
         ):
             assert await runtime.scalar(text(f"SELECT count(*) FROM {table}")) == 0
         with pytest.raises(DBAPIError):
@@ -335,6 +338,32 @@ async def test_external_sales_runtime_rls_and_cross_company_child_ownership(
                     "(company_id,name,kind) VALUES (:company_id,'Spoof','OTHER')"
                 ),
                 {"company_id": company_a},
+            )
+        await runtime.rollback()
+
+        await set_rls_company(runtime, company_a)
+        await runtime.execute(
+            text(
+                "INSERT INTO external_sale_posting "
+                "(company_id,external_sale_id,version,snapshot) "
+                "VALUES (:company_id,:sale_id,2,'{}'::jsonb)"
+            ),
+            {"company_id": company_a, "sale_id": sale_id},
+        )
+        await runtime.commit()
+        with pytest.raises(DBAPIError):
+            await runtime.execute(
+                text(
+                    "UPDATE external_sale_posting SET snapshot='{}'::jsonb "
+                    "WHERE external_sale_id=:id"
+                ),
+                {"id": sale_id},
+            )
+        await runtime.rollback()
+        with pytest.raises(DBAPIError):
+            await runtime.execute(
+                text("DELETE FROM external_sale_posting WHERE external_sale_id=:id"),
+                {"id": sale_id},
             )
         await runtime.rollback()
 
@@ -356,7 +385,7 @@ async def test_external_sales_runtime_rls_and_cross_company_child_ownership(
 async def test_external_sales_duplicate_update_is_409_and_rolls_back_tax_rows(
     db_client: AsyncClient, tax_selection: str
 ) -> None:
-    _, treatment, rate, _, _ = await _owner_company(db_client)
+    company, treatment, rate, _, _ = await _owner_company(db_client)
     source = (
         await db_client.post(
             "/api/v1/external-sales-sources", json={"name": "Duplicate updates", "kind": "OTHER"}
@@ -387,7 +416,14 @@ async def test_external_sales_duplicate_update_is_409_and_rolls_back_tax_rows(
     before = (await db_client.get(url)).json()
     duplicate = await db_client.put(url, json={**payload, "original_number": "  A  "})
     assert duplicate.status_code == 409
-    assert duplicate.json() == {"detail": "DUPLICATE_SOURCE_NUMBER"}
+    assert duplicate.json() == {
+        "detail": {
+            "code": "DUPLICATE_SOURCE_NUMBER",
+            "detail": "DUPLICATE_SOURCE_NUMBER",
+            "external_sale_id": None,
+            "current_version": None,
+        }
+    }
     after = (await db_client.get(url)).json()
     assert after == before
 
@@ -410,6 +446,266 @@ async def test_external_sales_remove_file_updates_full_capacity_response(
     assert len(removed.json()["files"]) == 4
     assert removed.json()["files"] == (await db_client.get(url)).json()["files"]
     assert (await db_client.post(f"{url}/files", files=files[:1])).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_external_sale_preview_acknowledged_posting_and_reports_once(
+    db_client: AsyncClient,
+    db_session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    company, treatment, rate, _, _ = await _owner_company(db_client)
+    source = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Test platform", "kind": "PLATFORM"}
+        )
+    ).json()
+    rate_pct = Decimal(rate["percent"])
+    net = Decimal("100.01")
+    derived = (net * rate_pct / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    original_vat = derived + Decimal("0.01")
+    second_net = Decimal("10.00")
+    second_derived = (second_net * rate_pct / Decimal("100")).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    second_vat = second_derived - Decimal("0.01")
+    original_vat_total = original_vat + second_vat
+    net_total = net + second_net
+    created = await db_client.post(
+        "/api/v1/external-sales",
+        json={
+            "source_id": source["id"],
+            "original_number": "  PLATFORM-42  ",
+            "document_date": "2026-02-15",
+            "include_in_pl": True,
+            "tax_summaries": [
+                {
+                    "treatment_id": treatment["id"],
+                    "rate_id": rate["id"],
+                    "net_amount": str(net),
+                    "vat_amount": str(original_vat),
+                },
+                {
+                    "treatment_id": treatment["id"],
+                    "rate_id": rate["id"],
+                    "net_amount": str(second_net),
+                    "vat_amount": str(second_vat),
+                },
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    sale = created.json()
+    sale_url = f"/api/v1/external-sales/{sale['id']}"
+    no_original = await db_client.post(
+        f"{sale_url}/calculate", json={"expected_version": sale["version"]}
+    )
+    assert no_original.status_code == 422
+    uploaded = await db_client.post(
+        f"{sale_url}/files",
+        files=[("files", ("original.pdf", b"%PDF-original", "application/pdf"))],
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    sale = uploaded.json()
+    assert sale["version"] > 1
+
+    before_pl = (
+        await db_client.get("/api/v1/reports/profit-loss?from=2026-01-01&to=2026-12-31")
+    ).json()
+    preview = await db_client.post(
+        f"{sale_url}/calculate", json={"expected_version": sale["version"]}
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["mismatch"] is True
+    assert Decimal(preview.json()["original_vat_total"]) == original_vat_total
+    assert preview.json()["mismatch_row_indices"] == [0, 1]
+    stale_version = sale["version"]
+    appended = await db_client.post(
+        f"{sale_url}/files",
+        files=[("files", ("second.pdf", b"%PDF-second", "application/pdf"))],
+    )
+    assert appended.status_code == 200
+    stale_confirm = await db_client.post(
+        f"{sale_url}/confirm",
+        json={"expected_version": stale_version},
+    )
+    assert stale_confirm.status_code == 409
+    assert stale_confirm.json()["detail"]["code"] == "EXTERNAL_SALE_VERSION_CONFLICT"
+    assert stale_confirm.json()["detail"]["external_sale_id"] == sale["id"]
+    assert stale_confirm.json()["detail"]["current_version"] == appended.json()["version"]
+    sale = appended.json()
+    preview = await db_client.post(
+        f"{sale_url}/calculate", json={"expected_version": sale["version"]}
+    )
+    assert preview.status_code == 200
+    no_ack = await db_client.post(f"{sale_url}/confirm", json={"expected_version": sale["version"]})
+    assert no_ack.status_code == 422
+
+    async def fail_posting_commit(_session: AsyncSession) -> None:
+        raise RuntimeError("forced external sale posting commit failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(AsyncSession, "commit", fail_posting_commit)
+        with pytest.raises(RuntimeError, match="forced external sale posting commit failure"):
+            await db_client.post(
+                f"{sale_url}/confirm",
+                json={
+                    "expected_version": sale["version"],
+                    "acknowledge_vat_mismatch": True,
+                    "mismatch_ack_reason": "Commit rollback check.",
+                },
+            )
+    after_failed_commit = (await db_client.get(sale_url)).json()
+    assert after_failed_commit["status"] == "PENDING"
+    assert after_failed_commit["postings"] == []
+    confirm_payload = {
+        "expected_version": sale["version"],
+        "acknowledge_vat_mismatch": True,
+        "mismatch_ack_reason": "The original document shows the retained VAT amount.",
+    }
+    confirmation, concurrent_confirmation = await asyncio.gather(
+        db_client.post(f"{sale_url}/confirm", json=confirm_payload),
+        db_client.post(f"{sale_url}/confirm", json=confirm_payload),
+    )
+    statuses = sorted([confirmation.status_code, concurrent_confirmation.status_code])
+    assert statuses == [200, 409], (confirmation.text, concurrent_confirmation.text)
+    if confirmation.status_code == 409:
+        confirmation, concurrent_confirmation = concurrent_confirmation, confirmation
+    assert concurrent_confirmation.json()["detail"]["code"] == "EXTERNAL_SALE_ALREADY_POSTED"
+    posted = confirmation.json()
+    assert posted["status"] == "POSTED"
+    assert Decimal(posted["original_net_total"]) == net_total
+    assert Decimal(posted["original_vat_total"]) == original_vat_total
+    assert posted["mismatch_ack_reason"]
+    assert len(posted["postings"]) == 1
+    assert (await db_client.put(sale_url, json={})).status_code == 409
+    assert (await db_client.delete(sale_url)).status_code == 409
+    retained_file = posted["files"][0]
+    assert (await db_client.delete(f"{sale_url}/files/{retained_file['id']}")).status_code == 409
+    retained_download = await db_client.get(f"{sale_url}/files/{retained_file['id']}")
+    assert retained_download.status_code == 200
+    assert retained_download.content == b"%PDF-original"
+
+    conflict = await db_client.post(
+        f"{sale_url}/confirm",
+        json={
+            "expected_version": sale["version"],
+            "acknowledge_vat_mismatch": True,
+            "mismatch_ack_reason": "retry",
+        },
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "EXTERNAL_SALE_ALREADY_POSTED"
+    assert conflict.json()["detail"]["external_sale_id"] == sale["id"]
+
+    for failure in (FileNotFoundError("offline"), None):
+        broken_open = Mock(side_effect=failure, return_value=b"corrupted original")
+        with monkeypatch.context() as patch:
+            patch.setattr(storage, "open", broken_open)
+            for command in ("calculate", "confirm"):
+                for expected_version in (sale["version"], posted["version"]):
+                    retry = await db_client.post(
+                        f"{sale_url}/{command}", json={"expected_version": expected_version}
+                    )
+                    assert retry.status_code == 409, retry.text
+                    assert retry.json()["detail"] == {
+                        "code": "EXTERNAL_SALE_ALREADY_POSTED",
+                        "detail": "EXTERNAL_SALE_ALREADY_POSTED",
+                        "external_sale_id": posted["id"],
+                        "current_version": posted["version"],
+                    }
+            broken_open.assert_not_called()
+
+    after_pl = (
+        await db_client.get("/api/v1/reports/profit-loss?from=2026-01-01&to=2026-12-31")
+    ).json()
+    assert Decimal(after_pl["revenue_net"]) - Decimal(before_pl["revenue_net"]) == net_total
+    assert after_pl["external_sales"][0]["external_sale_id"] == sale["id"]
+    vat = (await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=1")).json()
+    assert (
+        Decimal(vat["boxes"]["box_1a"]["vat"] if rate_pct == 21 else vat["boxes"]["box_1b"]["vat"])
+        == original_vat_total
+    )
+    event = next(row for row in vat["event_rows"] if row["external_sale_id"] == sale["id"])
+    assert event["source_type"] == "EXTERNAL_SALE"
+    assert event["document_id"] is None and event["document_kind"] is None
+    assert event["external_original_number"] == "  PLATFORM-42  "
+    assert (await db_client.get("/api/v1/reports/dashboard?year=2026")).json()["kpi"][
+        "ytd_revenue"
+    ] == after_pl["revenue_net"]
+
+    async with db_session_maker() as admin:
+        await set_rls_company(admin, uuid.UUID(company["id"]))
+        count = await admin.scalar(
+            text("SELECT count(*) FROM external_sale_posting WHERE external_sale_id=:id"),
+            {"id": uuid.UUID(sale["id"])},
+        )
+        assert count == 1
+
+    energy = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Energy company", "kind": "ENERGY"}
+        )
+    ).json()
+    energy_net = Decimal("25.00")
+    energy_vat = (energy_net * rate_pct / Decimal("100")).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    energy_sale = (
+        await db_client.post(
+            "/api/v1/external-sales",
+            json={
+                "source_id": energy["id"],
+                "original_number": "ENERGY-1",
+                "document_date": "2026-02-20",
+                "tax_summaries": [
+                    {
+                        "treatment_id": treatment["id"],
+                        "rate_id": rate["id"],
+                        "net_amount": str(energy_net),
+                        "vat_amount": str(energy_vat),
+                    }
+                ],
+            },
+        )
+    ).json()
+    assert energy_sale["include_in_pl"] is False
+    energy_url = f"/api/v1/external-sales/{energy_sale['id']}"
+    energy_sale = (
+        await db_client.post(
+            f"{energy_url}/files",
+            files=[("files", ("energy.pdf", b"%PDF-energy", "application/pdf"))],
+        )
+    ).json()
+    assert (
+        await db_client.post(
+            f"{energy_url}/calculate", json={"expected_version": energy_sale["version"]}
+        )
+    ).status_code == 200
+    energy_post = await db_client.post(
+        f"{energy_url}/confirm", json={"expected_version": energy_sale["version"]}
+    )
+    assert energy_post.status_code == 200, energy_post.text
+    pl_after_energy = (
+        await db_client.get("/api/v1/reports/profit-loss?from=2026-01-01&to=2026-12-31")
+    ).json()
+    assert pl_after_energy["revenue_net"] == after_pl["revenue_net"]
+    vat_after_energy = (
+        await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=1")
+    ).json()
+    assert (
+        Decimal(
+            vat_after_energy["boxes"]["box_1a"]["vat"]
+            if rate_pct == 21
+            else vat_after_energy["boxes"]["box_1b"]["vat"]
+        )
+        == original_vat_total + energy_vat
+    )
+    assert (await db_client.get("/api/v1/reports/dashboard?year=2026")).json()["kpi"][
+        "ytd_revenue"
+    ] == after_pl["revenue_net"]
 
 
 @pytest.mark.asyncio
@@ -536,7 +832,10 @@ async def test_external_sales_upload_preflight_capacity_and_locked_recheck(
     with monkeypatch.context() as patch:
         patch.setattr(UploadFile, "read", read)
         full = await db_client.post(url, files=[("files", ("bad.txt", b"bad", "text/plain"))])
-    assert full.status_code == 409 and full.json()["detail"] == "FILE_LIMIT_REACHED"
+    assert full.status_code == 409
+    assert full.json()["detail"]["code"] == "FILE_LIMIT_REACHED"
+    assert full.json()["detail"]["external_sale_id"] == str(sale_id)
+    assert full.json()["detail"]["current_version"] == 3
     read.assert_not_awaited()
     with monkeypatch.context() as patch:
         patch.setattr(UploadFile, "read", read)
@@ -557,3 +856,294 @@ async def test_external_sales_upload_preflight_capacity_and_locked_recheck(
                 64,
                 storage,
             )
+
+
+@pytest.mark.asyncio
+async def test_external_sale_zero_rate_validation_preserves_draft_and_reconciles_reports(
+    db_client: AsyncClient,
+    runtime_session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject unsupported originals before posting; corrected selection retains its VAT."""
+    import jai.services.reporting.dashboard as dashboard
+
+    monkeypatch.setattr(dashboard, "_select_quarter", lambda _year: 1)
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    company, treatment, _, _, _ = await _owner_company(db_client)
+    rates = (await db_client.get("/api/v1/vat-rates")).json()["items"]
+    zero = next(rate for rate in rates if Decimal(rate["percent"]) == 0)
+    high = next(rate for rate in rates if Decimal(rate["percent"]) == 21)
+    source = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Rate review", "kind": "PLATFORM"}
+        )
+    ).json()
+    payload = {
+        "source_id": source["id"],
+        "original_number": "ZERO-ORIGINAL",
+        "document_date": "2026-03-31",
+        "include_in_pl": True,
+        "tax_summaries": [
+            {
+                "treatment_id": treatment["id"],
+                "rate_id": zero["id"],
+                "net_amount": "100.00",
+                "vat_amount": "21.01",
+            }
+        ],
+    }
+    draft = (await db_client.post("/api/v1/external-sales", json=payload)).json()
+    url = f"/api/v1/external-sales/{draft['id']}"
+    draft = (
+        await db_client.post(
+            f"{url}/files", files=[("files", ("original.pdf", b"%PDF-zero", "application/pdf"))]
+        )
+    ).json()
+    originals = dict(storage.data)
+    for command in ("calculate", "confirm"):
+        body = {"expected_version": draft["version"]}
+        if command == "confirm":
+            body.update(acknowledge_vat_mismatch=True, mismatch_ack_reason="Original checked.")
+        rejected = await db_client.post(f"{url}/{command}", json=body)
+        assert rejected.status_code == 422, rejected.text
+        assert "zero VAT rate" in rejected.json()["detail"]
+        assert "review the original document" in rejected.json()["detail"]
+    assert (await db_client.get(url)).json() == draft
+    assert storage.data == originals
+    async with runtime_session_maker() as runtime:
+        assert await runtime.scalar(text("SELECT current_user")) == "jai_app"
+        await set_rls_company(runtime, uuid.UUID(company["id"]))
+        assert await runtime.scalar(text("SELECT count(*) FROM external_sale_posting")) == 0
+    vat_url = "/api/v1/reports/vat-return?year=2026&quarter=1"
+    pl_url = "/api/v1/reports/profit-loss?from=2026-01-01&to=2026-03-31"
+    dashboard_url = "/api/v1/reports/dashboard?year=2026"
+    before_vat = (await db_client.get(vat_url)).json()
+    assert before_vat["event_rows"] == []
+    assert Decimal(before_vat["totals"]["output_vat_total"]["vat"]) == 0
+    assert Decimal((await db_client.get(pl_url)).json()["revenue_net"]) == 0
+    assert (
+        Decimal((await db_client.get(dashboard_url)).json()["kpi"]["current_quarter_vat_payable"])
+        == 0
+    )
+
+    # Correct the selected rate, never the original amount. A real mismatch still needs a reason.
+    payload["tax_summaries"][0]["rate_id"] = high["id"]
+    updated = await db_client.put(url, json=payload)
+    assert updated.status_code == 200, updated.text
+    draft = (await db_client.get(url)).json()
+    for failure in (FileNotFoundError("offline"), None):
+        with monkeypatch.context() as patch:
+            patch.setattr(storage, "open", Mock(side_effect=failure, return_value=b"corrupt"))
+            for command in ("calculate", "confirm"):
+                unavailable = await db_client.post(
+                    f"{url}/{command}", json={"expected_version": draft["version"]}
+                )
+                assert unavailable.status_code == 422, unavailable.text
+                assert "original file" in unavailable.json()["detail"]
+    assert (await db_client.get(url)).json() == draft
+    preview = await db_client.post(f"{url}/calculate", json={"expected_version": draft["version"]})
+    assert preview.status_code == 200 and preview.json()["mismatch"] is True
+    assert Decimal(preview.json()["original_vat_total"]) == Decimal("21.01")
+    assert (
+        await db_client.post(f"{url}/confirm", json={"expected_version": draft["version"]})
+    ).status_code == 422
+    posted = await db_client.post(
+        f"{url}/confirm",
+        json={
+            "expected_version": draft["version"],
+            "acknowledge_vat_mismatch": True,
+            "mismatch_ack_reason": "Verified 21% selection against the retained original.",
+        },
+    )
+    assert posted.status_code == 200, posted.text
+
+    # A supported 0%/zero-VAT original still posts to 1e (base only).
+    payload["original_number"] = "ZERO-VALID"
+    payload["tax_summaries"][0].update(rate_id=zero["id"], net_amount="25.00", vat_amount="0.00")
+    zero_sale = (await db_client.post("/api/v1/external-sales", json=payload)).json()
+    zero_url = f"/api/v1/external-sales/{zero_sale['id']}"
+    zero_sale = (
+        await db_client.post(
+            f"{zero_url}/files", files=[("files", ("zero.pdf", b"%PDF-valid", "application/pdf"))]
+        )
+    ).json()
+    assert (
+        await db_client.post(
+            f"{zero_url}/calculate", json={"expected_version": zero_sale["version"]}
+        )
+    ).status_code == 200
+    assert (
+        await db_client.post(f"{zero_url}/confirm", json={"expected_version": zero_sale["version"]})
+    ).status_code == 200
+    vat = (await db_client.get(vat_url)).json()
+    events_vat = sum(Decimal(row["vat_amount"]) for row in vat["event_rows"])
+    assert events_vat == Decimal("21.01")
+    assert Decimal(vat["boxes"]["box_1a"]["vat"]) == events_vat
+    assert Decimal(vat["boxes"]["box_1e"]["base"]) == Decimal("25.00")
+    assert Decimal(vat["totals"]["output_vat_total"]["vat"]) == events_vat
+    pl = (await db_client.get(pl_url)).json()
+    assert Decimal(pl["revenue_net"]) == Decimal("125.00")
+    summary = (await db_client.get(dashboard_url)).json()
+    assert summary["kpi"]["ytd_revenue"] == pl["revenue_net"]
+    assert (
+        summary["kpi"]["current_quarter_vat_payable"]
+        == vat["totals"]["net_payable_or_refundable"]["vat"]
+    )
+    q2 = (await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=2")).json()
+    assert q2["event_rows"] == []
+
+    saved = (await db_client.get(url)).json()
+    renamed_rate = await db_client.put(
+        f"/api/v1/vat-rates/{high['id']}",
+        json={"label": "Later dictionary rate", "percent": "9", "active": False},
+    )
+    assert renamed_rate.status_code == 200, renamed_rate.text
+    assert (await db_client.get(url)).json() == saved
+    assert (await db_client.get(vat_url)).json() == vat
+    assert (await db_client.get(pl_url)).json() == pl
+    assert (await db_client.get(dashboard_url)).json() == summary
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("storage_failure", ["missing", "corrupt"])
+async def test_external_sale_posting_conflicts_precede_storage_access(
+    db_client: AsyncClient,
+    db_session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    storage_failure: str,
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    await _owner_company(db_client)
+    # No complete business inputs needed: state/version must precede both input and storage checks.
+    draft = (await db_client.post("/api/v1/external-sales", json={})).json()
+    url = f"/api/v1/external-sales/{draft['id']}"
+    stale_version = draft["version"]
+    draft = (
+        await db_client.post(
+            f"{url}/files", files=[("files", ("original.pdf", b"%PDF-safe", "application/pdf"))]
+        )
+    ).json()
+    broken_open = (
+        Mock(side_effect=FileNotFoundError("offline"))
+        if storage_failure == "missing"
+        else Mock(return_value=b"corrupt")
+    )
+    monkeypatch.setattr(storage, "open", broken_open)
+    for command in ("calculate", "confirm"):
+        conflict = await db_client.post(
+            f"{url}/{command}", json={"expected_version": stale_version}
+        )
+        assert conflict.status_code == 409, conflict.text
+        assert conflict.json()["detail"] == {
+            "code": "EXTERNAL_SALE_VERSION_CONFLICT",
+            "detail": "EXTERNAL_SALE_VERSION_CONFLICT",
+            "external_sale_id": draft["id"],
+            "current_version": draft["version"],
+        }
+    broken_open.assert_not_called()
+
+    # A different tenant's existing identity remains 404, even with stale/invalid fields.
+    async with db_session_maker() as admin:
+        other_id, other_sale_id = uuid.uuid4(), uuid.uuid4()
+        await admin.execute(
+            text("INSERT INTO company (id,name,base_currency) VALUES (:id,'Other','EUR')"),
+            {"id": other_id},
+        )
+        await set_rls_company(admin, other_id)
+        await admin.execute(
+            text("INSERT INTO external_sale (id,company_id) VALUES (:id,:company)"),
+            {"id": other_sale_id, "company": other_id},
+        )
+        await admin.commit()
+    for command in ("calculate", "confirm"):
+        assert (
+            await db_client.post(
+                f"/api/v1/external-sales/{other_sale_id}/{command}", json={"expected_version": 99}
+            )
+        ).status_code == 404
+    broken_open.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fractional_external_rate_and_configured_zero_tier_report_without_vat_loss(
+    db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jai.services.reporting.dashboard as dashboard
+
+    monkeypatch.setattr(dashboard, "_select_quarter", lambda _year: 1)
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    _, treatment, _, _, _ = await _owner_company(db_client)
+    source = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Decimal rates", "kind": "PLATFORM"}
+        )
+    ).json()
+    configured = await db_client.put(
+        "/api/v1/settings/vat-rate-tiers", json={"hoog": 21, "laag": 9, "zero": 3}
+    )
+    assert configured.status_code == 200, configured.text
+    for percent, original_vat in [("0.5", "0.51"), ("3", "3.00")]:
+        rate = await db_client.post(
+            "/api/v1/vat-rates", json={"label": f"Custom {percent}", "percent": percent}
+        )
+        assert rate.status_code == 201, rate.text
+        created = await db_client.post(
+            "/api/v1/external-sales",
+            json={
+                "source_id": source["id"],
+                "original_number": f"RATE-{percent}",
+                "document_date": "2026-03-31",
+                "include_in_pl": True,
+                "tax_summaries": [
+                    {
+                        "treatment_id": treatment["id"],
+                        "rate_id": rate.json()["id"],
+                        "net_amount": "100.00",
+                        "vat_amount": original_vat,
+                    }
+                ],
+            },
+        )
+        assert created.status_code == 201, created.text
+        url = f"/api/v1/external-sales/{created.json()['id']}"
+        draft = (
+            await db_client.post(
+                f"{url}/files", files=[("files", ("rate.pdf", b"%PDF-rate", "application/pdf"))]
+            )
+        ).json()
+        preview = await db_client.post(
+            f"{url}/calculate", json={"expected_version": draft["version"]}
+        )
+        confirmation = await db_client.post(
+            f"{url}/confirm",
+            json={
+                "expected_version": draft["version"],
+                "acknowledge_vat_mismatch": True,
+                "mismatch_ack_reason": "Reviewed the original fractional-rate VAT.",
+            },
+        )
+        if percent == "3":
+            assert preview.status_code == confirmation.status_code == 422
+            assert "configured zero VAT rate tier" in preview.json()["detail"]
+            assert "configured zero VAT rate tier" in confirmation.json()["detail"]
+            assert (await db_client.get(url)).json() == draft
+        else:
+            assert preview.status_code == confirmation.status_code == 200, confirmation.text
+            assert preview.json()["mismatch"] is True
+            assert Decimal(preview.json()["derived_vat_total"]) == Decimal("0.50")
+            assert Decimal(confirmation.json()["original_vat_total"]) == Decimal("0.51")
+            assert confirmation.json()["mismatch_ack_reason"]
+    vat = (await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=1")).json()
+    assert len(vat["event_rows"]) == 1
+    assert Decimal(vat["event_rows"][0]["vat_rate_percent"]) == Decimal("0.5")
+    assert Decimal(vat["event_rows"][0]["vat_amount"]) == Decimal("0.51")
+    assert Decimal(vat["boxes"]["box_1c"]["base"]) == Decimal("100.00")
+    assert Decimal(vat["boxes"]["box_1c"]["vat"]) == Decimal("0.51")
+    assert Decimal(vat["boxes"]["box_1e"]["base"]) == 0
+    assert Decimal(vat["totals"]["output_vat_total"]["vat"]) == Decimal("0.51")
+    summary = (await db_client.get("/api/v1/reports/dashboard?year=2026")).json()
+    assert Decimal(summary["kpi"]["current_quarter_vat_payable"]) == Decimal("0.51")
+    assert Decimal(summary["kpi"]["ytd_revenue"]) == Decimal("100.00")

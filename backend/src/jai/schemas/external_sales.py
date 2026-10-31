@@ -18,6 +18,7 @@ class ExternalSalesSourceKind(StrEnum):
 
 class ExternalSalesStatus(StrEnum):
     PENDING = "PENDING"
+    POSTED = "POSTED"
 
 
 class ExternalSalesSourceInput(BaseModel):
@@ -71,6 +72,35 @@ class ExternalSalesTaxRead(BaseModel):
     vat_amount: Decimal | None
 
 
+class ExternalSalesCalculateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=1)
+
+
+class ExternalSalesConfirmRequest(ExternalSalesCalculateRequest):
+    acknowledge_vat_mismatch: bool = False
+    mismatch_ack_reason: str | None = Field(default=None, max_length=2000)
+
+
+class ExternalSalesCalculation(BaseModel):
+    sale_id: uuid.UUID
+    expected_version: int
+    original_net_total: Decimal
+    original_vat_total: Decimal
+    derived_vat_total: Decimal
+    mismatch: bool
+    mismatch_row_indices: list[int]
+    warnings: list[str]
+
+
+class ExternalSalesPostingRead(BaseModel):
+    id: uuid.UUID
+    version: int
+    actor_id: uuid.UUID | None
+    created_at: datetime
+    snapshot: dict[str, object]
+
+
 class ExternalSalesInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source_id: uuid.UUID | None = None
@@ -115,6 +145,14 @@ class ExternalSalesRead(BaseModel):
     files: list[ExternalSalesFileRead]
     created_at: datetime
     updated_at: datetime
+    version: int
+    posted_at: datetime | None = Field(...)
+    posted_by: uuid.UUID | None = Field(...)
+    posted_source_name: str | None = Field(...)
+    original_net_total: Decimal | None = Field(...)
+    original_vat_total: Decimal | None = Field(...)
+    mismatch_ack_reason: str | None = Field(...)
+    postings: list[ExternalSalesPostingRead]
 
 
 class ExternalSalesListRead(BaseModel):
@@ -126,4 +164,12 @@ class ExternalSalesListRead(BaseModel):
 
 class ExternalSalesConflict(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    detail: ExternalSalesConflictDetail
+
+
+class ExternalSalesConflictDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str
     detail: str
+    external_sale_id: uuid.UUID | None = None
+    current_version: int | None = None

@@ -306,6 +306,23 @@ const periodLabel = computed<string>(() => {
           />
         </n-card>
 
+        <n-card :title="t('reports.vat.eventSources')" style="margin-bottom: 16px">
+          <ul>
+            <li
+              v-for="(event, index) in (store.vatReport.event_rows ?? []).filter(row => row.source_type === 'EXTERNAL_SALE')"
+              :key="`${event.external_sale_id}-${index}`"
+            >
+              <router-link :to="`/external-sales/${event.external_sale_id}`">
+                {{ t('reports.vat.externalSale') }} · {{ event.external_source_name }} ·
+                {{ event.external_original_number }} · {{ event.event_date }}
+              </router-link>
+            </li>
+          </ul>
+          <n-text v-if="!(store.vatReport.event_rows ?? []).some(row => row.source_type === 'EXTERNAL_SALE')" depth="3">
+            —
+          </n-text>
+        </n-card>
+
         <!-- Totals -->
         <n-card :title="t('reports.vat.totals')" style="margin-bottom: 16px">
           <n-grid :cols="2" :x-gap="24" :y-gap="16">

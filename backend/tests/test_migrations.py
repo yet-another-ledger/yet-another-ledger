@@ -563,6 +563,133 @@ class TestMigrations:
         finally:
             _drop_database(isolated_url)
 
+    def test_0048_empty_downgrade_restores_external_sale_rls_flags(self) -> None:
+        """A permitted posting downgrade leaves the retained header protected."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_down_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        try:
+            upgraded = _run_alembic("upgrade", "head", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            before = _query(
+                isolated_url,
+                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
+                "WHERE relname='external_sale'",
+            )
+            assert before == [{"relrowsecurity": True, "relforcerowsecurity": True}]
+
+            downgraded = _run_alembic("downgrade", "0047", url=isolated_url)
+            assert downgraded.returncode == 0, downgraded.stderr
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": "0047"}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
+                "WHERE relname='external_sale'",
+            ) == [{"relrowsecurity": True, "relforcerowsecurity": True}]
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0048_downgrade_rejects_posted_history_without_tenant_context(self) -> None:
+        """A NOBYPASSRLS migrator detects retained posting data and rolls back DDL."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_keep_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        company_id, source_id, sale_id, posting_id = (uuid.uuid4() for _ in range(4))
+        params = {
+            "company_id": company_id,
+            "source_id": source_id,
+            "sale_id": sale_id,
+            "posting_id": posting_id,
+        }
+        try:
+            upgraded = _run_alembic("upgrade", "head", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                isolated_url,
+                "INSERT INTO company (id,name,base_currency) "
+                "VALUES (:company_id,'M16 posted retained','EUR'); "
+                "INSERT INTO external_sales_source "
+                "(id,company_id,name,kind,default_include_in_pl) "
+                "VALUES (:source_id,:company_id,'Platform','PLATFORM',true); "
+                "INSERT INTO external_sale "
+                "(id,company_id,source_id,original_number,status,version,posted_at,"
+                "original_net_total,original_vat_total) "
+                "VALUES (:sale_id,:company_id,:source_id,'posted-001','POSTED',2,now(),10,2)",
+                params,
+                company_id=company_id,
+            )
+            _query(
+                isolated_url,
+                "INSERT INTO external_sale_posting "
+                "(id,company_id,external_sale_id,version,snapshot) "
+                "VALUES (:posting_id,:company_id,:sale_id,2,'{}'::jsonb)",
+                params,
+                company_id=company_id,
+            )
+            assert _query(isolated_url, "SELECT count(*) AS n FROM external_sale") == [
+                {"n": 0}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT count(*) AS n FROM external_sale_posting",
+            ) == [{"n": 0}]
+
+            refused = _run_alembic("downgrade", "0047", url=isolated_url)
+            assert refused.returncode != 0
+            assert "Refusing to discard retained external sale posting history" in refused.stderr
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": "0048"}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('external_sale','external_sale_posting') ORDER BY relname",
+            ) == [
+                {
+                    "relname": name,
+                    "relrowsecurity": True,
+                    "relforcerowsecurity": True,
+                }
+                for name in ("external_sale", "external_sale_posting")
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT status,version,original_net_total,original_vat_total "
+                "FROM external_sale WHERE id=:sale_id",
+                {"sale_id": sale_id},
+                company_id=company_id,
+            ) == [
+                {
+                    "status": "POSTED",
+                    "version": 2,
+                    "original_net_total": Decimal("10.00"),
+                    "original_vat_total": Decimal("2.00"),
+                }
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT id,version,snapshot FROM external_sale_posting "
+                "WHERE external_sale_id=:sale_id",
+                {"sale_id": sale_id},
+                company_id=company_id,
+            ) == [{"id": posting_id, "version": 2, "snapshot": {}}]
+        finally:
+            _drop_database(isolated_url)
+
     def test_0044_sent_copy_preserves_historical_logs(self) -> None:
         assert _run_alembic("upgrade", "head", url=self.url).returncode == 0
         assert _run_alembic("downgrade", "0043", url=self.url).returncode == 0

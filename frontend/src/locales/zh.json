@@ -1598,7 +1598,8 @@
       "expenseActual": "实际开支",
       "profit": "利润",
       "period": "期间",
-      "seriesTitle": "时间序列"
+      "seriesTitle": "时间序列",
+      "externalSales": "已过账外部销售"
     },
     "vat": {
       "title": "BTW 申报汇总",
@@ -1634,7 +1635,9 @@
       "box5b": "5b – 可抵进项税（Voorbelasting）",
       "outputVatTotal": "销项合计（≈ 5a，参考位）",
       "netPayable": "总应缴 / 应退（Totaal te betalen / terug te vragen）",
-      "q4Note": "1d 仅在 Q4 年末申报时非零（私用回补汇总整年）。"
+      "q4Note": "1d 仅在 Q4 年末申报时非零（私用回补汇总整年）。",
+      "eventSources": "可追溯来源记录",
+      "externalSale": "外部销售"
     },
     "icp": {
       "title": "ICP 清单（Opgaaf ICP）",
@@ -1780,9 +1783,27 @@
     "pending": "待审核",
     "none": "未设置",
     "saved": "待审核记录已保存。",
+    "calculate": "审核过账内容",
+    "saveBeforeCalculate": "请先保存更改，再审核过账内容。",
+    "confirmPosting": "确认并过账",
+    "posted": "已过账",
+    "version": "版本",
+    "postingHistory": "入账历史",
+    "postedAt": "入账时间",
+    "actor": "操作人",
+    "originalTotals": "原件净额 / VAT",
+    "derivedVat": "税率推导 VAT",
+    "acknowledgeMismatch": "我已核对并确认原件 VAT 差异",
+    "mismatchReason": "VAT 差异原因",
     "sourceSaved": "来源已保存。",
     "sourceDisabled": "停用的来源不能用于新建记录。",
     "duplicateWarning": "已存在相同原件，请检查是否重复。",
+    "conflicts": {
+      "versionConflict": "此记录已发生变化。请重新加载并核对当前内容后再过账。",
+      "alreadyPosted": "此记录已过账，现有记录已保留。",
+      "notPending": "此记录已不再处于待审核状态。请重新加载查看当前状态。",
+      "duplicateNumber": "此来源下已存在相同原始编号的记录。"
+    },
     "error": "无法保存外部销售记录。请检查字段后重试。"
   },
   "sentCopy": {

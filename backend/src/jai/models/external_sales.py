@@ -6,8 +6,19 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Numeric, Text, func, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    Text,
+    func,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from jai.db import Base
@@ -55,6 +66,15 @@ class ExternalSale(Base):
     description: Mapped[str | None] = mapped_column(Text)
     include_in_pl: Mapped[bool | None] = mapped_column(Boolean)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'PENDING'"))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    posted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT")
+    )
+    posted_source_name: Mapped[str | None] = mapped_column(Text)
+    original_net_total: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    original_vat_total: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    mismatch_ack_reason: Mapped[str | None] = mapped_column(Text)
     creator_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL")
     )
@@ -70,6 +90,30 @@ class ExternalSale(Base):
     )
     files: Mapped[list[ExternalSaleFile]] = relationship(
         cascade="all, delete-orphan", passive_deletes=True, order_by="ExternalSaleFile.created_at"
+    )
+    postings: Mapped[list[ExternalSalePosting]] = relationship(
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ExternalSalePosting.created_at",
+    )
+
+
+class ExternalSalePosting(Base):
+    __tablename__ = "external_sale_posting"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company.id", ondelete="RESTRICT"), nullable=False
+    )
+    external_sale_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("external_sale.id", ondelete="RESTRICT"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
     )
 
 

@@ -15,6 +15,9 @@ from jai.config import get_settings
 from jai.db import get_session
 from jai.models.user import User
 from jai.schemas.external_sales import (
+    ExternalSalesCalculateRequest,
+    ExternalSalesCalculation,
+    ExternalSalesConfirmRequest,
     ExternalSalesConflict,
     ExternalSalesInput,
     ExternalSalesListRead,
@@ -28,7 +31,9 @@ from jai.services.external_sales import (
 )
 from jai.services.external_sales import (
     append_files,
+    calculate_sale,
     check_append_capacity,
+    confirm_sale,
     create_sale,
     create_source,
     discard_sale,
@@ -62,7 +67,17 @@ def _raise_service_error(exc: Exception) -> NoReturn:
     if isinstance(exc, LookupError):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if isinstance(exc, ServiceConflict):
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": exc.code,
+                "detail": str(exc),
+                "external_sale_id": (
+                    str(exc.external_sale_id) if exc.external_sale_id is not None else None
+                ),
+                "current_version": exc.current_version,
+            },
+        ) from exc
     if isinstance(exc, ReceiptValidationError):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     raise exc
@@ -237,6 +252,40 @@ async def get_external_sale_file(
         media_type=file_row.mime_type,
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
     )
+
+
+@router.post(
+    "/external-sales/{sale_id}/calculate",
+    response_model=ExternalSalesCalculation,
+    responses={409: {"model": ExternalSalesConflict}},
+)
+async def post_external_sale_calculation(
+    sale_id: uuid.UUID,
+    body: ExternalSalesCalculateRequest,
+    user: User = Depends(_owner),
+    session: AsyncSession = Depends(get_session),
+) -> ExternalSalesCalculation:
+    try:
+        return await calculate_sale(session, _company_id(user), sale_id, body, get_storage())
+    except (LookupError, ServiceConflict, ReceiptValidationError) as exc:
+        _raise_service_error(exc)
+
+
+@router.post(
+    "/external-sales/{sale_id}/confirm",
+    response_model=ExternalSalesRead,
+    responses={409: {"model": ExternalSalesConflict}},
+)
+async def post_external_sale_confirmation(
+    sale_id: uuid.UUID,
+    body: ExternalSalesConfirmRequest,
+    user: User = Depends(_owner),
+    session: AsyncSession = Depends(get_session),
+) -> ExternalSalesRead:
+    try:
+        return await confirm_sale(session, _company_id(user), user.id, sale_id, body, get_storage())
+    except (LookupError, ServiceConflict, ReceiptValidationError) as exc:
+        _raise_service_error(exc)
 
 
 @router.delete(

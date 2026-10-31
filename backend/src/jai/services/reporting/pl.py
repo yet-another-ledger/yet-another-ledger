@@ -70,6 +70,7 @@ from typing import Literal
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jai.db import set_rls_company
 from jai.models._enums import (
     ExpenseKind,
     InvoiceDocumentKind,
@@ -79,8 +80,9 @@ from jai.models._enums import (
 )
 from jai.models.document import InvoiceCorrection
 from jai.models.expense import Expense
+from jai.models.external_sales import ExternalSale
 from jai.models.invoice import Invoice
-from jai.schemas.report import ProfitLossReport, ProfitLossSeriesItem
+from jai.schemas.report import ExternalSaleReportReference, ProfitLossReport, ProfitLossSeriesItem
 from jai.services.expense import compute_annual_pl_cost, compute_pl_cost_basis
 from jai.services.money import quantize_to_minor_unit
 
@@ -218,6 +220,7 @@ async def compute_profit_loss(
     ProfitLossReport
         Aggregated report with series and top-level totals.
     """
+    await set_rls_company(session, company_id)
     buckets = _build_empty_buckets(date_from, date_to, granularity)
 
     # -------------------------------------------------------------------
@@ -274,6 +277,33 @@ async def compute_profit_loss(
         if key in buckets:
             buckets[key]["revenue_net"] = buckets[key]["revenue_net"] - quantize_to_minor_unit(
                 Decimal(str(correction.issued_base_net_amount))
+            )
+
+    external_sales: list[ExternalSaleReportReference] = []
+    external_result = await session.scalars(
+        select(ExternalSale)
+        .where(
+            ExternalSale.status == "POSTED",
+            ExternalSale.include_in_pl.is_(True),
+            ExternalSale.document_date >= date_from,
+            ExternalSale.document_date <= date_to,
+        )
+        .order_by(ExternalSale.document_date, ExternalSale.id)
+    )
+    for sale in external_result.all():
+        if sale.document_date is None or sale.original_net_total is None:
+            continue
+        amount = quantize_to_minor_unit(Decimal(str(sale.original_net_total)))
+        key = _bucket_key(sale.document_date, granularity)
+        if key in buckets:
+            buckets[key]["revenue_net"] += amount
+            external_sales.append(
+                ExternalSaleReportReference(
+                    external_sale_id=str(sale.id),
+                    source_name=sale.posted_source_name or "External source",
+                    original_number=sale.original_number or "",
+                    event_date=sale.document_date,
+                )
             )
 
     # -------------------------------------------------------------------
@@ -345,4 +375,5 @@ async def compute_profit_loss(
         profit=total_profit,
         series=series,
         by_category=None,
+        external_sales=external_sales,
     )
