@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import en from '../../src/locales/en.json'
@@ -59,7 +59,7 @@ vi.mock('naive-ui', () => ({
   },
   NModal: { template: '<div><slot /></div>' },
   NSelect: {
-    props: ['value', 'disabled', 'options'],
+    props: ['value', 'disabled', 'options', 'clearable'],
     emits: ['update:value'],
     template: '<select :disabled="disabled" :value="value ?? \'\'" @change="$emit(\'update:value\', $event.target.value)"><option value=""></option></select>',
   },
@@ -70,12 +70,16 @@ import ExternalSales from '../../src/views/externalSales/ExternalSales.vue'
 
 
 
-function sale(status: 'PENDING' | 'POSTED' = 'PENDING') {
+function sale(status: 'PENDING' | 'POSTED' | 'VOID' = 'PENDING') {
   return {
     id: 'sale-1',
     source_id: 'source-1',
     source_name: 'Platform',
     original_number: 'EXT-42',
+    document_kind: 'SALE',
+    related_external_sale_id: null,
+    historical_original_number: null,
+    historical_original_explanation: null,
     document_date: '2026-10-05',
     covered_from: null,
     covered_to: null,
@@ -89,7 +93,7 @@ function sale(status: 'PENDING' | 'POSTED' = 'PENDING') {
       rate_percent: '10.000', net_amount: '10.00', vat_amount: '1.25',
     }],
     files: [{ id: 'file-1', filename: 'original.pdf', mime_type: 'application/pdf', byte_size: 8, sha256: 'abc', duplicate_warning: false, created_at: '2026-10-05T10:00:00Z' }],
-    created_at: '2026-10-05T10:00:00Z', updated_at: '2026-10-05T10:00:00Z', version: 3,
+    created_at: '2026-10-05T10:00:00Z', updated_at: '2026-10-05T10:00:00Z', version: status === 'POSTED' ? 4 : 3,
     posted_at: status === 'POSTED' ? '2026-10-05T11:00:00Z' : null,
     posted_by: status === 'POSTED' ? 'user-1' : null,
     posted_source_name: status === 'POSTED' ? 'Platform' : null,
@@ -97,6 +101,7 @@ function sale(status: 'PENDING' | 'POSTED' = 'PENDING') {
     original_vat_total: status === 'POSTED' ? '1.25' : null,
     mismatch_ack_reason: status === 'POSTED' ? 'Original document reviewed.' : null,
     postings: status === 'POSTED' ? [{ id: 'posting-1', version: 4, actor_id: 'user-1', created_at: '2026-10-05T11:00:00Z', snapshot: {} }] : [],
+    revisions: [],
   }
 }
 
@@ -116,6 +121,12 @@ async function render(status: 'PENDING' | 'POSTED' = 'PENDING', current = sale(s
     if (url.startsWith('/api/v1/vat-treatments')) return { items: [] }
     if (url.startsWith('/api/v1/vat-rates')) return { items: [] }
     if (url === '/api/v1/external-sales/sale-1') return current
+    if (url.startsWith('/api/v1/external-sales/sale-1/revisions?')) {
+      const params = new URL(url, 'http://localhost').searchParams
+      const offset = Number(params.get('offset') || 0)
+      const limit = Number(params.get('limit') || 50)
+      return { items: current.revisions.slice(offset, offset + limit), total: current.revisions.length, offset, limit }
+    }
     throw new Error(`Unexpected GET ${url}`)
   })
   const wrapper = mount(ExternalSales, {
@@ -135,6 +146,8 @@ describe('External Sales posting review', () => {
     mocks.route.name = 'external-sales-detail'
     mocks.route.params.id = 'sale-1'
   })
+
+  afterEach(() => { vi.unstubAllGlobals() })
 
   it('shows the server preview and requires acknowledgement plus a reason before confirming', async () => {
     mocks.post.mockImplementation(async (url: string) => {
@@ -227,8 +240,10 @@ describe('External Sales posting review', () => {
     const posted = await render('POSTED')
     expect(posted.text()).toContain('original.pdf')
     expect(posted.findAll('button').some((item) => item.text().includes('Remove file'))).toBe(false)
-    expect(posted.find('input[type="file"]').exists()).toBe(false)
-    expect(posted.find('input[type="text"]').exists()).toBe(false)
+    expect(posted.find('input[type="file"]').exists()).toBe(true)
+    expect(posted.find('[data-testid="posted-detail"] input[type="date"]').exists()).toBe(false)
+    expect(posted.text()).toContain('Revise posted entry')
+    expect(posted.text()).toContain('Append supporting evidence')
     expect(posted.text()).toContain('Original document reviewed.')
   })
 })
@@ -275,8 +290,11 @@ describe('Posted external record traceability', () => {
     expect(rows[1]!.text()).toContain('4.50')
     expect(detail.get('[data-testid="posting-history"] tbody tr').findAll('td').map(cell => cell.text())).toEqual(['4', 'user-1', '2026-10-05T11:00:00Z'])
     expect(detail.text()).toContain(locale === 'en' ? 'Posting history' : '入账历史')
-    expect(detail.findAll('input, select, textarea, button')).toHaveLength(0)
-    expect(wrapper.find('input[type="file"]').exists()).toBe(false)
+    expect(detail.find('input[type="date"]').exists()).toBe(false)
+    expect(detail.find('textarea').exists()).toBe(false)
+    expect(detail.findAll('button').some(item => item.text().includes('Remove file'))).toBe(false)
+    expect(wrapper.find('input[type="file"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain(locale === 'en' ? 'Append supporting evidence' : '追加支持材料')
     expect(mocks.get).toHaveBeenCalledWith('/api/v1/external-sales/sale-1')
     expect(mocks.post).not.toHaveBeenCalled()
     expect(mocks.put).not.toHaveBeenCalled()
@@ -292,4 +310,145 @@ describe('Posted external record traceability', () => {
     expect(wrapper.get('[data-testid="posted-tax-summaries"]').text()).toContain('1.25')
     expect(wrapper.findAll('button').some(item => ['Confirm and post', 'Save pending entry', '确认并入账'].includes(item.text()))).toBe(false)
   })
+
+  it.each(['en', 'zh'])('previews and saves a reasoned version-checked revision (%s)', async (locale) => {
+    const current = sale('POSTED')
+    const revised = {
+      ...current,
+      version: 5,
+      document_date: '2027-01-10',
+      revisions: [{ id: 'revision-1', version: 5, action: 'REVISION', reason: 'Date correction', actor_id: 'user-1', created_at: '2027-01-11T12:00:00Z', before_snapshot: { document_date: '2026-10-05' }, after_snapshot: { document_date: '2027-01-10' } }],
+    }
+    mocks.post.mockImplementation(async (url: string) => {
+      if (url.endsWith('/revisions/preview')) return { sale_id: 'sale-1', expected_version: 4, old_period: '2026-10', new_period: '2027-01', old_net_total: '10.00', new_net_total: '10.00', old_vat_total: '1.25', new_vat_total: '1.25', warnings: ['Filing status is unknown.'] }
+      if (url.endsWith('/revisions')) return revised
+      throw new Error(`Unexpected POST ${url}`)
+    })
+    const wrapper = await render('POSTED', current, locale)
+    await button(wrapper, locale === 'en' ? 'Revise posted entry' : '修订已过账记录').trigger('click')
+    await wrapper.get('[data-testid="revision-reason"]').setValue('Date correction')
+    await button(wrapper, locale === 'en' ? 'Preview revision' : '预览修订').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('2026-10')
+    expect(wrapper.text()).toContain('2027-01')
+    const save = button(wrapper, locale === 'en' ? 'Save audited revision' : '保存审计修订')
+    expect((save.element as HTMLButtonElement).disabled).toBe(false)
+    mocks.get.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/v1/external-sales/sale-1/revisions?')) {
+        return { items: revised.revisions, total: revised.revisions.length, offset: 0, limit: 50 }
+      }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    await save.trigger('click')
+    await flushPromises()
+    expect(mocks.post).toHaveBeenLastCalledWith('/api/v1/external-sales/sale-1/revisions', expect.objectContaining({
+      expected_version: 4,
+      reason: 'Date correction',
+      document_date: '2026-10-05',
+      include_in_pl: true,
+    }))
+    expect(wrapper.get('[data-testid="revision-history"]').text()).toContain('Date correction')
+  })
+
+  it('keeps a voided entry read-only while retaining originals and evidence access', async () => {
+    const current = sale('VOID')
+    const wrapper = await render('POSTED', current)
+    expect(wrapper.find('[data-testid="posted-detail"]').text()).toContain('Voided')
+    expect(wrapper.find('input[type="date"]').exists()).toBe(false)
+    expect(wrapper.find('input[type="file"]').exists()).toBe(true)
+    expect(wrapper.findAll('button').some(item => item.text().includes('Revise posted entry'))).toBe(false)
+    expect(wrapper.findAll('button').some(item => item.text().includes('Void mistaken entry'))).toBe(false)
+    expect(wrapper.findAll('button').some(item => item.text().includes('Remove file'))).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('appends evidence to a posted entry without replacing its retained original', async () => {
+    const current = sale('POSTED')
+    const appended = {
+      ...current,
+      files: [...current.files, { ...current.files[0], id: 'file-2', filename: 'support.pdf' }],
+    }
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => appended })
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = await render('POSTED', current)
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['%PDF-support'], 'support.pdf', { type: 'application/pdf' })],
+      configurable: true,
+    })
+    await input.trigger('change')
+    await button(wrapper, 'Append supporting evidence').trigger('click')
+    await flushPromises()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/external-sales/sale-1/files')
+    expect(wrapper.text()).toContain('original.pdf')
+    expect(wrapper.text()).toContain('support.pdf')
+    expect(wrapper.findAll('button').some(item => item.text().includes('Remove file'))).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('pages through the full audit history', async () => {
+    const current = sale('POSTED')
+    current.revisions = Array.from({ length: 51 }, (_, index) => ({
+      id: `revision-${index + 1}`, version: index + 5, action: 'REVISION',
+      reason: `Correction ${index + 1}`, actor_id: 'user-1',
+      created_at: '2027-01-11T12:00:00Z', before_snapshot: {}, after_snapshot: {},
+    }))
+    const wrapper = await render('POSTED', current)
+    expect(wrapper.findAll('[data-testid="revision-history"] > tbody > tr')).toHaveLength(50)
+    expect(wrapper.find('[data-testid="revision-pagination"]').text()).toContain('1–50 of 51')
+    await button(wrapper, 'Next page').trigger('click')
+    await flushPromises()
+    expect(mocks.get).toHaveBeenCalledWith('/api/v1/external-sales/sale-1/revisions?offset=50&limit=50')
+    expect(wrapper.findAll('[data-testid="revision-history"] > tbody > tr')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="revision-pagination"]').text()).toContain('51–51 of 51')
+    wrapper.unmount()
+  })
+
+  it('retains explicit P/L on a clearing event and submits stable retained tax identity', async () => {
+    mocks.post.mockResolvedValue({ sale_id: 'sale-1', expected_version: 4, old_period: '2026-10', new_period: '2026-10', old_net_total: '10.00', new_net_total: '10.00', old_vat_total: '1.25', new_vat_total: '1.25', warnings: [] })
+    const wrapper = await render('POSTED')
+    await button(wrapper, 'Revise posted entry').trigger('click')
+    const pl = wrapper.getComponent('[data-testid="include-in-pl"]')
+    expect(pl.props('clearable')).toBe(false)
+    expect(wrapper.getComponent('[data-testid="tax-rate-0"]').props('options')).toContainEqual({ label: 'Custom (10.000%)', value: 'rate-1' })
+    pl.vm.$emit('update:value', null)
+    await wrapper.get('[data-testid="revision-reason"]').setValue('Text review')
+    await button(wrapper, 'Preview revision').trigger('click')
+    await flushPromises()
+    expect(mocks.post).toHaveBeenLastCalledWith('/api/v1/external-sales/sale-1/revisions/preview', expect.objectContaining({ include_in_pl: true, tax_summaries: [expect.objectContaining({ tax_summary_id: 'tax-1', net_amount: '10.00', vat_amount: '1.25' })] }))
+    pl.vm.$emit('update:value', 'false')
+    await button(wrapper, 'Preview revision').trigger('click')
+    await flushPromises()
+    expect(mocks.post).toHaveBeenLastCalledWith('/api/v1/external-sales/sale-1/revisions/preview', expect.objectContaining({ include_in_pl: false }))
+    wrapper.unmount()
+  })
+
+  it.each(['en', 'zh'])('shows escaped frozen before/after amounts, taxes, P/L and evidence in %s history', async (locale) => {
+    const current = sale('POSTED')
+    const before = { document_date: '2026-10-05', covered_from: '2026-09-01', covered_to: '2026-09-30', description: '<img src=x onerror=alert(1)>', include_in_pl: true, original_net_total: '100.00', original_vat_total: '21.00', tax_summaries: [{ treatment_code: 'NL_DOMESTIC', treatment_label: 'Frozen domestic', rate_label: 'Frozen high', rate_percent: '21.000', net_amount: '100.00', vat_amount: '21.00' }], originals: [{ id: 'original-frozen', filename: '<script>evidence</script>.pdf', sha256: 'frozen-hash-before', mime_type: 'application/pdf', byte_size: 8 }] }
+    const after = { ...before, description: 'Corrected narrative', include_in_pl: false, original_net_total: '200.00', original_vat_total: '42.00', tax_summaries: [{ ...before.tax_summaries[0], net_amount: '200.00', vat_amount: '42.00' }], originals: [...before.originals, { ...before.originals[0], id: 'support-frozen', filename: 'extra.pdf', sha256: 'frozen-hash-after' }] }
+    current.revisions = [{ id: 'revision-1', version: 5, action: 'REVISION', reason: 'Change reviewed', actor_id: 'owner-1', created_at: '2026-10-11T12:00:00Z', before_snapshot: before, after_snapshot: after }]
+    const wrapper = await render('POSTED', current, locale)
+    const history = wrapper.get('[data-testid="revision-history"]')
+    expect(history.find('details').exists()).toBe(true)
+    await history.get('summary').trigger('click')
+    const snapshots = history.findAll('.business-snapshot')
+    expect(snapshots).toHaveLength(2)
+    expect(snapshots[0].text()).toContain('100.00')
+    expect(snapshots[0].text()).toContain('21.00')
+    expect(snapshots[0].text()).toContain(locale === 'en' ? 'Yes' : '是')
+    expect(snapshots[1].text()).toContain('200.00')
+    expect(snapshots[1].text()).toContain('42.00')
+    expect(snapshots[1].text()).toContain(locale === 'en' ? 'No' : '否')
+    expect(history.text()).toContain('Frozen high (21.000%)')
+    expect(history.text()).toContain('2026-09-01')
+    expect(history.text()).toContain('frozen-hash-before')
+    expect(history.text()).toContain('frozen-hash-after')
+    expect(history.text()).toContain('<script>evidence</script>.pdf')
+    expect(history.findAll('script, img')).toHaveLength(0)
+    expect(history.findAll('input, textarea')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
 })

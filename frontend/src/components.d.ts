@@ -20,6 +20,7 @@ declare module 'vue' {
     DocumentWorkflowPanel: typeof import('./components/DocumentWorkflowPanel.vue')['default']
     EmailLogPanel: typeof import('./components/EmailLogPanel.vue')['default']
     EmailTemplatesSettings: typeof import('./components/settings/EmailTemplatesSettings.vue')['default']
+    ExternalSaleSnapshot: typeof import('./components/externalSales/ExternalSaleSnapshot.vue')['default']
     InvoicePaymentPanel: typeof import('./components/InvoicePaymentPanel.vue')['default']
     LineOrdering: typeof import('./components/LineOrdering.vue')['default']
     MileageSettings: typeof import('./components/settings/MileageSettings.vue')['default']

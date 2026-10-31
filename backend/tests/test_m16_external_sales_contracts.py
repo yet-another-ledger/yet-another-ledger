@@ -34,8 +34,25 @@ def test_external_sales_openapi_exposes_only_safe_file_metadata() -> None:
         ("/api/v1/external-sales/{sale_id}/files/{file_id}", "delete"),
         ("/api/v1/external-sales/{sale_id}/calculate", "post"),
         ("/api/v1/external-sales/{sale_id}/confirm", "post"),
+        ("/api/v1/external-sales/{sale_id}/revisions/preview", "post"),
+        ("/api/v1/external-sales/{sale_id}/revisions", "post"),
+        ("/api/v1/external-sales/{sale_id}/revisions", "get"),
+        ("/api/v1/external-sales/{sale_id}/void", "post"),
     }
     assert expected <= {(path, method) for path, item in paths.items() for method in item}
+    revision_history = paths["/api/v1/external-sales/{sale_id}/revisions"]["get"]
+    assert {"offset", "limit"} <= {
+        parameter["name"] for parameter in revision_history["parameters"]
+    }
+    assert (
+        schema["components"]["schemas"]["ExternalSalesRevisionListRead"]["properties"].keys()
+        >= {"items", "total", "offset", "limit"}
+    )
+    preview_responses = paths["/api/v1/external-sales/{sale_id}/revisions/preview"]["post"][
+        "responses"
+    ]
+    assert "409" in preview_responses
+    assert "ExternalSalesConflict" in str(preview_responses["409"])
     props = schema["components"]["schemas"]["ExternalSalesFileRead"]["properties"]
     assert "storage_key" not in props
     assert "sha256" in props and "duplicate_warning" in props
@@ -73,11 +90,36 @@ def test_tax_summary_accepts_typed_dictionary_ids_and_rejects_extra_authority_fi
         ExternalSalesTaxInput.model_validate({"rate_percent": "21", "net_amount": "10"})
 
 
+def test_external_sales_revision_contract_requires_nonblank_reason_and_version() -> None:
+    from jai.schemas.external_sales import ExternalSalesRevisionInput, ExternalSalesVoidInput
+
+    with pytest.raises(ValidationError):
+        ExternalSalesRevisionInput.model_validate({"expected_version": 1, "reason": "  "})
+    with pytest.raises(ValidationError):
+        ExternalSalesVoidInput.model_validate({"expected_version": 1, "reason": ""})
+    with pytest.raises(ValidationError):
+        ExternalSalesRevisionInput.model_validate({"expected_version": 0, "reason": "correct date"})
+
+
+def test_external_credit_sign_is_applied_once_and_settlement_can_be_signed() -> None:
+    with pytest.raises(external_sales.ReceiptValidationError, match="negative signed rows"):
+        external_sales.validate_signed_external_amounts(
+            "CREDIT", Decimal("-10.00"), Decimal("2.10")
+        )
+    external_sales.validate_signed_external_amounts("CREDIT", Decimal("-10.00"), Decimal("-2.10"))
+    external_sales.validate_signed_external_amounts(
+        "SETTLEMENT_ADJUSTMENT", Decimal("-3.25"), Decimal("-0.68")
+    )
+    with pytest.raises(external_sales.ReceiptValidationError, match="cannot be negative"):
+        external_sales.validate_signed_external_amounts("SALE", Decimal("-10.00"), Decimal("-2.10"))
+
+
 def test_posting_calculation_rounds_each_rate_row_and_preserves_original_vat() -> None:
     """Opposing row differences remain visible even when their totals cancel."""
     sale = SimpleNamespace(
         id=uuid.uuid4(),
         status="PENDING",
+        document_kind="SALE",
         version=7,
         source_id=uuid.uuid4(),
         source=object(),
@@ -118,17 +160,15 @@ def test_posting_calculation_rounds_each_rate_row_and_preserves_original_vat() -
 async def test_external_sales_upload_state_guard_precedes_file_validation(
     monkeypatch: pytest.MonkeyPatch, command: str
 ) -> None:
-    # Step 2's database permits only PENDING; exercise the service guard without
-    # adding the later posting schema or bypassing current database constraints.
+    # Invalid states are rejected before file validation; posted/voided rows may
+    # append supporting evidence under Step 4.
     session = AsyncMock()
     monkeypatch.setattr(external_sales, "set_rls_company", AsyncMock())
     monkeypatch.setattr(
         external_sales,
         "_owned_sale",
         AsyncMock(
-            return_value=SimpleNamespace(
-                status="POSTED", files=[], id=uuid.uuid4(), version=2
-            )
+                return_value=SimpleNamespace(status="INVALID", files=[], id=uuid.uuid4(), version=2)
         ),
     )
     normalize = Mock(side_effect=AssertionError("Do not validate files in a forbidden state"))
@@ -166,6 +206,7 @@ def test_posting_zero_rate_requires_zero_original_vat(
     sale = SimpleNamespace(
         id=uuid.uuid4(),
         status="PENDING",
+        document_kind="SALE",
         version=1,
         source_id=uuid.uuid4(),
         source=object(),
@@ -192,3 +233,88 @@ def test_posting_zero_rate_requires_zero_original_vat(
         assert calculation.mismatch is mismatch
         assert calculation.original_vat_total == Decimal(vat)
     assert sale.tax_summaries[0].vat_amount == Decimal(vat)
+
+def test_revision_tax_calculation_preserves_decimal_originals_and_signed_rounding() -> None:
+    from jai.models.external_sales import ExternalSaleTax
+
+    taxes = [
+        ExternalSaleTax(
+            treatment_code="NL_DOMESTIC",
+            rate_percent=Decimal("10"),
+            net_amount=Decimal("10.005"),
+            vat_amount=Decimal("1.005"),
+        ),
+        ExternalSaleTax(
+            treatment_code="NL_DOMESTIC",
+            rate_percent=Decimal("5"),
+            net_amount=Decimal("20.005"),
+            vat_amount=Decimal("0.995"),
+        ),
+    ]
+    net, vat, mismatch, warnings = external_sales._calculate_revision_taxes(
+        taxes, "SALE", VatRateTiers()
+    )
+    assert net == Decimal("30.02") and vat == Decimal("2.01")
+    assert mismatch and len(warnings) == 1
+    taxes[0].net_amount, taxes[0].vat_amount = Decimal("-10.005"), Decimal("-1.005")
+    net, vat, mismatch, _ = external_sales._calculate_revision_taxes(
+        taxes[:1], "CREDIT", VatRateTiers()
+    )
+    assert net == Decimal("-10.01") and vat == Decimal("-1.01") and mismatch
+    with pytest.raises(external_sales.ReceiptValidationError, match="negative signed"):
+        external_sales._calculate_revision_taxes(taxes[1:], "CREDIT", VatRateTiers())
+    taxes[0].rate_percent = Decimal("0")
+    with pytest.raises(external_sales.ReceiptValidationError, match="zero VAT"):
+        external_sales._calculate_revision_taxes(taxes[:1], "CREDIT", VatRateTiers())
+
+
+def test_revision_null_pl_is_invalid_but_omission_is_a_patch() -> None:
+    from jai.schemas.external_sales import ExternalSalesRevisionInput
+
+    body = {"expected_version": 2, "reason": "Review P/L"}
+    assert "include_in_pl" not in ExternalSalesRevisionInput.model_validate(body).model_fields_set
+    for value in (True, False):
+        assert (
+            ExternalSalesRevisionInput.model_validate(
+                {**body, "include_in_pl": value}
+            ).include_in_pl
+            is value
+        )
+    with pytest.raises(ValidationError):
+        ExternalSalesRevisionInput.model_validate({**body, "include_in_pl": None})
+
+
+def test_revision_tax_identity_preserves_reorder_and_rejects_ambiguous_or_foreign_rows() -> None:
+    from jai.models.external_sales import ExternalSaleTax
+    from jai.schemas.external_sales import ExternalSalesRevisionTaxInput
+
+    treatment_id, rate_id = uuid.uuid4(), uuid.uuid4()
+    a, b = [
+        ExternalSaleTax(
+            id=uuid.uuid4(),
+            treatment_id=treatment_id,
+            rate_id=rate_id,
+            treatment_code="NL_DOMESTIC",
+            treatment_label="Original",
+            rate_label="Frozen",
+            rate_percent=Decimal(percent),
+            net_amount=Decimal("100.00"),
+            vat_amount=Decimal("21.00"),
+        )
+        for percent in ("21", "9")
+    ]
+    raw = dict(treatment_id=treatment_id, rate_id=rate_id, net_amount="100", vat_amount="21")
+
+    def item(**extra: object) -> ExternalSalesRevisionTaxInput:
+        return ExternalSalesRevisionTaxInput.model_validate({**raw, **extra})
+
+    assert external_sales._match_revision_taxes(
+        [a, b], [item(tax_summary_id=b.id), item(tax_summary_id=a.id)]
+    ) == [b, a]
+    for inputs in (
+        [item()],
+        [item(tax_summary_id=uuid.uuid4())],
+        [item(tax_summary_id=a.id), item(tax_summary_id=a.id)],
+    ):
+        with pytest.raises(external_sales.ReceiptValidationError):
+            external_sales._match_revision_taxes([a, b], inputs)

@@ -4,11 +4,11 @@ import { createI18n } from 'vue-i18n'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), del: vi.fn() }))
-vi.mock('../../src/api/http', () => api)
+vi.mock('../../src/api/http', async (importOriginal) => ({ ...await importOriginal<typeof import('../../src/api/http')>(), ...api }))
 vi.mock('naive-ui', () => {
   const box = { inheritAttrs: false, template: '<div v-bind="$attrs"><slot /></div>' }
   const button = { inheritAttrs: false, props: ['disabled', 'type', 'attrType'], template: '<button v-bind="$attrs" :disabled="disabled" :type="attrType || \'button\'"><slot /></button>' }
-  const input = { inheritAttrs: false, props: ['value', 'type', 'placeholder'], emits: ['update:value'], template: '<input v-bind="$attrs" :value="value" :placeholder="placeholder" @input="$emit(\'update:value\',$event.target.value)" />' }
+  const input = { inheritAttrs: false, props: ['value', 'type', 'placeholder'], emits: ['update:value'], template: '<textarea v-if="type === \'textarea\'" v-bind="$attrs" :value="value" @input="$emit(\'update:value\',$event.target.value)" /><input v-else v-bind="$attrs" :value="value" :placeholder="placeholder" @input="$emit(\'update:value\',$event.target.value)" />' }
   const select = { inheritAttrs: false, props: ['value', 'options', 'placeholder'], emits: ['update:value'], template: '<select v-bind="$attrs" :value="value" @change="$emit(\'update:value\',$event.target.value)"><option value=""></option><option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option></select>' }
   return {
     NButton: button, NCard: box, NCheckbox: { props: ['checked'], template: '<input type="checkbox" />' },
@@ -25,7 +25,7 @@ const source = { id: 'source-platform', name: 'Platform', kind: 'PLATFORM', defa
 const treatment = { id: 'treatment-domestic', code: 'NL_DOMESTIC', label: 'Domestic sales', side: 'SALES', effect: 'APPLY_RATE', requires_icp: false, active: true }
 const rates = [{ id: 'rate-21', label: 'High', percent: '21', active: true }, { id: 'rate-9', label: 'Low', percent: '9', active: true }]
 
-const saved = { id: 'sale-1', source_id: source.id, source_name: source.name, original_number: 'saved-number', document_date: '2026-01-02', covered_from: null, covered_to: null, counterparty: 'saved counterparty', description: 'saved description', include_in_pl: true, status: 'PENDING', tax_summaries: [{ treatment_id: treatment.id, rate_id: rates[0].id, net_amount: '100.00', vat_amount: '21.00' }], files: [{ id: 'file-1', filename: 'original.pdf', mime_type: 'application/pdf', byte_size: 9, sha256: '', duplicate_warning: false, created_at: '' }], created_at: '', updated_at: '' }
+const saved = { id: 'sale-1', source_id: source.id, source_name: source.name, original_number: 'saved-number', document_kind: 'SALE', related_external_sale_id: null, historical_original_number: null, historical_original_explanation: null, document_date: '2026-01-02', covered_from: null, covered_to: null, counterparty: 'saved counterparty', description: 'saved description', include_in_pl: true, status: 'PENDING', tax_summaries: [{ id: 'tax-1', treatment_id: treatment.id, rate_id: rates[0].id, treatment_code: 'NL_DOMESTIC', treatment_label: 'Domestic sales', rate_label: 'High', rate_percent: '21', net_amount: '100.00', vat_amount: '21.00' }], files: [{ id: 'file-1', filename: 'original.pdf', mime_type: 'application/pdf', byte_size: 9, sha256: '', duplicate_warning: false, created_at: '' }], created_at: '', updated_at: '', version: 1, posted_at: null, posted_by: null, posted_source_name: null, original_net_total: null, original_vat_total: null, mismatch_ack_reason: null, postings: [] }
 
 function setup(path = '/external-sales/new') {
   const router = createRouter({
@@ -46,6 +46,7 @@ describe('External Sales manual draft editor', () => {
       if (url.startsWith('/api/v1/external-sales-sources')) return Promise.resolve({ items: [source], total: 1, limit: 100, offset: 0 })
       if (url.split('?')[0] === '/api/v1/external-sales') return Promise.resolve({ items: [], total: 0, limit: 50, offset: 0 })
       if (url === '/api/v1/external-sales/sale-1') return Promise.resolve(structuredClone(saved))
+      if (url.startsWith('/api/v1/external-sales/sale-1/revisions?')) return Promise.resolve({ items: [], total: 0, offset: 0, limit: 50 })
       if (url.includes('/vat-treatments')) return Promise.resolve({ items: [treatment] })
       if (url.includes('/vat-rates')) return Promise.resolve({ items: rates })
       return Promise.resolve({})
@@ -58,19 +59,20 @@ describe('External Sales manual draft editor', () => {
     const selects = wrapper.findAll('select')
     await selects[0].setValue(source.id)
     await wrapper.findAll('input')[0].setValue('  EXT 017  ')
-    await wrapper.findAll('select')[2].setValue(treatment.id)
-    await wrapper.findAll('select')[3].setValue(rates[0].id)
+    await wrapper.findAll('select')[3].setValue(treatment.id)
+    await wrapper.findAll('select')[4].setValue(rates[0].id)
     await wrapper.findAll('input[placeholder="Original net amount"]')[0].setValue('100.005')
     await wrapper.findAll('input[placeholder="Original VAT amount"]')[0].setValue('21.005')
     await wrapper.findAll('button').find((button) => button.text() === 'Add tax row')!.trigger('click')
-    await wrapper.findAll('select')[4].setValue(treatment.id)
-    await wrapper.findAll('select')[5].setValue(rates[1].id)
+    await wrapper.findAll('select')[5].setValue(treatment.id)
+    await wrapper.findAll('select')[6].setValue(rates[1].id)
     await wrapper.findAll('input[placeholder="Original net amount"]')[1].setValue('50')
     await wrapper.findAll('input[placeholder="Original VAT amount"]')[1].setValue('4.5')
     const created = { id: 'sale-1', source_id: source.id, source_name: source.name, original_number: '  EXT 017  ', document_date: null, covered_from: null, covered_to: null, counterparty: null, description: null, include_in_pl: true, status: 'PENDING', tax_summaries: [], files: [], created_at: '', updated_at: '' }
     api.post.mockResolvedValue(created)
     api.get.mockImplementation((url: string) => {
       if (url === '/api/v1/external-sales/sale-1') return Promise.resolve(created)
+      if (url.startsWith('/api/v1/external-sales/sale-1/revisions?')) return Promise.resolve({ items: [], total: 0, offset: 0, limit: 50 })
       if (url.startsWith('/api/v1/external-sales-sources')) return Promise.resolve({ items: [source], total: 1, limit: 100, offset: 0 })
       if (url.split('?')[0] === '/api/v1/external-sales') return Promise.resolve({ items: [created], total: 1, limit: 50, offset: 0 })
       if (url.includes('/vat-treatments')) return Promise.resolve({ items: [treatment] })
@@ -96,9 +98,9 @@ describe('External Sales manual draft editor', () => {
     await inputs[2].setValue('new counterparty')
     await inputs[3].setValue('2026-01-01')
     await inputs[4].setValue('2026-01-31')
-    await inputs[5].setValue('unsaved description')
-    await wrapper.findAll('select')[1].setValue('false')
-    await wrapper.findAll('select')[3].setValue(rates[1].id)
+    await wrapper.find('textarea').setValue('unsaved description')
+    await wrapper.find('[data-testid="include-in-pl"]').setValue('false')
+    await wrapper.findAll('select')[4].setValue(rates[1].id)
     await wrapper.find('input[placeholder="Original net amount"]').setValue('123.456')
     await wrapper.find('input[placeholder="Original VAT amount"]').setValue('11.111')
     const serverResult = { ...structuredClone(saved), files: action === 'remove' ? [] : [...saved.files, { ...saved.files[0], id: 'file-2', filename: 'added.pdf' }] }
@@ -122,7 +124,7 @@ describe('External Sales manual draft editor', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(api.put).toHaveBeenCalledWith('/api/v1/external-sales/sale-1', {
-      source_id: source.id, original_number: 'unsaved-corrected-number', document_date: '2026-02-03',
+      source_id: source.id, original_number: 'unsaved-corrected-number', document_kind: 'SALE', related_external_sale_id: null, historical_original_number: null, historical_original_explanation: null, document_date: '2026-02-03',
       covered_from: '2026-01-01', covered_to: '2026-01-31', counterparty: 'new counterparty',
       description: 'unsaved description', include_in_pl: false,
       tax_summaries: [{ treatment_id: treatment.id, rate_id: rates[1].id, net_amount: '123.456', vat_amount: '11.111' }],
@@ -254,7 +256,7 @@ describe('External Sales manual draft editor', () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => fast, blob: async () => new Blob(['original']) })
     vi.stubGlobal('fetch', fetchMock)
     vi.stubGlobal('confirm', () => true)
-    vi.stubGlobal('URL', { createObjectURL: () => 'blob:test', revokeObjectURL: vi.fn() })
+    vi.stubGlobal('URL', class extends URL { static createObjectURL = () => 'blob:test'; static revokeObjectURL = vi.fn() })
     const button = (text: string) => wrapper.findAll('button').find((row) => row.text() === text)!
     const picker = wrapper.find('input[type="file"]')
     Object.defineProperty(picker.element, 'files', { value: [new File(['%PDF-safe'], 'added.pdf', { type: 'application/pdf' })], configurable: true })
@@ -389,6 +391,70 @@ describe('External Sales manual draft editor', () => {
     await flushPromises()
     expect(wrapper.find('input').element.value).toBe('next-number')
     expect(wrapper.find('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+
+  it('pages original candidates independently beyond 50 and keeps an existing off-page link readable', async () => {
+    const originalGet = api.get.getMockImplementation()!
+    const originals = Array.from({ length: 51 }, (_, i) => ({ ...saved, id: `original-${i}`, original_number: `ORIGINAL-${i}`, status: 'POSTED', document_kind: 'SALE' }))
+    const credit = { ...saved, document_kind: 'CREDIT', related_external_sale_id: 'original-50' }
+    api.get.mockImplementation(async (url: string) => {
+      if (url === '/api/v1/external-sales/sale-1') return credit
+      if (url === '/api/v1/external-sales/original-50') return originals[50]
+      if (url.startsWith('/api/v1/external-sales?')) {
+        const offset = Number(new URL(url, 'http://localhost').searchParams.get('offset'))
+        return { items: originals.slice(offset, offset + 50), total: 51, offset, limit: 50 }
+      }
+      return originalGet(url)
+    })
+    const wrapper = await setup('/external-sales/sale-1').mount()
+    expect(wrapper.get('[data-testid="related-original"]').text()).toContain('ORIGINAL-50')
+    expect(wrapper.get('[data-testid="original-pagination"]').text()).toContain('1–50 of 51')
+    await wrapper.get('[data-testid="original-pagination"]').findAll('button')[1].trigger('click')
+    await flushPromises()
+    expect(api.get).toHaveBeenCalledWith('/api/v1/external-sales?limit=50&offset=50')
+    const select = wrapper.get('[data-testid="related-original"]')
+    expect(select.findAll('option').map(row => row.attributes('value'))).toContain('original-50')
+    await select.setValue('original-50')
+    api.put.mockResolvedValue(credit)
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(api.put).toHaveBeenCalledWith('/api/v1/external-sales/sale-1', expect.objectContaining({ related_external_sale_id: 'original-50' }))
+    wrapper.unmount()
+  })
+
+  it.each(['SALE', 'SETTLEMENT_ADJUSTMENT'])('normalizes historical/known credit fields on mode changes to %s', async (kind) => {
+    const originalGet = api.get.getMockImplementation()!
+    const original = { ...saved, id: 'original-1', original_number: 'KNOWN-1', status: 'POSTED' }
+    api.get.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/v1/external-sales?')) return { items: [original], total: 1, offset: 0, limit: 50 }
+      if (url === '/api/v1/external-sales/original-1') return original
+      return originalGet(url)
+    })
+    const wrapper = await setup().mount()
+    await wrapper.get('[data-testid="document-kind"]').setValue('CREDIT')
+    await flushPromises()
+    await wrapper.get('[data-testid="historical-number"]').setValue('OLD-17')
+    await wrapper.get('[data-testid="historical-explanation"]').setValue('Before system')
+    await wrapper.get('[data-testid="related-original"]').setValue('original-1')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="historical-number"]').exists()).toBe(false)
+    api.post.mockRejectedValue(new Error('Keep editor for payload assertion'))
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(api.post).toHaveBeenLastCalledWith('/api/v1/external-sales', expect.objectContaining({ related_external_sale_id: 'original-1', historical_original_number: null, historical_original_explanation: null }))
+    // Clearing known mode reveals empty historical fields, not stale hidden values.
+    await wrapper.get('[data-testid="related-original"]').setValue('')
+    expect((wrapper.get('[data-testid="historical-number"]').element as HTMLInputElement).value).toBe('')
+    await wrapper.get('[data-testid="historical-number"]').setValue('OLD-18')
+    await wrapper.get('[data-testid="historical-explanation"]').setValue('Another original')
+    await wrapper.get('[data-testid="document-kind"]').setValue(kind)
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(api.post).toHaveBeenLastCalledWith('/api/v1/external-sales', expect.objectContaining({ document_kind: kind, related_external_sale_id: null, historical_original_number: null, historical_original_explanation: null }))
+    await wrapper.get('[data-testid="document-kind"]').setValue('CREDIT')
+    expect((wrapper.get('[data-testid="historical-number"]').element as HTMLInputElement).value).toBe('')
     wrapper.unmount()
   })
 

@@ -59,6 +59,10 @@ class ExternalSale(Base):
         UUID(as_uuid=True), ForeignKey("external_sales_source.id", ondelete="RESTRICT")
     )
     original_number: Mapped[str | None] = mapped_column(Text)
+    document_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'SALE'"))
+    related_external_sale_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    historical_original_number: Mapped[str | None] = mapped_column(Text)
+    historical_original_explanation: Mapped[str | None] = mapped_column(Text)
     document_date: Mapped[date | None] = mapped_column(Date)
     covered_from: Mapped[date | None] = mapped_column(Date)
     covered_to: Mapped[date | None] = mapped_column(Date)
@@ -96,6 +100,10 @@ class ExternalSale(Base):
         passive_deletes=True,
         order_by="ExternalSalePosting.created_at",
     )
+    revisions: Mapped[list[ExternalSaleRevision]] = relationship(
+        passive_deletes=True,
+        order_by="ExternalSaleRevision.created_at",
+    )
 
 
 class ExternalSalePosting(Base):
@@ -109,6 +117,28 @@ class ExternalSalePosting(Base):
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+
+
+class ExternalSaleRevision(Base):
+    __tablename__ = "external_sale_revision"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company.id", ondelete="RESTRICT"), nullable=False
+    )
+    external_sale_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("external_sale.id", ondelete="RESTRICT"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    before_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    after_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     actor_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT")
     )

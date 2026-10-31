@@ -19,6 +19,13 @@ class ExternalSalesSourceKind(StrEnum):
 class ExternalSalesStatus(StrEnum):
     PENDING = "PENDING"
     POSTED = "POSTED"
+    VOID = "VOID"
+
+
+class ExternalSalesDocumentKind(StrEnum):
+    SALE = "SALE"
+    CREDIT = "CREDIT"
+    SETTLEMENT_ADJUSTMENT = "SETTLEMENT_ADJUSTMENT"
 
 
 class ExternalSalesSourceInput(BaseModel):
@@ -105,6 +112,10 @@ class ExternalSalesInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source_id: uuid.UUID | None = None
     original_number: str | None = Field(default=None, max_length=255)
+    document_kind: ExternalSalesDocumentKind = ExternalSalesDocumentKind.SALE
+    related_external_sale_id: uuid.UUID | None = None
+    historical_original_number: str | None = Field(default=None, max_length=255)
+    historical_original_explanation: str | None = None
     document_date: date | None = None
     covered_from: date | None = None
     covered_to: date | None = None
@@ -132,6 +143,10 @@ class ExternalSalesFileRead(BaseModel):
 class ExternalSalesRead(BaseModel):
     source_id: uuid.UUID | None
     original_number: str | None
+    document_kind: ExternalSalesDocumentKind
+    related_external_sale_id: uuid.UUID | None
+    historical_original_number: str | None
+    historical_original_explanation: str | None
     document_date: date | None
     covered_from: date | None
     covered_to: date | None
@@ -153,6 +168,83 @@ class ExternalSalesRead(BaseModel):
     original_vat_total: Decimal | None = Field(...)
     mismatch_ack_reason: str | None = Field(...)
     postings: list[ExternalSalesPostingRead]
+
+
+class ExternalSalesRevisionTaxInput(ExternalSalesTaxInput):
+    # Retained row identity is scoped to this external sale by the service.
+    tax_summary_id: uuid.UUID | None = None
+
+
+class ExternalSalesRevisionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=2000)
+    document_date: date | None = None
+    covered_from: date | None = None
+    covered_to: date | None = None
+    counterparty: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+    include_in_pl: bool = False
+    tax_summaries: list[ExternalSalesRevisionTaxInput] | None = Field(default=None, max_length=20)
+    acknowledge_vat_mismatch: bool = False
+    mismatch_ack_reason: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def require_reason(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("A revision reason is required.")
+        return value
+
+    @field_validator("counterparty", "description")
+    @classmethod
+    def trim_revision_text(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+
+class ExternalSalesVoidInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def require_reason(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("A void reason is required.")
+        return value
+
+
+class ExternalSalesRevisionRead(BaseModel):
+    id: uuid.UUID
+    version: int
+    action: str
+    reason: str
+    actor_id: uuid.UUID | None
+    created_at: datetime
+    before_snapshot: dict[str, object]
+    after_snapshot: dict[str, object]
+
+
+class ExternalSalesRevisionListRead(BaseModel):
+    items: list[ExternalSalesRevisionRead]
+    total: int
+    offset: int = 0
+    limit: int = 50
+
+
+class ExternalSalesRevisionPreview(BaseModel):
+    sale_id: uuid.UUID
+    expected_version: int
+    old_period: str
+    new_period: str
+    old_net_total: Decimal
+    new_net_total: Decimal
+    old_vat_total: Decimal
+    new_vat_total: Decimal
+    warnings: list[str]
 
 
 class ExternalSalesListRead(BaseModel):

@@ -142,8 +142,10 @@ async def test_external_sales_runtime_drafts_defaults_duplicates_files_and_repor
     assert sale["include_in_pl"] is True
     assert sale["status"] == "PENDING"
     assert len(sale["tax_summaries"]) == 2
-    assert sale["tax_summaries"][0]["rate_id"] == rate_a["id"]
-    assert sale["tax_summaries"][0]["net_amount"] == "100.01"
+    rate_a_summary = next(
+        item for item in sale["tax_summaries"] if item["rate_id"] == rate_a["id"]
+    )
+    assert Decimal(rate_a_summary["net_amount"]) == Decimal("100.01")
     unsupported = await db_client.post(
         "/api/v1/external-sales",
         json={
@@ -277,7 +279,7 @@ async def test_external_sales_runtime_rls_and_cross_company_child_ownership(
     runtime_session_maker: async_sessionmaker[AsyncSession],
 ) -> None:
     company_a, company_b = uuid.uuid4(), uuid.uuid4()
-    source_id, sale_id = uuid.uuid4(), uuid.uuid4()
+    source_id, sale_id, foreign_sale_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     async with db_session_maker() as admin:
         await admin.execute(
             text(
@@ -285,6 +287,26 @@ async def test_external_sales_runtime_rls_and_cross_company_child_ownership(
                 "(:a,'M16 RLS A','EUR'),(:b,'M16 RLS B','EUR')"
             ),
             {"a": company_a, "b": company_b},
+        )
+        await admin.commit()
+        await set_rls_company(admin, company_b)
+        await admin.execute(
+            text("INSERT INTO external_sale (id,company_id,original_number) VALUES (:id,:b,'B-1')"),
+            {"id": foreign_sale_id, "b": company_b},
+        )
+        await admin.commit()
+        await set_rls_company(admin, company_a)
+        with pytest.raises(DBAPIError):
+            await admin.execute(
+                text("""INSERT INTO external_sale
+                    (id,company_id,document_kind,related_external_sale_id,original_number)
+                    VALUES (:id,:a,'CREDIT',:foreign,'A-CREDIT')"""),
+                {"id": uuid.uuid4(), "a": company_a, "foreign": foreign_sale_id},
+            )
+        await admin.rollback()
+        await set_rls_company(admin, company_b)
+        await admin.execute(
+            text("DELETE FROM external_sale WHERE id=:id"), {"id": foreign_sale_id}
         )
         await admin.commit()
 
@@ -329,6 +351,7 @@ async def test_external_sales_runtime_rls_and_cross_company_child_ownership(
             "external_sale_tax",
             "external_sale_file",
             "external_sale_posting",
+            "external_sale_revision",
         ):
             assert await runtime.scalar(text(f"SELECT count(*) FROM {table}")) == 0
         with pytest.raises(DBAPIError):
@@ -351,6 +374,41 @@ async def test_external_sales_runtime_rls_and_cross_company_child_ownership(
             {"company_id": company_a, "sale_id": sale_id},
         )
         await runtime.commit()
+        # The tenant GUC is transaction-local; re-establish it after commit.
+        await set_rls_company(runtime, company_a)
+        await runtime.execute(
+            text("""INSERT INTO external_sale_revision
+                (company_id,external_sale_id,version,action,reason,before_snapshot,after_snapshot)
+                VALUES (:company_id,:sale_id,2,'REVISION','audit test','{}'::jsonb,'{}'::jsonb)"""),
+            {"company_id": company_a, "sale_id": sale_id},
+        )
+        await runtime.commit()
+        await set_rls_company(runtime, company_b)
+        assert await runtime.scalar(text("SELECT count(*) FROM external_sale_revision")) == 0
+        with pytest.raises(DBAPIError):
+            await runtime.execute(
+                text("""INSERT INTO external_sale_revision
+                    (company_id,external_sale_id,version,action,reason,before_snapshot,after_snapshot)
+                    VALUES (:company_id,:sale_id,3,'REVISION','spoof','{}'::jsonb,'{}'::jsonb)"""),
+                {"company_id": company_a, "sale_id": sale_id},
+            )
+        await runtime.rollback()
+        await set_rls_company(runtime, company_a)
+        with pytest.raises(DBAPIError):
+            await runtime.execute(
+                text(
+                    "UPDATE external_sale_revision SET reason='changed' "
+                    "WHERE external_sale_id=:id"
+                ),
+                {"id": sale_id},
+            )
+        await runtime.rollback()
+        with pytest.raises(DBAPIError):
+            await runtime.execute(
+                text("DELETE FROM external_sale_revision WHERE external_sale_id=:id"),
+                {"id": sale_id},
+            )
+        await runtime.rollback()
         with pytest.raises(DBAPIError):
             await runtime.execute(
                 text(
@@ -1147,3 +1205,622 @@ async def test_fractional_external_rate_and_configured_zero_tier_report_without_
     summary = (await db_client.get("/api/v1/reports/dashboard?year=2026")).json()
     assert Decimal(summary["kpi"]["current_quarter_vat_payable"]) == Decimal("0.51")
     assert Decimal(summary["kpi"]["ytd_revenue"]) == Decimal("100.00")
+
+
+@pytest.mark.asyncio
+async def test_external_sale_revision_credit_void_and_exactly_once_projection(
+    db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    monkeypatch.setattr(
+        external_sales_api, "get_settings", lambda: SimpleNamespace(max_receipt_bytes=1024)
+    )
+    _, treatment, rate, _, _ = await _owner_company(db_client)
+    source = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Revision source", "kind": "PLATFORM"}
+        )
+    ).json()
+    base = {
+        "source_id": source["id"],
+        "original_number": "SALE-ORIGINAL-01",
+        "document_date": "2026-10-15",
+        "tax_summaries": [
+            {
+                "treatment_id": treatment["id"],
+                "rate_id": rate["id"],
+                "net_amount": "100.00",
+                "vat_amount": "21.00",
+            }
+        ],
+    }
+    draft = await db_client.post("/api/v1/external-sales", json=base)
+    assert draft.status_code == 201, draft.text
+    sale_id = draft.json()["id"]
+    upload = await db_client.post(
+        f"/api/v1/external-sales/{sale_id}/files",
+        files=[("files", ("original.pdf", b"%PDF-1.7\noriginal", "application/pdf"))],
+    )
+    assert upload.status_code == 200, upload.text
+    original_file_id = upload.json()["files"][0]["id"]
+    calculation = await db_client.post(
+        f"/api/v1/external-sales/{sale_id}/calculate",
+        json={"expected_version": upload.json()["version"]},
+    )
+    assert calculation.status_code == 200, calculation.text
+    confirmation = await db_client.post(
+        f"/api/v1/external-sales/{sale_id}/confirm",
+        json={"expected_version": calculation.json()["expected_version"]},
+    )
+    assert confirmation.status_code == 200, confirmation.text
+    original_posting = confirmation.json()["postings"][0]["snapshot"]
+
+    change = {
+        "expected_version": confirmation.json()["version"],
+        "reason": "Correct source statement period and amount",
+        "document_date": "2027-01-10",
+        "include_in_pl": False,
+        "tax_summaries": [
+            {
+                "treatment_id": treatment["id"],
+                "rate_id": rate["id"],
+                "net_amount": "200.00",
+                "vat_amount": "42.00",
+            }
+        ],
+    }
+    preview = await db_client.post(
+        f"/api/v1/external-sales/{sale_id}/revisions/preview", json=change
+    )
+    assert preview.status_code == 200, preview.text
+    assert (preview.json()["old_period"], preview.json()["new_period"]) == ("2026-10", "2027-01")
+    assert Decimal(preview.json()["new_net_total"]) == Decimal("200.00")
+    assert any("filing status is unknown" in message for message in preview.json()["warnings"])
+
+    async def fail_commit(_session: AsyncSession) -> None:
+        raise RuntimeError("injected revision commit failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(AsyncSession, "commit", fail_commit)
+        with pytest.raises(RuntimeError, match="injected revision commit failure"):
+            await db_client.post(f"/api/v1/external-sales/{sale_id}/revisions", json=change)
+    unchanged = (await db_client.get(f"/api/v1/external-sales/{sale_id}")).json()
+    assert unchanged["version"] == confirmation.json()["version"]
+    history = await db_client.get(f"/api/v1/external-sales/{sale_id}/revisions?offset=0&limit=50")
+    assert history.status_code == 200
+    assert history.json() == {"items": [], "total": 0, "offset": 0, "limit": 50}
+    revised = await db_client.post(f"/api/v1/external-sales/{sale_id}/revisions", json=change)
+    assert revised.status_code == 200, revised.text
+    assert revised.json()["version"] == confirmation.json()["version"] + 1
+    assert revised.json()["postings"][0]["snapshot"] == original_posting
+    assert revised.json()["files"][0]["id"] == original_file_id
+    assert revised.json()["original_number"] == "SALE-ORIGINAL-01"
+    history = await db_client.get(f"/api/v1/external-sales/{sale_id}/revisions?offset=0&limit=50")
+    assert history.status_code == 200
+    assert history.json()["total"] == 1
+    assert history.json()["items"][0]["before_snapshot"]["document_date"] == "2026-10-15"
+    assert history.json()["items"][0]["after_snapshot"]["document_date"] == "2027-01-10"
+    generic = await db_client.put(
+        f"/api/v1/external-sales/{sale_id}", json={**base, "description": "bypass"}
+    )
+    assert generic.status_code == 409
+    downloaded = await db_client.get(f"/api/v1/external-sales/{sale_id}/files/{original_file_id}")
+    assert downloaded.content == b"%PDF-1.7\noriginal"
+
+    credit_payload = {
+        **base,
+        "original_number": "CREDIT-ORIGINAL-01",
+        "document_kind": "CREDIT",
+        "related_external_sale_id": sale_id,
+        "document_date": "2027-01-12",
+        "tax_summaries": [
+            {
+                "treatment_id": treatment["id"],
+                "rate_id": rate["id"],
+                "net_amount": "-50.00",
+                "vat_amount": "-10.50",
+            }
+        ],
+    }
+    credit = await db_client.post("/api/v1/external-sales", json=credit_payload)
+    assert credit.status_code == 201, credit.text
+    credit_id = credit.json()["id"]
+    credit_upload = await db_client.post(
+        f"/api/v1/external-sales/{credit_id}/files",
+        files=[("files", ("credit.pdf", b"%PDF-credit", "application/pdf"))],
+    )
+    credit_calc = await db_client.post(
+        f"/api/v1/external-sales/{credit_id}/calculate",
+        json={"expected_version": credit_upload.json()["version"]},
+    )
+    assert credit_calc.status_code == 200, credit_calc.text
+    credit_posted = await db_client.post(
+        f"/api/v1/external-sales/{credit_id}/confirm",
+        json={"expected_version": credit_calc.json()["expected_version"]},
+    )
+    assert credit_posted.status_code == 200, credit_posted.text
+    assert credit_posted.json()["original_net_total"] == "-50.00"
+
+    historical_credit_payload = {
+        **credit_payload,
+        "original_number": "CREDIT-HISTORICAL-01",
+        "related_external_sale_id": None,
+        "historical_original_number": "LEGACY-1998-17",
+        "historical_original_explanation": (
+            "Original predates this system; number read from retained paper copy."
+        ),
+    }
+    historical_credit = await db_client.post(
+        "/api/v1/external-sales", json=historical_credit_payload
+    )
+    assert historical_credit.status_code == 201, historical_credit.text
+    assert historical_credit.json()["historical_original_number"] == "LEGACY-1998-17"
+    assert historical_credit.json()["original_number"] == "CREDIT-HISTORICAL-01"
+
+    settlement_payload = {
+        **base,
+        "original_number": "SETTLEMENT-ADJUSTMENT-01",
+        "document_kind": "SETTLEMENT_ADJUSTMENT",
+        "document_date": "2027-01-14",
+        "include_in_pl": False,
+        "tax_summaries": [
+            {
+                "treatment_id": treatment["id"],
+                "rate_id": rate["id"],
+                "net_amount": "-20.00",
+                "vat_amount": "-4.20",
+            }
+        ],
+    }
+    settlement = await db_client.post("/api/v1/external-sales", json=settlement_payload)
+    assert settlement.status_code == 201, settlement.text
+    settlement_id = settlement.json()["id"]
+    settlement_upload = await db_client.post(
+        f"/api/v1/external-sales/{settlement_id}/files",
+        files=[("files", ("settlement.pdf", b"%PDF-settlement", "application/pdf"))],
+    )
+    settlement_calc = await db_client.post(
+        f"/api/v1/external-sales/{settlement_id}/calculate",
+        json={"expected_version": settlement_upload.json()["version"]},
+    )
+    assert settlement_calc.status_code == 200, settlement_calc.text
+    settlement_posted = await db_client.post(
+        f"/api/v1/external-sales/{settlement_id}/confirm",
+        json={"expected_version": settlement_calc.json()["expected_version"]},
+    )
+    assert settlement_posted.status_code == 200, settlement_posted.text
+    assert settlement_posted.json()["original_net_total"] == "-20.00"
+
+    double_signed = await db_client.post(
+        "/api/v1/external-sales",
+        json={
+            **credit_payload,
+            "original_number": "CREDIT-DOUBLE-SIGN-01",
+            "tax_summaries": [
+                {
+                    "treatment_id": treatment["id"],
+                    "rate_id": rate["id"],
+                    "net_amount": "50.00",
+                    "vat_amount": "10.50",
+                }
+            ],
+        },
+    )
+    assert double_signed.status_code == 201, double_signed.text
+    double_id = double_signed.json()["id"]
+    double_upload = await db_client.post(
+        f"/api/v1/external-sales/{double_id}/files",
+        files=[("files", ("double.pdf", b"%PDF-double", "application/pdf"))],
+    )
+    double_calc = await db_client.post(
+        f"/api/v1/external-sales/{double_id}/calculate",
+        json={"expected_version": double_upload.json()["version"]},
+    )
+    assert double_calc.status_code == 422
+    assert (
+        await db_client.get(f"/api/v1/external-sales/{double_id}")
+    ).json()["status"] == "PENDING"
+
+    support = await db_client.post(
+        f"/api/v1/external-sales/{sale_id}/files",
+        files=[("files", ("support.pdf", b"%PDF-support", "application/pdf"))],
+    )
+    assert support.status_code == 200, support.text
+    assert len(support.json()["files"]) == 2
+    assert support.json()["version"] == revised.json()["version"]
+    assert (
+        await db_client.delete(f"/api/v1/external-sales/{sale_id}/files/{original_file_id}")
+    ).status_code == 409
+
+    stale_version = support.json()["version"]
+    race_body = {
+        "expected_version": stale_version,
+        "reason": "Concurrent correction",
+        "description": "single current version",
+    }
+    races = await asyncio.gather(
+        *[
+            db_client.post(f"/api/v1/external-sales/{sale_id}/revisions", json=race_body)
+            for _ in range(2)
+        ]
+    )
+    assert sorted(response.status_code for response in races) == [200, 409]
+    current = (await db_client.get(f"/api/v1/external-sales/{sale_id}")).json()
+    void_body = {"expected_version": current["version"], "reason": "Duplicate bookkeeping entry"}
+    assert (
+        await db_client.post(
+            f"/api/v1/external-sales/{sale_id}/void",
+            json={"expected_version": current["version"], "reason": "  "},
+        )
+    ).status_code == 422
+    voided = await db_client.post(f"/api/v1/external-sales/{sale_id}/void", json=void_body)
+    assert voided.status_code == 200, voided.text
+    assert voided.json()["status"] == "VOID"
+    assert voided.json()["original_number"] == "SALE-ORIGINAL-01"
+    assert len(voided.json()["files"]) == 2
+    history = await db_client.get(f"/api/v1/external-sales/{sale_id}/revisions?offset=0&limit=50")
+    assert history.status_code == 200 and history.json()["total"] == 3
+    assert (
+        await db_client.post(f"/api/v1/external-sales/{sale_id}/void", json=void_body)
+    ).status_code == 409
+    vat = (await db_client.get("/api/v1/reports/vat-return?year=2027&quarter=1")).json()
+    matching = [
+        row
+        for row in vat["event_rows"]
+        if row.get("external_sale_id") in {sale_id, credit_id, settlement_id}
+    ]
+    assert {row["external_sale_id"] for row in matching} == {credit_id, settlement_id}
+    assert {
+        row["external_sale_id"] for row in matching if row.get("taxable_amount") == "-20.00"
+    } == {settlement_id}
+
+async def _repair_post_sale(client: AsyncClient, treatment: dict, rate: dict) -> dict:
+    source = (
+        await client.post(
+            "/api/v1/external-sales-sources", json={"name": "Repair source", "kind": "PLATFORM"}
+        )
+    ).json()
+    draft = await client.post(
+        "/api/v1/external-sales",
+        json={
+            "source_id": source["id"],
+            "original_number": "REPAIR-1",
+            "document_date": "2026-10-10",
+            "tax_summaries": [
+                {
+                    "treatment_id": treatment["id"],
+                    "rate_id": rate["id"],
+                    "net_amount": "100.00",
+                    "vat_amount": "21.00",
+                }
+            ],
+        },
+    )
+    assert draft.status_code == 201, draft.text
+    url = f"/api/v1/external-sales/{draft.json()['id']}"
+    upload = await client.post(
+        f"{url}/files", files=[("files", ("source.pdf", b"%PDF-original", "application/pdf"))]
+    )
+    posted = await client.post(
+        f"{url}/confirm", json={"expected_version": upload.json()["version"]}
+    )
+    assert posted.status_code == 200, posted.text
+    return posted.json()
+
+
+@pytest.mark.asyncio
+async def test_revision_repeated_tax_inputs_preserve_edited_and_inactive_dictionary_snapshots(
+    db_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    storage = MemoryStorage()
+    company, treatment, rate, _, _ = await _owner_company(db_client)
+    sale = await _repair_post_sale(db_client, treatment, rate)
+    url = f"/api/v1/external-sales/{sale['id']}"
+    tax = sale["tax_summaries"][0]
+    changed_rate = await db_client.put(
+        f"/api/v1/vat-rates/{rate['id']}",
+        json={"label": "Edited later", "percent": "9", "active": True},
+    )
+    assert changed_rate.status_code == 200, changed_rate.text
+    # Normal dictionary edits/deactivation cannot change a repeated legacy full payload.
+    raw = {key: tax[key] for key in ("treatment_id", "rate_id", "net_amount", "vat_amount")}
+    for identified, active in ((False, True), (False, False), (True, False)):
+        if not active:
+            response = await db_client.put(
+                f"/api/v1/vat-rates/{rate['id']}",
+                json={"label": "Inactive later", "percent": "9", "active": False},
+            )
+            assert response.status_code == 200
+            async with runtime_session_maker() as session:
+                await set_rls_company(session, uuid.UUID(company["id"]))
+                await session.execute(
+                    text(
+                        "UPDATE vat_treatment SET label='Inactive later',active=false WHERE id=:id"
+                    ),
+                    {"id": uuid.UUID(treatment["id"])},
+                )
+                await session.commit()
+        body = {
+            "expected_version": sale["version"],
+            "reason": "Correct text only",
+            "description": f"Text {active}",
+            "tax_summaries": [{**raw, **({"tax_summary_id": tax["id"]} if identified else {})}],
+        }
+        before = (await db_client.get(url)).json()
+        preview = await db_client.post(f"{url}/revisions/preview", json=body)
+        assert preview.status_code == 200, preview.text
+        assert (await db_client.get(url)).json() == before
+        saved = await db_client.post(f"{url}/revisions", json=body)
+        assert saved.status_code == 200, saved.text
+        sale = saved.json()
+        assert sale["tax_summaries"] == before["tax_summaries"]
+        assert Decimal(preview.json()["new_net_total"]) == Decimal(sale["original_net_total"])
+    vat = (await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=4")).json()
+    assert Decimal(vat["boxes"]["box_1a"]["base"]) == Decimal("100")
+    assert Decimal(vat["boxes"]["box_1a"]["vat"]) == Decimal("21")
+    assert Decimal(vat["boxes"]["box_1b"]["base"]) == 0
+    # Changing original amounts retains the same frozen rate; mismatch review still applies.
+    body = {
+        "expected_version": sale["version"],
+        "reason": "Correct source amount",
+        "tax_summaries": [
+            {**raw, "tax_summary_id": tax["id"], "net_amount": "200.005", "vat_amount": "42.005"}
+        ],
+    }
+    for command in ("revisions/preview", "revisions"):
+        assert (await db_client.post(f"{url}/{command}", json=body)).status_code == 422
+    body.update(acknowledge_vat_mismatch=True, mismatch_ack_reason="Source VAT reviewed")
+    preview = await db_client.post(f"{url}/revisions/preview", json=body)
+    saved = await db_client.post(f"{url}/revisions", json=body)
+    assert saved.status_code == preview.status_code == 200, saved.text
+    sale = saved.json()
+    assert Decimal(sale["original_net_total"]) == Decimal("200.01")
+    assert Decimal(sale["tax_summaries"][0]["rate_percent"]) == Decimal("21")
+    # A deliberate new selection resolves live active dictionaries, not the old snapshot.
+    active_treatment = await db_client.get("/api/v1/vat-treatments?side=SALES")
+    async with runtime_session_maker() as session:
+        await set_rls_company(session, uuid.UUID(company["id"]))
+        await session.execute(
+            text("UPDATE vat_treatment SET active=true WHERE id=:id"),
+            {"id": uuid.UUID(treatment["id"])},
+        )
+        await session.commit()
+    assert active_treatment.status_code == 200
+    new_rate = await db_client.post(
+        "/api/v1/vat-rates", json={"label": "Explicit correction", "percent": "7.5", "active": True}
+    )
+    assert new_rate.status_code == 201
+    body = {
+        "expected_version": sale["version"],
+        "reason": "Select corrected tax",
+        "tax_summaries": [
+            {
+                **raw,
+                "tax_summary_id": tax["id"],
+                "rate_id": new_rate.json()["id"],
+                "vat_amount": "7.50",
+            }
+        ],
+    }
+    preview = await db_client.post(f"{url}/revisions/preview", json=body)
+    saved = await db_client.post(f"{url}/revisions", json=body)
+    assert saved.status_code == preview.status_code == 200, saved.text
+    assert Decimal(saved.json()["tax_summaries"][0]["rate_percent"]) == Decimal("7.5")
+    assert saved.json()["tax_summaries"][0]["treatment_label"] == tax["treatment_label"]
+
+    # Every newly supplied identity/selection remains scoped through runtime RLS.
+    sale = saved.json()
+    other_company, other_sale, other_tax, other_rate = (uuid.uuid4() for _ in range(4))
+    async with runtime_session_maker() as session:
+        await session.execute(
+            text("INSERT INTO company(id,name,base_currency) VALUES(:id,'Foreign tax','EUR')"),
+            {"id": other_company},
+        )
+        await set_rls_company(session, other_company)
+        await session.execute(
+            text("INSERT INTO external_sale(id,company_id) VALUES(:id,:company)"),
+            {"id": other_sale, "company": other_company},
+        )
+        await session.execute(
+            text(
+                "INSERT INTO vat_rate(id,company_id,label,percent) "
+                "VALUES(:id,:company,'Foreign',7.5)"
+            ),
+            {"id": other_rate, "company": other_company},
+        )
+        await session.execute(
+            text(
+                "INSERT INTO external_sale_tax(id,company_id,external_sale_id,rate_id) "
+                "VALUES(:id,:company,:sale,:rate)"
+            ),
+            {"id": other_tax, "company": other_company, "sale": other_sale, "rate": other_rate},
+        )
+        await session.commit()
+    safe = {
+        "treatment_id": treatment["id"],
+        "rate_id": new_rate.json()["id"],
+        "net_amount": "100",
+        "vat_amount": "7.50",
+        "tax_summary_id": tax["id"],
+    }
+    for invalid in (
+        {"tax_summary_id": str(other_tax)},
+        {"rate_id": str(other_rate)},
+        {"rate_id": rate["id"]},
+    ):
+        for command in ("revisions/preview", "revisions"):
+            response = await db_client.post(
+                f"{url}/{command}",
+                json={
+                    "expected_version": sale["version"],
+                    "reason": "Reject invalid choice",
+                    "tax_summaries": [{**safe, **invalid}],
+                },
+            )
+            assert response.status_code == 422, response.text
+    assert (await db_client.get(url)).json() == sale
+    async with runtime_session_maker() as session:
+        await set_rls_company(session, uuid.UUID(company["id"]))
+        # Ownership guards still reject moving a retained selection to another tenant.
+        with pytest.raises(DBAPIError):
+            await session.execute(
+                text("UPDATE external_sale_tax SET rate_id=:rate WHERE id=:id"),
+                {"rate": other_rate, "id": uuid.UUID(tax["id"])},
+            )
+        await session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_revision_null_pl_rejected_without_audit_version_or_report_effect(
+    db_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    company, treatment, rate, _, _ = await _owner_company(db_client)
+    sale = await _repair_post_sale(db_client, treatment, rate)
+    url = f"/api/v1/external-sales/{sale['id']}"
+    report_url = "/api/v1/reports/profit-loss?from=2026-01-01&to=2026-12-31"
+    before_report = (await db_client.get(report_url)).json()
+    for command in ("revisions/preview", "revisions"):
+        bad = await db_client.post(
+            f"{url}/{command}",
+            json={
+                "expected_version": sale["version"],
+                "reason": "Reject null",
+                "include_in_pl": None,
+            },
+        )
+        assert bad.status_code == 422, bad.text
+    assert (await db_client.get(url)).json() == sale
+    assert (await db_client.get(report_url)).json() == before_report
+    async with runtime_session_maker() as session:
+        await set_rls_company(session, uuid.UUID(company["id"]))
+        assert await session.scalar(text("SELECT count(*) FROM external_sale_revision")) == 0
+    for explicit in (None, False, None, True):
+        body = {
+            "expected_version": sale["version"],
+            "reason": "Review P/L",
+            "description": "Still explicit",
+        }
+        if explicit is not None:
+            body["include_in_pl"] = explicit
+        saved = await db_client.post(f"{url}/revisions", json=body)
+        assert saved.status_code == 200, saved.text
+        expected = sale["include_in_pl"] if explicit is None else explicit
+        sale = saved.json()
+        assert sale["include_in_pl"] is expected
+        report = (await db_client.get(report_url)).json()
+        assert Decimal(report["revenue_net"]) == (Decimal("100") if expected else Decimal("0"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "partial",
+    [
+        {},
+        {"historical_original_number": "OLD-17"},
+        {"historical_original_explanation": "Find original"},
+    ],
+)
+async def test_credit_pending_reference_is_incomplete_until_confirmation(
+    db_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_session_maker: async_sessionmaker[AsyncSession],
+    partial: dict,
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    company, treatment, rate, _, _ = await _owner_company(db_client)
+    original = await _repair_post_sale(db_client, treatment, rate)
+    base = {
+        "source_id": original["source_id"],
+        "original_number": "CREDIT-PENDING",
+        "document_kind": "CREDIT",
+        "document_date": "2026-10-11",
+        "include_in_pl": True,
+        "tax_summaries": [
+            {
+                "treatment_id": treatment["id"],
+                "rate_id": rate["id"],
+                "net_amount": "-10",
+                "vat_amount": "-2.10",
+            }
+        ],
+        **partial,
+    }
+    draft = await db_client.post("/api/v1/external-sales", json=base)
+    assert draft.status_code == 201, draft.text
+    sale = draft.json()
+    url = f"/api/v1/external-sales/{sale['id']}"
+    upload = await db_client.post(
+        f"{url}/files", files=[("files", ("credit.pdf", b"%PDF-credit", "application/pdf"))]
+    )
+    sale = upload.json()
+    for command in ("calculate", "confirm"):
+        invalid = await db_client.post(
+            f"{url}/{command}", json={"expected_version": sale["version"]}
+        )
+        assert invalid.status_code == 422, invalid.text
+    assert (await db_client.get(url)).json() == sale
+    assert (await db_client.get(f"{url}/revisions")).json()["total"] == 0
+    for invalid in (
+        {"related_external_sale_id": original["id"], "historical_original_number": "OLD"},
+        {"related_external_sale_id": sale["id"]},
+        {"document_kind": "SALE", "historical_original_number": "OLD"},
+    ):
+        response = await db_client.put(url, json={**base, **invalid})
+        assert response.status_code == 422, response.text
+    other_company, other_sale = uuid.uuid4(), uuid.uuid4()
+    async with runtime_session_maker() as session:
+        await session.execute(
+            text("INSERT INTO company(id,name,base_currency) VALUES(:id,'Foreign','EUR')"),
+            {"id": other_company},
+        )
+        await set_rls_company(session, other_company)
+        await session.execute(
+            text("INSERT INTO external_sale(id,company_id) VALUES(:id,:company)"),
+            {"id": other_sale, "company": other_company},
+        )
+        await session.commit()
+    assert (
+        await db_client.put(
+            url,
+            json={
+                **base,
+                "related_external_sale_id": str(other_sale),
+                "historical_original_number": None,
+                "historical_original_explanation": None,
+            },
+        )
+    ).status_code == 404
+    # Raw runtime DB permits partial Pending, but cannot post it without a complete reference.
+    async with runtime_session_maker() as session:
+        await set_rls_company(session, uuid.UUID(company["id"]))
+        with pytest.raises(DBAPIError, match="external_sale_credit_reference_check"):
+            await session.execute(
+                text("UPDATE external_sale SET status='POSTED' WHERE id=:id"),
+                {"id": uuid.UUID(sale["id"])},
+            )
+        await session.rollback()
+    completed = await db_client.put(
+        url,
+        json={
+            **base,
+            "related_external_sale_id": original["id"],
+            "historical_original_number": None,
+            "historical_original_explanation": None,
+        },
+    )
+    assert completed.status_code == 200, completed.text
+    posted = await db_client.post(
+        f"{url}/confirm", json={"expected_version": completed.json()["version"]}
+    )
+    assert posted.status_code == 200, posted.text
+    assert posted.json()["related_external_sale_id"] == original["id"]
+    assert Decimal(posted.json()["original_net_total"]) == Decimal("-10")

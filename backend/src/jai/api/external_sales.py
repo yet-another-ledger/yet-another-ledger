@@ -22,9 +22,13 @@ from jai.schemas.external_sales import (
     ExternalSalesInput,
     ExternalSalesListRead,
     ExternalSalesRead,
+    ExternalSalesRevisionInput,
+    ExternalSalesRevisionListRead,
+    ExternalSalesRevisionPreview,
     ExternalSalesSourceInput,
     ExternalSalesSourceListRead,
     ExternalSalesSourceRead,
+    ExternalSalesVoidInput,
 )
 from jai.services.external_sales import (
     ExternalSalesConflict as ServiceConflict,
@@ -38,12 +42,16 @@ from jai.services.external_sales import (
     create_source,
     discard_sale,
     get_sale,
+    list_revisions,
     list_sales,
     list_sources,
+    preview_revision,
     read_file,
     remove_file,
+    revise_sale,
     update_sale,
     update_source,
+    void_sale,
 )
 from jai.services.receipt_inbox import MAX_FILES
 from jai.services.storage import ReceiptValidationError, get_storage
@@ -284,6 +292,71 @@ async def post_external_sale_confirmation(
 ) -> ExternalSalesRead:
     try:
         return await confirm_sale(session, _company_id(user), user.id, sale_id, body, get_storage())
+    except (LookupError, ServiceConflict, ReceiptValidationError) as exc:
+        _raise_service_error(exc)
+
+
+@router.post(
+    "/external-sales/{sale_id}/revisions/preview",
+    response_model=ExternalSalesRevisionPreview,
+    responses={409: {"model": ExternalSalesConflict}},
+)
+async def post_external_sale_revision_preview(
+    sale_id: uuid.UUID,
+    body: ExternalSalesRevisionInput,
+    user: User = Depends(_owner),
+    session: AsyncSession = Depends(get_session),
+) -> ExternalSalesRevisionPreview:
+    try:
+        return await preview_revision(session, _company_id(user), sale_id, body)
+    except (LookupError, ServiceConflict, ReceiptValidationError) as exc:
+        _raise_service_error(exc)
+
+
+@router.post(
+    "/external-sales/{sale_id}/revisions",
+    response_model=ExternalSalesRead,
+    responses={409: {"model": ExternalSalesConflict}},
+)
+async def post_external_sale_revision(
+    sale_id: uuid.UUID,
+    body: ExternalSalesRevisionInput,
+    user: User = Depends(_owner),
+    session: AsyncSession = Depends(get_session),
+) -> ExternalSalesRead:
+    try:
+        return await revise_sale(session, _company_id(user), user.id, sale_id, body)
+    except (LookupError, ServiceConflict, ReceiptValidationError) as exc:
+        _raise_service_error(exc)
+
+
+@router.get("/external-sales/{sale_id}/revisions", response_model=ExternalSalesRevisionListRead)
+async def get_external_sale_revisions(
+    sale_id: uuid.UUID,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    user: User = Depends(_owner),
+    session: AsyncSession = Depends(get_session),
+) -> ExternalSalesRevisionListRead:
+    try:
+        return await list_revisions(session, _company_id(user), sale_id, offset, limit)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/external-sales/{sale_id}/void",
+    response_model=ExternalSalesRead,
+    responses={409: {"model": ExternalSalesConflict}},
+)
+async def post_external_sale_void(
+    sale_id: uuid.UUID,
+    body: ExternalSalesVoidInput,
+    user: User = Depends(_owner),
+    session: AsyncSession = Depends(get_session),
+) -> ExternalSalesRead:
+    try:
+        return await void_sale(session, _company_id(user), user.id, sale_id, body)
     except (LookupError, ServiceConflict, ReceiptValidationError) as exc:
         _raise_service_error(exc)
 

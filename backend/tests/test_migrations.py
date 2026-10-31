@@ -22,7 +22,7 @@ import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
-from sqlalchemy.engine import URL
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
@@ -51,6 +51,20 @@ def _alembic_url() -> str:
         database="jai_test_migrations",
     ).render_as_string(hide_password=False)
     return migration_url
+
+
+def _runtime_url(url: str) -> str:
+    """Use the NOBYPASSRLS application role against the same isolated database."""
+    settings = get_settings()
+    parsed = make_url(url)
+    return URL.create(
+        drivername="postgresql+asyncpg",
+        username=settings.postgres_app_user,
+        password=settings.postgres_app_password,
+        host=settings.postgres_host,
+        port=settings.postgres_port,
+        database=parsed.database,
+    ).render_as_string(hide_password=False)
 
 
 def _run_alembic(*extra_args: str, url: str) -> subprocess.CompletedProcess[str]:
@@ -575,7 +589,7 @@ class TestMigrations:
         ).render_as_string(hide_password=False)
         _ensure_database(isolated_url)
         try:
-            upgraded = _run_alembic("upgrade", "head", url=isolated_url)
+            upgraded = _run_alembic("upgrade", "0048", url=isolated_url)
             assert upgraded.returncode == 0, upgraded.stderr
             before = _query(
                 isolated_url,
@@ -616,7 +630,7 @@ class TestMigrations:
             "posting_id": posting_id,
         }
         try:
-            upgraded = _run_alembic("upgrade", "head", url=isolated_url)
+            upgraded = _run_alembic("upgrade", "0048", url=isolated_url)
             assert upgraded.returncode == 0, upgraded.stderr
             _query(
                 isolated_url,
@@ -687,6 +701,366 @@ class TestMigrations:
                 {"sale_id": sale_id},
                 company_id=company_id,
             ) == [{"id": posting_id, "version": 2, "snapshot": {}}]
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0049_upgrade_preserves_rows_and_audits_a_live_revision(self) -> None:
+        """The production-shaped 0048→0049 upgrade retains old rows and enables audited edits."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_upgrade_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        company_id, source_id, pending_id, posted_id, file_id, posting_id = (
+            uuid.uuid4() for _ in range(6)
+        )
+        params = {
+            "company_id": company_id,
+            "source_id": source_id,
+            "pending_id": pending_id,
+            "posted_id": posted_id,
+            "file_id": file_id,
+            "posting_id": posting_id,
+        }
+        try:
+            upgraded = _run_alembic("upgrade", "0048", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                isolated_url,
+                "INSERT INTO company (id,name,base_currency) "
+                "VALUES (:company_id,'M16 0049 upgrade','EUR'); "
+                "INSERT INTO external_sales_source (id,company_id,name,kind) "
+                "VALUES (:source_id,:company_id,'Retained source','OTHER'); "
+                "INSERT INTO external_sale (id,company_id,source_id,original_number) "
+                "VALUES (:pending_id,:company_id,:source_id,'pending-0048'); "
+                "INSERT INTO external_sale "
+                "(id,company_id,source_id,original_number,status,version,posted_at,"
+                "original_net_total,original_vat_total) "
+                "VALUES (:posted_id,:company_id,:source_id,'posted-0048','POSTED',2,now(),"
+                "100.00,21.00); "
+                "INSERT INTO external_sale_file "
+                "(id,company_id,external_sale_id,storage_key,filename,mime_type,byte_size,sha256) "
+                "VALUES (:file_id,:company_id,:posted_id,'external-sales/retained.pdf',"
+                "'retained.pdf','application/pdf',8,:sha); "
+                "INSERT INTO external_sale_posting "
+                "(id,company_id,external_sale_id,version,snapshot) "
+                "VALUES (:posting_id,:company_id,:posted_id,2,CAST(:snapshot AS jsonb))",
+                {**params, "sha": "a" * 64, "snapshot": '{"original_number":"posted-0048"}'},
+                company_id=company_id,
+            )
+            before = _query(
+                isolated_url,
+                "SELECT s.id,s.original_number,s.status,s.version,s.original_net_total,"
+                "f.storage_key,f.sha256,p.snapshot FROM external_sale s "
+                "JOIN external_sale_file f ON f.external_sale_id=s.id "
+                "JOIN external_sale_posting p ON p.external_sale_id=s.id "
+                "WHERE s.id=:posted_id",
+                params,
+                company_id=company_id,
+            )
+            step4 = _run_alembic("upgrade", "0049", url=isolated_url)
+            assert step4.returncode == 0, step4.stderr
+            assert _query(
+                isolated_url,
+                "SELECT document_kind,related_external_sale_id,historical_original_number "
+                "FROM external_sale WHERE id=:posted_id",
+                params,
+                company_id=company_id,
+            ) == [{
+                "document_kind": "SALE",
+                "related_external_sale_id": None,
+                "historical_original_number": None,
+            }]
+            after = _query(
+                isolated_url,
+                "SELECT s.id,s.original_number,s.status,s.version,s.original_net_total,"
+                "f.storage_key,f.sha256,p.snapshot FROM external_sale s "
+                "JOIN external_sale_file f ON f.external_sale_id=s.id "
+                "JOIN external_sale_posting p ON p.external_sale_id=s.id "
+                "WHERE s.id=:posted_id",
+                params,
+                company_id=company_id,
+            )
+            assert after == before
+            assert _query(
+                isolated_url,
+                "SELECT status,original_number FROM external_sale WHERE id=:pending_id",
+                params,
+                company_id=company_id,
+            ) == [{"status": "PENDING", "original_number": "pending-0048"}]
+
+            audit_id = uuid.uuid4()
+            _query(
+                _runtime_url(isolated_url),
+                "INSERT INTO external_sale_revision "
+                "(id,company_id,external_sale_id,version,action,reason,before_snapshot,"
+                "after_snapshot) "
+                "VALUES (:audit_id,:company_id,:posted_id,3,'REVISION','upgrade-path test',"
+                "'{}'::jsonb,'{}'::jsonb); "
+                "SELECT set_config('jai.external_sale_revision_id',:audit_id,true); "
+                "UPDATE external_sale SET document_date=DATE '2027-01-10',version=3 "
+                "WHERE id=:posted_id",
+                {**params, "audit_id": str(audit_id)},
+                company_id=company_id,
+            )
+            assert _query(
+                isolated_url,
+                "SELECT status,version,document_date FROM external_sale WHERE id=:posted_id",
+                params,
+                company_id=company_id,
+            ) == [{"status": "POSTED", "version": 3, "document_date": date(2027, 1, 10)}]
+            assert _query(
+                isolated_url,
+                "SELECT action,reason,version FROM external_sale_revision WHERE id=:audit_id",
+                {"audit_id": audit_id},
+                company_id=company_id,
+            ) == [{"action": "REVISION", "reason": "upgrade-path test", "version": 3}]
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0049_retained_revision_blocks_downgrade_for_nobypass_migrator(self) -> None:
+        """The NOBYPASSRLS migration role cannot hide retained revision history."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_retained_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        company_id, source_id, sale_id, file_id, posting_id, revision_id = (
+            uuid.uuid4() for _ in range(6)
+        )
+        params = {
+            "company_id": company_id,
+            "source_id": source_id,
+            "sale_id": sale_id,
+            "file_id": file_id,
+            "posting_id": posting_id,
+            "revision_id": revision_id,
+        }
+        try:
+            upgraded = _run_alembic("upgrade", "head", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                isolated_url,
+                "INSERT INTO company (id,name,base_currency) "
+                "VALUES (:company_id,'M16 retained revision','EUR'); "
+                "INSERT INTO external_sales_source (id,company_id,name,kind) "
+                "VALUES (:source_id,:company_id,'Retained source','OTHER'); "
+                "INSERT INTO external_sale "
+                "(id,company_id,source_id,original_number,status,version,posted_at,"
+                "original_net_total,original_vat_total) "
+                "VALUES (:sale_id,:company_id,:source_id,'retained-0049','POSTED',2,now(),"
+                "100.00,21.00); "
+                "INSERT INTO external_sale_file "
+                "(id,company_id,external_sale_id,storage_key,filename,mime_type,byte_size,sha256) "
+                "VALUES (:file_id,:company_id,:sale_id,'external-sales/retained.pdf',"
+                "'retained.pdf','application/pdf',8,:sha); "
+                "INSERT INTO external_sale_posting "
+                "(id,company_id,external_sale_id,version,snapshot) "
+                "VALUES (:posting_id,:company_id,:sale_id,2,'{}'::jsonb); "
+                "INSERT INTO external_sale_revision "
+                "(id,company_id,external_sale_id,version,action,reason,before_snapshot,"
+                "after_snapshot) "
+                "VALUES (:revision_id,:company_id,:sale_id,3,'REVISION','retain audit',"
+                "'{}'::jsonb,'{}'::jsonb)",
+                {**params, "sha": "b" * 64},
+                company_id=company_id,
+            )
+            refused = _run_alembic("downgrade", "0048", url=isolated_url)
+            assert refused.returncode != 0
+            assert (
+                "Refusing to discard retained external sale revision/void history"
+                in refused.stderr
+            )
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": "0049"}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('external_sale','external_sale_revision') ORDER BY relname",
+            ) == [
+                {"relname": name, "relrowsecurity": True, "relforcerowsecurity": True}
+                for name in ("external_sale", "external_sale_revision")
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT status,original_number FROM external_sale WHERE id=:sale_id",
+                params,
+                company_id=company_id,
+            ) == [{"status": "POSTED", "original_number": "retained-0049"}]
+            assert _query(
+                isolated_url,
+                "SELECT reason FROM external_sale_revision WHERE id=:revision_id",
+                params,
+                company_id=company_id,
+            ) == [{"reason": "retain audit"}]
+        finally:
+            _drop_database(isolated_url)
+
+    @pytest.mark.parametrize(
+        "kind,reference",
+        [
+            ("CREDIT", "known"),
+            ("CREDIT", "historical"),
+            ("SETTLEMENT_ADJUSTMENT", "none"),
+        ],
+    )
+    def test_0049_unrevised_posted_semantics_block_downgrade_across_tenants(
+        self, kind: str, reference: str
+    ) -> None:
+        """No revision is needed to retain a first-posted credit/adjustment."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_fix01_down_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        company_id, other_company, source_id, original_id, sale_id, tax_id, file_id, posting_id = (
+            uuid.uuid4() for _ in range(8)
+        )
+        params = dict(
+            company=company_id,
+            other_company=other_company,
+            source=source_id,
+            original=original_id,
+            sale=sale_id,
+            tax=tax_id,
+            file=file_id,
+            posting=posting_id,
+            kind=kind,
+            related=original_id if reference == "known" else None,
+            number="OLD-17" if reference == "historical" else None,
+            explanation="Predates system" if reference == "historical" else None,
+            sha="c" * 64,
+        )
+        try:
+            upgraded = _run_alembic("upgrade", "0048", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                isolated_url,
+                "INSERT INTO company(id,name,base_currency) VALUES(:company,'Retained','EUR'),"
+                "(:other_company,'Unrelated tenant','EUR'); "
+                "INSERT INTO external_sales_source(id,company_id,name,kind) "
+                "VALUES(:source,:company,'Source','PLATFORM'); "
+                "INSERT INTO external_sale(id,company_id,source_id,original_number,status,version,"
+                "document_date,include_in_pl,original_net_total,original_vat_total) "
+                "VALUES(:original,:company,:source,'ORIGINAL','POSTED',2,'2026-10-01',true,100,21)",
+                params,
+                company_id=company_id,
+            )
+            upgraded = _run_alembic("upgrade", "0049", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                _runtime_url(isolated_url),
+                "INSERT INTO external_sale(id,company_id,source_id,original_number,status,version,"
+                "document_date,include_in_pl,original_net_total,original_vat_total,document_kind,"
+                "related_external_sale_id,historical_original_number,"
+                "historical_original_explanation) "
+                "VALUES(:sale,:company,:source,'CORRECTION','POSTED',2,'2026-10-02',true,-10,-2.1,"
+                ":kind,:related,:number,:explanation); "
+                "INSERT INTO external_sale_tax(id,company_id,external_sale_id,treatment_code,"
+                "rate_percent,net_amount,vat_amount) "
+                "VALUES(:tax,:company,:sale,'NL_DOMESTIC',21,-10,-2.1); "
+                "INSERT INTO external_sale_file(id,company_id,external_sale_id,"
+                "storage_key,filename,"
+                "mime_type,byte_size,sha256) "
+                "VALUES(:file,:company,:sale,'external-sales/fix01.pdf',"
+                "'original.pdf','application/pdf',10,:sha); "
+                "INSERT INTO external_sale_posting(id,company_id,external_sale_id,"
+                "version,snapshot) "
+                "VALUES(:posting,:company,:sale,2,"
+                "jsonb_build_object('document_kind',CAST(:kind AS text)))",
+                params,
+                company_id=company_id,
+            )
+            query = (
+                "SELECT s.*,t.net_amount,t.vat_amount,f.sha256,p.snapshot "
+                "FROM external_sale s JOIN external_sale_tax t ON t.external_sale_id=s.id "
+                "JOIN external_sale_file f ON f.external_sale_id=s.id "
+                "JOIN external_sale_posting p ON p.external_sale_id=s.id WHERE s.id=:sale"
+            )
+            before = _query(_runtime_url(isolated_url), query, params, company_id=company_id)
+            assert len(before) == 1
+            assert _query(isolated_url, "SELECT count(*) AS count FROM external_sale") == [
+                {"count": 0}
+            ]
+            assert _query(_runtime_url(isolated_url), query, params, company_id=other_company) == []
+            assert _query(
+                _runtime_url(isolated_url),
+                "SELECT count(*) AS count FROM external_sale_revision",
+                company_id=company_id,
+            ) == [{"count": 0}]
+            refused = _run_alembic("downgrade", "0048", url=isolated_url)
+            assert refused.returncode != 0
+            assert "Refusing to discard retained external sale" in refused.stderr
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": "0049"}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('external_sale','external_sale_revision') ORDER BY relname",
+            ) == [
+                {"relrowsecurity": True, "relforcerowsecurity": True},
+                {"relrowsecurity": True, "relforcerowsecurity": True},
+            ]
+            assert (
+                _query(_runtime_url(isolated_url), query, params, company_id=company_id) == before
+            )
+            assert _query(_runtime_url(isolated_url), query, params, company_id=other_company) == []
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0049_empty_downgrade_and_reupgrade_restore_rls_guards(self) -> None:
+        """An empty 0049 downgrade is safe, and re-upgrade restores forced RLS."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_roundtrip_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        try:
+            upgraded = _run_alembic("upgrade", "0049", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            assert _query(
+                isolated_url,
+                "SELECT relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname='external_sale_revision'",
+            ) == [{"relrowsecurity": True, "relforcerowsecurity": True}]
+            downgraded = _run_alembic("downgrade", "0048", url=isolated_url)
+            assert downgraded.returncode == 0, downgraded.stderr
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": "0048"}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT to_regclass('external_sale_revision') AS revision_table",
+            ) == [{"revision_table": None}]
+            reupgraded = _run_alembic("upgrade", "0049", url=isolated_url)
+            assert reupgraded.returncode == 0, reupgraded.stderr
+            assert _query(
+                isolated_url,
+                "SELECT relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('external_sale','external_sale_revision') "
+                "ORDER BY relname",
+            ) == [
+                {"relrowsecurity": True, "relforcerowsecurity": True},
+                {"relrowsecurity": True, "relforcerowsecurity": True},
+            ]
         finally:
             _drop_database(isolated_url)
 

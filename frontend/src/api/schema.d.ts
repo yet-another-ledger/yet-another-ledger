@@ -2040,6 +2040,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/external-sales/{sale_id}/revisions/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post External Sale Revision Preview */
+        post: operations["post_external_sale_revision_preview_api_v1_external_sales__sale_id__revisions_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-sales/{sale_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get External Sale Revisions */
+        get: operations["get_external_sale_revisions_api_v1_external_sales__sale_id__revisions_get"];
+        put?: never;
+        /** Post External Sale Revision */
+        post: operations["post_external_sale_revision_api_v1_external_sales__sale_id__revisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-sales/{sale_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post External Sale Void */
+        post: operations["post_external_sale_void_api_v1_external_sales__sale_id__void_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices/{invoice_id}/payments": {
         parameters: {
             query?: never;
@@ -5857,6 +5909,11 @@ export interface components {
             /** Current Version */
             current_version?: number | null;
         };
+        /**
+         * ExternalSalesDocumentKind
+         * @enum {string}
+         */
+        ExternalSalesDocumentKind: "SALE" | "CREDIT" | "SETTLEMENT_ADJUSTMENT";
         /** ExternalSalesFileRead */
         ExternalSalesFileRead: {
             /**
@@ -5886,6 +5943,14 @@ export interface components {
             source_id?: string | null;
             /** Original Number */
             original_number?: string | null;
+            /** @default SALE */
+            document_kind?: components["schemas"]["ExternalSalesDocumentKind"];
+            /** Related External Sale Id */
+            related_external_sale_id?: string | null;
+            /** Historical Original Number */
+            historical_original_number?: string | null;
+            /** Historical Original Explanation */
+            historical_original_explanation?: string | null;
             /** Document Date */
             document_date?: string | null;
             /** Covered From */
@@ -5939,6 +6004,13 @@ export interface components {
             source_id: string | null;
             /** Original Number */
             original_number: string | null;
+            document_kind: components["schemas"]["ExternalSalesDocumentKind"];
+            /** Related External Sale Id */
+            related_external_sale_id: string | null;
+            /** Historical Original Number */
+            historical_original_number: string | null;
+            /** Historical Original Explanation */
+            historical_original_explanation: string | null;
             /** Document Date */
             document_date: string | null;
             /** Covered From */
@@ -5989,6 +6061,120 @@ export interface components {
             mismatch_ack_reason: string | null;
             /** Postings */
             postings: components["schemas"]["ExternalSalesPostingRead"][];
+        };
+        /** ExternalSalesRevisionInput */
+        ExternalSalesRevisionInput: {
+            /** Expected Version */
+            expected_version: number;
+            /** Reason */
+            reason: string;
+            /** Document Date */
+            document_date?: string | null;
+            /** Covered From */
+            covered_from?: string | null;
+            /** Covered To */
+            covered_to?: string | null;
+            /** Counterparty */
+            counterparty?: string | null;
+            /** Description */
+            description?: string | null;
+            /**
+             * Include In Pl
+             * @default false
+             */
+            include_in_pl?: boolean;
+            /** Tax Summaries */
+            tax_summaries?: components["schemas"]["ExternalSalesRevisionTaxInput"][] | null;
+            /**
+             * Acknowledge Vat Mismatch
+             * @default false
+             */
+            acknowledge_vat_mismatch?: boolean;
+            /** Mismatch Ack Reason */
+            mismatch_ack_reason?: string | null;
+        };
+        /** ExternalSalesRevisionListRead */
+        ExternalSalesRevisionListRead: {
+            /** Items */
+            items: components["schemas"]["ExternalSalesRevisionRead"][];
+            /** Total */
+            total: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset?: number;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit?: number;
+        };
+        /** ExternalSalesRevisionPreview */
+        ExternalSalesRevisionPreview: {
+            /**
+             * Sale Id
+             * Format: uuid
+             */
+            sale_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Old Period */
+            old_period: string;
+            /** New Period */
+            new_period: string;
+            /** Old Net Total */
+            old_net_total: string;
+            /** New Net Total */
+            new_net_total: string;
+            /** Old Vat Total */
+            old_vat_total: string;
+            /** New Vat Total */
+            new_vat_total: string;
+            /** Warnings */
+            warnings: string[];
+        };
+        /** ExternalSalesRevisionRead */
+        ExternalSalesRevisionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version: number;
+            /** Action */
+            action: string;
+            /** Reason */
+            reason: string;
+            /** Actor Id */
+            actor_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Before Snapshot */
+            before_snapshot: {
+                [key: string]: unknown;
+            };
+            /** After Snapshot */
+            after_snapshot: {
+                [key: string]: unknown;
+            };
+        };
+        /** ExternalSalesRevisionTaxInput */
+        ExternalSalesRevisionTaxInput: {
+            /** Treatment Id */
+            treatment_id?: string | null;
+            /** Rate Id */
+            rate_id?: string | null;
+            /** Net Amount */
+            net_amount?: number | string | null;
+            /** Vat Amount */
+            vat_amount?: number | string | null;
+            /** Tax Summary Id */
+            tax_summary_id?: string | null;
         };
         /** ExternalSalesSourceInput */
         ExternalSalesSourceInput: {
@@ -6051,7 +6237,7 @@ export interface components {
          * ExternalSalesStatus
          * @enum {string}
          */
-        ExternalSalesStatus: "PENDING" | "POSTED";
+        ExternalSalesStatus: "PENDING" | "POSTED" | "VOID";
         /** ExternalSalesTaxInput */
         ExternalSalesTaxInput: {
             /** Treatment Id */
@@ -6086,6 +6272,13 @@ export interface components {
             net_amount: string | null;
             /** Vat Amount */
             vat_amount: string | null;
+        };
+        /** ExternalSalesVoidInput */
+        ExternalSalesVoidInput: {
+            /** Expected Version */
+            expected_version: number;
+            /** Reason */
+            reason: string;
         };
         /** FinalAdvanceApplicationRead */
         FinalAdvanceApplicationRead: {
@@ -15203,6 +15396,172 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ExternalSalesConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_external_sale_revision_preview_api_v1_external_sales__sale_id__revisions_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalSalesRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRevisionPreview"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_external_sale_revisions_api_v1_external_sales__sale_id__revisions_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRevisionListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_external_sale_revision_api_v1_external_sales__sale_id__revisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalSalesRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_external_sale_void_api_v1_external_sales__sale_id__void_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalSalesVoidInput"];
             };
         };
         responses: {
