@@ -185,6 +185,24 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true },
       },
       {
+        path: 'external-sales',
+        name: 'external-sales-list',
+        component: () => import('../views/externalSales/ExternalSales.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'external-sales/new',
+        name: 'external-sales-new',
+        component: () => import('../views/externalSales/ExternalSales.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'external-sales/:id',
+        name: 'external-sales-detail',
+        component: () => import('../views/externalSales/ExternalSales.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
         path: 'expenses/new',
         name: 'expense-new',
         component: () => import('../views/expenses/ExpenseEdit.vue'),

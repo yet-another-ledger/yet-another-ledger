@@ -19,6 +19,8 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.engine import URL
 from sqlalchemy.exc import IntegrityError
@@ -28,6 +30,13 @@ from jai.config import get_settings
 from jai.services.mileage import get_mileage_defaults
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+def _script_head() -> str:
+    config = Config(str(BACKEND_DIR / "alembic.ini"))
+    head = ScriptDirectory.from_config(config).get_current_head()
+    assert head is not None
+    return head
 
 
 def _alembic_url() -> str:
@@ -413,24 +422,144 @@ class TestMigrations:
             ) == [{"include_in_pl": True, "pl_cost_basis": "NET"}]
             assert _query(
                 isolated_url,
-                "SELECT include_in_pl, pl_cost_basis FROM recurring_expense "
-                "WHERE id=:recurring_id",
+                "SELECT include_in_pl, pl_cost_basis FROM recurring_expense WHERE id=:recurring_id",
                 {"recurring_id": ids["recurring_id"]},
                 company_id=ids["company_id"],
             ) == [{"include_in_pl": True, "pl_cost_basis": "NET"}]
-            assert _query(
+            assert (
+                _query(
+                    isolated_url,
+                    f"SELECT {amount_columns} FROM expense WHERE id=:expense_id",
+                    {"expense_id": ids["expense_id"]},
+                    company_id=ids["company_id"],
+                )
+                == before_expense
+            )
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT net_amount, vat_amount, gross_amount, business_percentage, "
+                    "depreciation_years FROM recurring_expense WHERE id=:recurring_id",
+                    {"recurring_id": ids["recurring_id"]},
+                    company_id=ids["company_id"],
+                )
+                == before_recurring
+            )
+            original_expense_rls = _query(
                 isolated_url,
-                f"SELECT {amount_columns} FROM expense WHERE id=:expense_id",
+                "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('expense','recurring_expense') ORDER BY relname",
+            )
+            _query(
+                isolated_url,
+                "UPDATE expense SET include_in_pl=false WHERE id=:expense_id",
                 {"expense_id": ids["expense_id"]},
                 company_id=ids["company_id"],
-            ) == before_expense
+            )
+            refused = _run_alembic("downgrade", "0045", url=isolated_url)
+            assert refused.returncode != 0
+            assert "M16 Expense settings contain non-default values" in refused.stderr
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": _script_head()}
+            ]
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
+                    "WHERE relname IN ('expense','recurring_expense') ORDER BY relname",
+                )
+                == original_expense_rls
+            )
+            visible_without_context = _query(
+                isolated_url,
+                "SELECT count(*) AS n FROM expense WHERE id=:expense_id",
+                {"expense_id": ids["expense_id"]},
+            )[0]["n"]
+            assert visible_without_context == (
+                0 if original_expense_rls[0]["relrowsecurity"] else 1
+            )
             assert _query(
                 isolated_url,
-                "SELECT net_amount, vat_amount, gross_amount, business_percentage, "
-                "depreciation_years FROM recurring_expense WHERE id=:recurring_id",
-                {"recurring_id": ids["recurring_id"]},
+                "SELECT id, include_in_pl FROM expense WHERE id=:expense_id",
+                {"expense_id": ids["expense_id"]},
                 company_id=ids["company_id"],
-            ) == before_recurring
+            ) == [{"id": ids["expense_id"], "include_in_pl": False}]
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0047_downgrade_guard_sees_retained_rows_without_tenant_context(self) -> None:
+        """A real NOBYPASSRLS migrator cannot hide retained external sales from downgrade."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_sale_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        company_id, source_id, sale_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        try:
+            upgraded = _run_alembic("upgrade", "head", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            expected_head = _script_head()
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": expected_head}
+            ]
+            _query(
+                isolated_url,
+                "INSERT INTO company (id,name,base_currency) "
+                "VALUES (:company_id,'M16 retained sale','EUR'); "
+                "INSERT INTO external_sales_source "
+                "(id,company_id,name,kind,default_include_in_pl) "
+                "VALUES (:source_id,:company_id,'Platform','PLATFORM',true); "
+                "INSERT INTO external_sale (id,company_id,source_id,original_number) "
+                "VALUES (:sale_id,:company_id,:source_id,'retained-001')",
+                {"company_id": company_id, "source_id": source_id, "sale_id": sale_id},
+                company_id=company_id,
+            )
+            assert _query(
+                isolated_url,
+                "SELECT count(*) AS n FROM external_sale",
+            ) == [{"n": 0}]
+            assert _query(
+                isolated_url,
+                "SELECT count(*) AS n FROM external_sale WHERE id=:sale_id",
+                {"sale_id": sale_id},
+                company_id=company_id,
+            ) == [{"n": 1}]
+            refused = _run_alembic("downgrade", "0046", url=isolated_url)
+            assert refused.returncode != 0
+            assert (
+                "Refusing to discard external sales drafts or original metadata" in refused.stderr
+            )
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": expected_head}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('external_sales_source','external_sale',"
+                "'external_sale_tax','external_sale_file') ORDER BY relname",
+            ) == [
+                {
+                    "relname": table,
+                    "relrowsecurity": True,
+                    "relforcerowsecurity": True,
+                }
+                for table in (
+                    "external_sale",
+                    "external_sale_file",
+                    "external_sale_tax",
+                    "external_sales_source",
+                )
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT id,original_number FROM external_sale WHERE id=:sale_id",
+                {"sale_id": sale_id},
+                company_id=company_id,
+            ) == [{"id": sale_id, "original_number": "retained-001"}]
         finally:
             _drop_database(isolated_url)
 

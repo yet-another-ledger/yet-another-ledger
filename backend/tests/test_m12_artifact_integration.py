@@ -636,6 +636,9 @@ async def test_refund_delete_tombstones_cash_but_retains_artifact_and_email_audi
     assert hashlib.sha256(historic.content).hexdigest() == artifact["sha256"]
     # The formal API-created tombstone blocks downgrade before any 0040 DDL;
     # its historical owner/bytes and successful EmailLog relation stay intact.
+    async with db_session_maker() as session:
+        active_head = await session.scalar(text("SELECT version_num FROM alembic_version"))
+    assert active_head is not None
     downgrade = _run_alembic(
         "downgrade",
         "0039",
@@ -658,7 +661,9 @@ async def test_refund_delete_tombstones_cash_but_retains_artifact_and_email_audi
         assert hashlib.sha256(retained.pdf_bytes).hexdigest() == artifact["sha256"]
         # The 0040 downgrade guard aborts before running its DDL, so a failed
         # attempt must retain whichever head was active before the attempt.
-        assert (await session.scalar(text("SELECT version_num FROM alembic_version"))) == "0046"
+        assert (
+            await session.scalar(text("SELECT version_num FROM alembic_version"))
+        ) == active_head
 
 
 @pytest.mark.parametrize("output_action", ["preview", "download", "send"])

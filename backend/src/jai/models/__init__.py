@@ -26,6 +26,12 @@ from jai.models.email_log import EmailLog  # noqa: F401
 from jai.models.estimate import Estimate, EstimateGroup, EstimateLine  # noqa: F401
 from jai.models.expense import Expense  # noqa: F401
 from jai.models.expense_attachment import ExpenseAttachment  # noqa: F401
+from jai.models.external_sales import (  # noqa: F401
+    ExternalSale,
+    ExternalSaleFile,
+    ExternalSalesSource,
+    ExternalSaleTax,
+)
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax  # noqa: F401
 from jai.models.mileage import (  # noqa: F401
     MileageRate,

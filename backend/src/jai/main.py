@@ -26,6 +26,7 @@ from jai.api.customers import router as customers_router
 from jai.api.dictionary import router as dictionary_router
 from jai.api.estimates import router as estimates_router
 from jai.api.expenses import router as expenses_router
+from jai.api.external_sales import router as external_sales_router
 from jai.api.health import router as health_router
 from jai.api.invoices import router as invoices_router
 from jai.api.mileage import router as mileage_router
@@ -123,6 +124,7 @@ async def _generate_recurring_expenses_job() -> None:
         except Exception:
             await session.rollback()
             logger.exception("APScheduler: error in generate_recurring_expenses job")
+
 
 # index.html is the SPA entry point: it is NOT content-hashed, so it must never
 # be served from the browser cache without revalidation — otherwise a cached
@@ -262,6 +264,7 @@ def create_app() -> FastAPI:
     app.include_router(pdf_router)
     app.include_router(quotes_router)
     app.include_router(estimates_router)
+    app.include_router(external_sales_router)
     app.include_router(payments_router)
     app.include_router(expenses_router)
     app.include_router(mileage_router)

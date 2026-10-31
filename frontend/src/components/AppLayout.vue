@@ -33,6 +33,7 @@ import {
   DocumentTextOutline,
   ReceiptOutline,
   AlbumsOutline,
+  CashOutline,
   CalculatorOutline,
   WalletOutline,
   CardOutline,
@@ -74,6 +75,7 @@ const navOptions = computed<MenuOption[]>(() => [
   { label: t('nav.payments'), key: 'payment-list', icon: renderIcon(WalletOutline) },
   { label: t('nav.expenses'), key: 'expense-list', icon: renderIcon(CardOutline) },
   { label: t('nav.receiptInbox'), key: 'receipt-inbox', icon: renderIcon(AlbumsOutline) },
+  { label: t('nav.externalSales'), key: 'external-sales-list', icon: renderIcon(CashOutline) },
   { label: t('nav.recurring'), key: 'recurring-expense-list', icon: renderIcon(RepeatOutline) },
   {
     label: t('nav.reports'),
@@ -100,6 +102,7 @@ const activeKey = computed<string | null>(() => {
   if (typeof name === 'string' && name.startsWith('recurring-expense')) return 'recurring-expense-list'
   if (typeof name === 'string' && name.startsWith('expense')) return 'expense-list'
   if (typeof name === 'string' && name.startsWith('receipt-inbox')) return 'receipt-inbox'
+  if (typeof name === 'string' && name.startsWith('external-sales')) return 'external-sales-list'
   if (name === 'report-profit-loss') return 'report-profit-loss'
   if (name === 'report-vat-return') return 'report-vat-return'
   if (name === 'report-icp') return 'report-icp'
@@ -146,6 +149,7 @@ function handleNav(key: string) {
   else if (key === 'payment-list') void router.push('/payments')
   else if (key === 'expense-list') void router.push({ path: '/expenses', query: { tab: 'purchase' } })
   else if (key === 'receipt-inbox') void router.push('/receipt-inbox')
+  else if (key === 'external-sales-list') void router.push('/external-sales')
   else if (key === 'recurring-expense-list') void router.push('/recurring-expenses')
   else if (key === 'report-profit-loss') void router.push('/reports/profit-loss')
   else if (key === 'report-vat-return') void router.push('/reports/vat-return')
