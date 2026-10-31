@@ -1320,6 +1320,11 @@ class TestCostPreviewPersistenceParity:
         for result in (preview, current):
             assert Decimal(result.json()["annual_cost"]) == Decimal(expected)
         assert Decimal(report.json()["expense_actual"]) == Decimal(expected)
+        assert Decimal(report.json()["mileage_expense_actual"]) == Decimal("0.00")
+        assert Decimal(report.json()["other_expense_actual"]) == Decimal(expected)
+        assert Decimal(report.json()["profit_before_mileage"]) == Decimal(expected) * -1
+        assert report.json()["profit_after_mileage"] == report.json()["profit"]
+        assert Decimal(report.json()["profit_after_mileage"]) == Decimal(expected) * -1
 
     @pytest.mark.parametrize("changed_field", ["effect", "code"])
     async def test_current_preview_uses_persisted_tax_snapshot(

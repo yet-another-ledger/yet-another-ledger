@@ -185,7 +185,12 @@ def _build_empty_buckets(
     while (year, month) <= (end_year, end_month):
         key = _bucket_key(date(year, month, 1), granularity)
         if key not in buckets:
-            buckets[key] = {"revenue_net": _ZERO, "expense_actual": _ZERO}
+            buckets[key] = {
+                "revenue_net": _ZERO,
+                "expense_actual": _ZERO,
+                "mileage_expense_actual": _ZERO,
+                "other_expense_actual": _ZERO,
+            }
         # Advance month
         if month == 12:
             year += 1
@@ -341,6 +346,12 @@ async def compute_profit_loss(
                 buckets[key]["expense_actual"] = (
                     buckets[key]["expense_actual"] + slice_amount
                 )
+                cost_key = (
+                    "mileage_expense_actual"
+                    if ExpenseKind(exp.kind) == ExpenseKind.MILEAGE
+                    else "other_expense_actual"
+                )
+                buckets[key][cost_key] += slice_amount
 
     # -------------------------------------------------------------------
     # 3. Build series (sorted by period) and compute top-level totals
@@ -352,19 +363,33 @@ async def compute_profit_loss(
     for key in sorted(buckets.keys()):
         rev = buckets[key]["revenue_net"]
         exp_actual = buckets[key]["expense_actual"]
-        profit = rev - exp_actual
+        mileage_expense = buckets[key]["mileage_expense_actual"]
+        other_expense = buckets[key]["other_expense_actual"]
+        profit_before_mileage = rev - other_expense
+        profit_after_mileage = rev - exp_actual
         series.append(
             ProfitLossSeriesItem(
                 period=_bucket_label(key, granularity),
                 revenue_net=rev,
                 expense_actual=exp_actual,
-                profit=profit,
+                mileage_expense_actual=mileage_expense,
+                other_expense_actual=other_expense,
+                profit_before_mileage=profit_before_mileage,
+                profit_after_mileage=profit_after_mileage,
+                profit=profit_after_mileage,
             )
         )
         total_revenue = total_revenue + rev
         total_expense = total_expense + exp_actual
 
     total_profit = total_revenue - total_expense
+    total_mileage_expense = sum(
+        (bucket["mileage_expense_actual"] for bucket in buckets.values()), _ZERO
+    )
+    total_other_expense = sum(
+        (bucket["other_expense_actual"] for bucket in buckets.values()), _ZERO
+    )
+    total_profit_before_mileage = total_revenue - total_other_expense
 
     return ProfitLossReport(
         date_from=date_from,
@@ -372,6 +397,10 @@ async def compute_profit_loss(
         granularity=granularity,
         revenue_net=total_revenue,
         expense_actual=total_expense,
+        mileage_expense_actual=total_mileage_expense,
+        other_expense_actual=total_other_expense,
+        profit_before_mileage=total_profit_before_mileage,
+        profit_after_mileage=total_profit,
         profit=total_profit,
         series=series,
         by_category=None,

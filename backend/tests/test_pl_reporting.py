@@ -231,6 +231,7 @@ def _make_expense_row(
     base_net_amount: str,
     business_percentage: str = "100",
     depreciation_years: int = 1,
+    kind: ExpenseKind = ExpenseKind.PURCHASE,
 ) -> MagicMock:
     exp = MagicMock()
     exp.company_id = company_id
@@ -241,7 +242,7 @@ def _make_expense_row(
     exp.base_gross_amount = Decimal(base_net_amount)
     exp.business_percentage = Decimal(business_percentage)
     exp.depreciation_years = depreciation_years
-    exp.kind = ExpenseKind.PURCHASE
+    exp.kind = kind
     exp.pl_cost_basis = PlCostBasis.NET
     exp.vat_treatment_effect = VatTreatmentEffect.APPLY_RATE
     exp.deductible = True
@@ -307,6 +308,10 @@ class TestComputeProfitLoss:
         )
         assert report.revenue_net == Decimal("1500.00")
         assert report.expense_actual == Decimal("200.00")
+        assert report.mileage_expense_actual == Decimal("0")
+        assert report.other_expense_actual == Decimal("200.00")
+        assert report.profit_before_mileage == Decimal("1300.00")
+        assert report.profit_after_mileage == report.profit
         assert report.profit == Decimal("1300.00")
         assert len(report.series) == 2
         jan = report.series[0]
@@ -332,6 +337,9 @@ class TestComputeProfitLoss:
         expenses = [
             _make_expense_row(cid, False, date(2025, 2, 1), "60.00"),  # Q1
             _make_expense_row(cid, False, date(2025, 5, 1), "90.00"),  # Q2
+            _make_expense_row(
+                cid, False, date(2025, 5, 5), "25.00", kind=ExpenseKind.MILEAGE
+            ),  # Q2
         ]
         session = _make_session(invoices, expenses)
         report = await compute_profit_loss(
@@ -345,11 +353,90 @@ class TestComputeProfitLoss:
         assert q1.expense_actual == Decimal("60.00")
         assert q2.period == "2025-04-01"  # Q2 start
         assert q2.revenue_net == Decimal("300.00")
-        assert q2.expense_actual == Decimal("90.00")
+        assert q2.expense_actual == Decimal("115.00")
+        assert q2.mileage_expense_actual == Decimal("25.00")
+        assert q2.other_expense_actual == Decimal("90.00")
+        assert q2.profit_before_mileage == Decimal("210.00")
+        assert q2.profit_after_mileage == q2.profit == Decimal("185.00")
         # Top-level = sum of buckets
         assert report.revenue_net == q1.revenue_net + q2.revenue_net
         assert report.expense_actual == q1.expense_actual + q2.expense_actual
+        assert report.expense_actual == (
+            report.mileage_expense_actual + report.other_expense_actual
+        )
+        assert (
+            report.profit_before_mileage - report.mileage_expense_actual
+            == report.profit_after_mileage
+            == report.profit
+        )
         assert report.profit == report.revenue_net - report.expense_actual
+
+    @pytest.mark.asyncio
+    async def test_mileage_and_other_costs_reconcile_in_period_and_total(self) -> None:
+        cid = uuid.uuid4()
+        invoices = [_make_invoice(cid, "SENT", date(2025, 1, 5), "500.00")]
+        expenses = [
+            _make_expense_row(cid, False, date(2025, 1, 7), "30.00", kind=ExpenseKind.MILEAGE),
+            _make_expense_row(cid, False, date(2025, 1, 8), "100.00"),
+            _make_expense_row(
+                cid, False, date(2025, 2, 7), "60.00", "50", 2,
+                kind=ExpenseKind.MILEAGE,
+            ),
+        ]
+        report = await compute_profit_loss(
+            _make_session(invoices, expenses),
+            cid,
+            date(2025, 1, 1),
+            date(2025, 2, 28),
+            "month",
+        )
+
+        # Annual depreciation slices use the same rounded values as total cost:
+        # Jan 130 total (30 mileage + 100 other); Feb 15 mileage.
+        assert report.expense_actual == Decimal("145.00")
+        assert report.mileage_expense_actual == Decimal("45.00")
+        assert report.other_expense_actual == Decimal("100.00")
+        assert report.profit_before_mileage == Decimal("400.00")
+        assert report.profit_after_mileage == report.profit == Decimal("355.00")
+        jan, feb = report.series
+        assert (jan.mileage_expense_actual, jan.other_expense_actual) == (
+            Decimal("30.00"), Decimal("100.00")
+        )
+        assert jan.profit_before_mileage == Decimal("400.00")
+        assert jan.profit_after_mileage == jan.profit == Decimal("370.00")
+        assert feb.mileage_expense_actual == Decimal("15.00")
+        assert feb.other_expense_actual == Decimal("0")
+        assert feb.profit_before_mileage == Decimal("0")
+        assert feb.profit_after_mileage == feb.profit == Decimal("-15.00")
+        for field in (
+            "revenue_net", "expense_actual", "mileage_expense_actual",
+            "other_expense_actual", "profit_before_mileage", "profit_after_mileage", "profit",
+        ):
+            assert getattr(report, field) == sum(getattr(item, field) for item in report.series)
+
+    @pytest.mark.asyncio
+    async def test_mileage_only_empty_and_partial_date_window(self) -> None:
+        cid = uuid.uuid4()
+        mileage = _make_expense_row(
+            cid, False, date(2025, 3, 15), "50.00", kind=ExpenseKind.MILEAGE
+        )
+        expenses = [mileage]
+        march = await compute_profit_loss(
+            _make_session([], expenses), cid,
+            date(2025, 3, 14), date(2025, 3, 15), "month",
+        )
+        assert march.mileage_expense_actual == Decimal("50.00")
+        assert march.other_expense_actual == Decimal("0")
+        assert march.profit_before_mileage == Decimal("0")
+        assert march.profit_after_mileage == march.profit == Decimal("-50.00")
+
+        outside = await compute_profit_loss(
+            _make_session([], expenses), cid,
+            date(2025, 3, 16), date(2025, 3, 31), "month",
+        )
+        assert outside.expense_actual == outside.mileage_expense_actual == Decimal("0")
+        assert outside.other_expense_actual == Decimal("0")
+        assert outside.profit_before_mileage == outside.profit_after_mileage == outside.profit
 
     @pytest.mark.asyncio
     async def test_draft_invoices_excluded(self) -> None:
@@ -445,6 +532,10 @@ class TestComputeProfitLoss:
         )
         assert report.revenue_net == Decimal("0")
         assert report.expense_actual == Decimal("0")
+        assert report.mileage_expense_actual == Decimal("0")
+        assert report.other_expense_actual == Decimal("0")
+        assert report.profit_before_mileage == Decimal("0")
+        assert report.profit_after_mileage == Decimal("0")
         assert report.profit == Decimal("0")
         assert len(report.series) == 1  # one month bucket still present
         assert report.series[0].period == "2025-07-01"
@@ -499,6 +590,16 @@ class TestComputeProfitLoss:
         sum_exp = sum(s.expense_actual for s in report.series)
         assert report.revenue_net == sum_rev
         assert report.expense_actual == sum_exp
+        assert report.mileage_expense_actual == sum(
+            s.mileage_expense_actual for s in report.series
+        )
+        assert report.other_expense_actual == sum(s.other_expense_actual for s in report.series)
+        assert report.profit_before_mileage == sum(
+            s.profit_before_mileage for s in report.series
+        )
+        assert report.profit_after_mileage == sum(
+            s.profit_after_mileage for s in report.series
+        )
         assert report.profit == report.revenue_net - report.expense_actual
 
     @pytest.mark.asyncio
@@ -518,20 +619,19 @@ class TestComputeProfitLoss:
             session, cid, date(2023, 1, 1), date(2025, 12, 31), "month"
         )
         cent = Decimal("0.01")
-        # Top-level expense_actual must be at 2 dp
-        assert report.expense_actual == report.expense_actual.quantize(cent), (
-            f"expense_actual {report.expense_actual!r} is not quantised to 2 dp"
+        fields = (
+            "expense_actual", "mileage_expense_actual", "other_expense_actual",
+            "profit_before_mileage", "profit_after_mileage", "profit",
         )
-        # Every bucket must also be at 2 dp
+        for field in fields:
+            value = getattr(report, field)
+            assert value == value.quantize(cent), f"{field} {value!r} is not quantised to 2 dp"
         for s in report.series:
-            assert s.expense_actual == s.expense_actual.quantize(cent), (
-                f"series bucket {s.period!r} expense_actual {s.expense_actual!r} "
-                "is not quantised to 2 dp"
-            )
-            assert s.profit == s.profit.quantize(cent), (
-                f"series bucket {s.period!r} profit {s.profit!r} "
-                "is not quantised to 2 dp"
-            )
+            for field in fields:
+                value = getattr(s, field)
+                assert value == value.quantize(cent), (
+                    f"series bucket {s.period!r} {field} {value!r} is not quantised to 2 dp"
+                )
         # The three June buckets each get 333.33
         for year in (2023, 2024, 2025):
             period = f"{year}-06-01"
@@ -568,28 +668,23 @@ class TestComputeProfitLoss:
         )
         cent = Decimal("0.01")
 
-        # Top-level: all three fields must be ≤ 2 dp
-        assert report.revenue_net == report.revenue_net.quantize(cent), (
-            f"revenue_net {report.revenue_net!r} is not quantised to 2 dp"
+        # All amounts remain to-the-cent after service aggregation.
+        money_fields = (
+            "revenue_net", "expense_actual", "mileage_expense_actual",
+            "other_expense_actual", "profit_before_mileage", "profit_after_mileage", "profit",
         )
-        assert report.expense_actual == report.expense_actual.quantize(cent), (
-            f"expense_actual {report.expense_actual!r} is not quantised to 2 dp"
-        )
-        assert report.profit == report.profit.quantize(cent), (
-            f"profit {report.profit!r} is not quantised to 2 dp"
-        )
+        for field in money_fields:
+            value = getattr(report, field)
+            assert value == value.quantize(cent), f"{field} {value!r} is not quantised to 2 dp"
 
-        # Each series bucket: all three fields must be ≤ 2 dp
+        # Each series bucket's amounts remain to-the-cent.
         for s in report.series:
-            assert s.revenue_net == s.revenue_net.quantize(cent), (
-                f"bucket {s.period!r} revenue_net {s.revenue_net!r} not 2 dp"
-            )
-            assert s.expense_actual == s.expense_actual.quantize(cent), (
-                f"bucket {s.period!r} expense_actual {s.expense_actual!r} not 2 dp"
-            )
-            assert s.profit == s.profit.quantize(cent), (
-                f"bucket {s.period!r} profit {s.profit!r} not 2 dp"
-            )
+            for field in money_fields:
+                value = getattr(s, field)
+                assert value == value.quantize(cent), (
+                    f"bucket {s.period!r} {field} {value!r} not 2 dp"
+                )
+            assert s.profit_after_mileage == s.profit
 
         # Jan bucket: revenue=1000.00, expense=333.33, profit=666.67
         jan = next(s for s in report.series if s.period == "2025-01-01")

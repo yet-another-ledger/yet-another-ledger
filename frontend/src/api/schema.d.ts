@@ -9609,8 +9609,28 @@ export interface components {
              */
             expense_actual: string;
             /**
+             * Mileage Expense Actual
+             * @description Total depreciation-adjusted, business%-prorated mileage expense cost (EUR).
+             */
+            mileage_expense_actual: string;
+            /**
+             * Other Expense Actual
+             * @description Total depreciation-adjusted, business%-prorated non-mileage expense cost (EUR).
+             */
+            other_expense_actual: string;
+            /**
+             * Profit Before Mileage
+             * @description Total revenue net minus non-mileage expense cost (EUR).
+             */
+            profit_before_mileage: string;
+            /**
+             * Profit After Mileage
+             * @description Total revenue net minus all expense cost, including mileage (EUR).
+             */
+            profit_after_mileage: string;
+            /**
              * Profit
-             * @description revenue_net − expense_actual across the full range.
+             * @description Compatibility alias for profit_after_mileage across the full range.
              */
             profit: string;
             /**
@@ -9651,8 +9671,28 @@ export interface components {
              */
             expense_actual: string;
             /**
+             * Mileage Expense Actual
+             * @description Depreciation-adjusted, business%-prorated mileage expense cost in this period (EUR).
+             */
+            mileage_expense_actual: string;
+            /**
+             * Other Expense Actual
+             * @description Depreciation-adjusted, business%-prorated non-mileage expense cost in this period (EUR).
+             */
+            other_expense_actual: string;
+            /**
+             * Profit Before Mileage
+             * @description Revenue net minus non-mileage expense cost for this period (EUR).
+             */
+            profit_before_mileage: string;
+            /**
+             * Profit After Mileage
+             * @description Revenue net minus all expense cost, including mileage, for this period (EUR).
+             */
+            profit_after_mileage: string;
+            /**
              * Profit
-             * @description revenue_net − expense_actual for this period.
+             * @description Compatibility alias for profit_after_mileage in this period.
              */
             profit: string;
         };

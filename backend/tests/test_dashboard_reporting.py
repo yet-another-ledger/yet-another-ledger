@@ -77,6 +77,10 @@ def _make_pl_report(
         granularity="month",
         revenue_net=Decimal(revenue_net),
         expense_actual=Decimal(expense_actual),
+        mileage_expense_actual=Decimal("0.00"),
+        other_expense_actual=Decimal(expense_actual),
+        profit_before_mileage=Decimal(profit),
+        profit_after_mileage=Decimal(profit),
         profit=Decimal(profit),
         series=series,
         by_category=None,
@@ -90,6 +94,10 @@ def _make_series_item(
         period=f"{year:04d}-{month:02d}-01",
         revenue_net=Decimal(rev),
         expense_actual=Decimal(exp),
+        mileage_expense_actual=Decimal("0.00"),
+        other_expense_actual=Decimal(exp),
+        profit_before_mileage=Decimal(profit),
+        profit_after_mileage=Decimal(profit),
         profit=Decimal(profit),
     )
 

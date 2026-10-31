@@ -135,7 +135,26 @@ class ProfitLossSeriesItem(BaseModel):
     expense_actual: Decimal = Field(
         description="Depreciation-adjusted, business%-prorated expense cost in this period (EUR)."
     )
-    profit: Decimal = Field(description="revenue_net − expense_actual for this period.")
+    mileage_expense_actual: Decimal = Field(
+        description=(
+            "Depreciation-adjusted, business%-prorated mileage expense cost in this period (EUR)."
+        )
+    )
+    other_expense_actual: Decimal = Field(
+        description=(
+            "Depreciation-adjusted, business%-prorated non-mileage expense cost "
+            "in this period (EUR)."
+        )
+    )
+    profit_before_mileage: Decimal = Field(
+        description="Revenue net minus non-mileage expense cost for this period (EUR)."
+    )
+    profit_after_mileage: Decimal = Field(
+        description="Revenue net minus all expense cost, including mileage, for this period (EUR)."
+    )
+    profit: Decimal = Field(
+        description="Compatibility alias for profit_after_mileage in this period."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +185,23 @@ class ProfitLossReport(BaseModel):
     expense_actual: Decimal = Field(
         description="Total depreciation-adjusted, business%-prorated expense cost (EUR)."
     )
-    profit: Decimal = Field(description="revenue_net − expense_actual across the full range.")
+    mileage_expense_actual: Decimal = Field(
+        description="Total depreciation-adjusted, business%-prorated mileage expense cost (EUR)."
+    )
+    other_expense_actual: Decimal = Field(
+        description=(
+            "Total depreciation-adjusted, business%-prorated non-mileage expense cost (EUR)."
+        )
+    )
+    profit_before_mileage: Decimal = Field(
+        description="Total revenue net minus non-mileage expense cost (EUR)."
+    )
+    profit_after_mileage: Decimal = Field(
+        description="Total revenue net minus all expense cost, including mileage (EUR)."
+    )
+    profit: Decimal = Field(
+        description="Compatibility alias for profit_after_mileage across the full range."
+    )
     series: list[ProfitLossSeriesItem] = Field(
         description="Time-bucketed breakdown by month or quarter."
     )

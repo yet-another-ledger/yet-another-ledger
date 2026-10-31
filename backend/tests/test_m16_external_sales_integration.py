@@ -681,6 +681,10 @@ async def test_external_sale_preview_acknowledged_posting_and_reports_once(
         await db_client.get("/api/v1/reports/profit-loss?from=2026-01-01&to=2026-12-31")
     ).json()
     assert Decimal(after_pl["revenue_net"]) - Decimal(before_pl["revenue_net"]) == net_total
+    assert Decimal(after_pl["mileage_expense_actual"]) == 0
+    assert Decimal(after_pl["other_expense_actual"]) == 0
+    assert Decimal(after_pl["profit_before_mileage"]) == Decimal(after_pl["revenue_net"])
+    assert Decimal(after_pl["profit_after_mileage"]) == Decimal(after_pl["profit"])
     assert after_pl["external_sales"][0]["external_sale_id"] == sale["id"]
     vat = (await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=1")).json()
     assert (
@@ -751,6 +755,12 @@ async def test_external_sale_preview_acknowledged_posting_and_reports_once(
         await db_client.get("/api/v1/reports/profit-loss?from=2026-01-01&to=2026-12-31")
     ).json()
     assert pl_after_energy["revenue_net"] == after_pl["revenue_net"]
+    for field in (
+        "expense_actual", "mileage_expense_actual", "other_expense_actual",
+        "profit_before_mileage", "profit_after_mileage", "profit",
+    ):
+        assert pl_after_energy[field] == after_pl[field]
+    assert pl_after_energy["profit_after_mileage"] == pl_after_energy["profit"]
     vat_after_energy = (
         await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=1")
     ).json()
