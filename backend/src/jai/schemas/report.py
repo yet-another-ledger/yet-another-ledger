@@ -22,6 +22,7 @@ from decimal import Decimal
 from pydantic import BaseModel, Field
 
 from jai.models._enums import InvoiceDocumentKind, VatTreatmentEffect
+from jai.schemas.battery import BatteryAnnualMissingInput
 
 
 class ReportWarningCode(enum.StrEnum):
@@ -200,6 +201,19 @@ class VatBoxVatOnly(BaseModel):
     vat: Decimal = Field(description="VAT / BTW amount (EUR).")
 
 
+class VatBoxPrivateUse(BaseModel):
+    """Private-use box with an unknown-aware taxable base."""
+
+    base: Decimal | None = Field(
+        description="Taxable base; null when a legacy contribution has no reliable base."
+    )
+    vat: Decimal = Field(description="VAT / BTW amount (EUR).")
+    known_battery_base: Decimal = Field(description="Known battery base included in 1d.")
+    known_battery_vat: Decimal = Field(description="Known battery VAT included in 1d.")
+    missing_inputs: list[BatteryAnnualMissingInput] = Field(default_factory=list)
+    is_complete: bool = True
+
+
 class VatBoxBaseOnly(BaseModel):
     """A VAT return box that holds only a taxable base (no VAT column).
 
@@ -223,7 +237,7 @@ class VatReturnBoxes(BaseModel):
     box_1a: VatBoxBaseVat = Field(description="Domestic / EU-B2C hoog-tarief (21%) supplies.")
     box_1b: VatBoxBaseVat = Field(description="Domestic / EU-B2C laag-tarief (9%) supplies.")
     box_1c: VatBoxBaseVat = Field(description="Other rates (e.g. 13% forfait); v1 always 0.")
-    box_1d: VatBoxVatOnly = Field(
+    box_1d: VatBoxPrivateUse = Field(
         description="Privégebruik (private-use correction); only non-zero in Q4 (year-end)."
     )
     box_1e: VatBoxBaseOnly = Field(

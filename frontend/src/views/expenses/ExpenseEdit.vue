@@ -364,6 +364,7 @@ async function handleAiExtract(attachmentId: string) {
             </n-button>
             <h2>{{ isEdit ? t('expenses.edit') : t('expenses.new') }}</h2>
             <div class="header-badges">
+              <n-button v-if="isEdit && expenseId" size="small" @click="router.push(`/battery-assets/new?expense_id=${expenseId}`)">{{ t('battery.registerFromExpense') }}</n-button>
               <n-tag v-if="isDraft" type="warning" size="small">{{ t('expenses.draft') }}</n-tag>
               <n-tag v-if="recurringExpenseId" type="info" size="small">{{ t('expenses.fromRecurring') }}</n-tag>
             </div>

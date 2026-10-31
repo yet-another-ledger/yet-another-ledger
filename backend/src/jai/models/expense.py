@@ -30,6 +30,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -52,6 +53,7 @@ class Expense(Base):
     """Single expense record (purchase / cost entry)."""
 
     __tablename__ = "expense"
+    __table_args__ = (UniqueConstraint("company_id", "id", name="uq_expense_company_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
@@ -196,9 +198,7 @@ class Expense(Base):
     include_in_pl: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
-    pl_cost_basis: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'NET'")
-    )
+    pl_cost_basis: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'NET'"))
 
     # -- Draft flag (D3: recurring expenses generate as draft) ----------------
     is_draft: Mapped[bool] = mapped_column(

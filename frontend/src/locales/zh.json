@@ -225,7 +225,8 @@
     "reports": "报表",
     "openMenu": "打开导航菜单",
     "receiptInbox": "票据收件箱",
-    "externalSales": "外部销售"
+    "externalSales": "外部销售",
+    "batteryAssets": "电池资产"
   },
   "health": {
     "backend": "后端：{status}",
@@ -1620,6 +1621,7 @@
       "boxes": "BTW 申报格子",
       "totals": "汇总",
       "base": "净额（税基）",
+      "baseUnknown": "未知",
       "vat": "BTW（税额）",
       "box1a": "1a – 高税率（21%）",
       "box1b": "1b – 低税率（9%）",
@@ -1637,7 +1639,15 @@
       "netPayable": "总应缴 / 应退（Totaal te betalen / terug te vragen）",
       "q4Note": "1d 仅在 Q4 年末申报时非零（私用回补汇总整年）。",
       "eventSources": "可追溯来源记录",
-      "externalSale": "外部销售"
+      "externalSale": "外部销售",
+      "batterySubtotal": "1d 中已确认电池小计：税基 {base}，VAT {vat}。",
+      "batteryMissing": "电池资产年度 {year}：{code}；打开年度输入",
+      "missingCodes": {
+        "MISSING": "缺少输入",
+        "PERCENTAGE_MISSING": "缺少比例",
+        "UNCONFIRMED": "尚未确认",
+        "RECONFIRMATION_REQUIRED": "需要重新确认"
+      }
     },
     "icp": {
       "title": "ICP 清单（Opgaaf ICP）",
@@ -1848,6 +1858,34 @@
     "vatTotal": "原件 VAT 合计",
     "status": "状态",
     "retryOriginals": "重试加载原销售"
+  },
+  "battery": {
+    "title": "电池资产",
+    "registerTitle": "登记家用电池",
+    "eligibility": "仅可登记符合普通 VAT 制度且购入 VAT 全额初始抵扣的购置。所有者需确认适用性。",
+    "inServiceDate": "投入使用日期",
+    "ownerConfirm": "我确认该家用电池符合普通 VAT 制度且购入 VAT 已全额初始抵扣。",
+    "preview": "预览登记",
+    "register": "登记资产",
+    "purchaseSnapshot": "购入快照：净额 {net}，VAT {vat}，税率 {rate}%",
+    "affectedPeriods": "受影响的历史申报期间：{periods}",
+    "historyAck": "我已核对并确认受影响的历史申报期间。",
+    "assets": "已登记资产",
+    "empty": "尚无已登记电池资产。",
+    "annualTitle": "年度私人使用",
+    "snapshot": "冻结净额基数 {basis}；购入 VAT 税率 {rate}%。",
+    "year": "日历年度",
+    "confirmed": "年度快照已确认",
+    "confirmedCalculation": "已确认的 Q4 快照：税基 {base}，VAT {vat}。",
+    "percentage": "私人使用比例",
+    "basisNote": "计算依据说明",
+    "saveAnnual": "保存年度输入",
+    "calculate": "预览 Q4 计算",
+    "confirm": "确认年度计算",
+    "calculation": "Q4 申报框 1d：基数 {base}，VAT {vat}",
+    "evidence": "EMS / 能源账单证据",
+    "addEvidence": "添加证据",
+    "registerFromExpense": "登记电池"
   },
   "sentCopy": {
     "enabled": "保存副本到已发送",

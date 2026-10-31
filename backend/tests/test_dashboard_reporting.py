@@ -36,6 +36,7 @@ from jai.schemas.report import (
     ProfitLossSeriesItem,
     VatBoxBaseOnly,
     VatBoxBaseVat,
+    VatBoxPrivateUse,
     VatBoxVatOnly,
     VatReturnBoxes,
     VatReturnReport,
@@ -99,11 +100,19 @@ def _make_vat_report(
     zero_base_vat = VatBoxBaseVat(base=_ZERO, vat=_ZERO)
     zero_base = VatBoxBaseOnly(base=_ZERO)
     zero_vat = VatBoxVatOnly(vat=_ZERO)
+    zero_private_use = VatBoxPrivateUse(
+        base=_ZERO,
+        vat=_ZERO,
+        known_battery_base=_ZERO,
+        known_battery_vat=_ZERO,
+        missing_inputs=[],
+        is_complete=True,
+    )
     boxes = VatReturnBoxes(
         box_1a=zero_base_vat,
         box_1b=zero_base_vat,
         box_1c=zero_base_vat,
-        box_1d=zero_vat,
+        box_1d=zero_private_use,
         box_1e=zero_base,
         box_2a=zero_base_vat,
         box_3a=zero_base,

@@ -103,7 +103,7 @@ const boxRows = computed<BoxRow[]>(() => {
     {
       key: '1d',
       label: t('reports.vat.box1d'),
-      base: null,
+      base: b.box_1d.base === null ? t('reports.vat.baseUnknown') : fmtMoney(b.box_1d.base),
       vat: fmtMoney(b.box_1d.vat),
     },
     {
@@ -305,6 +305,17 @@ const periodLabel = computed<string>(() => {
             size="small"
           />
         </n-card>
+
+        <n-alert v-if="store.vatReport.is_last_period_of_year" :type="store.vatReport.boxes.box_1d.is_complete ? 'info' : 'warning'" style="margin-bottom: 16px">
+          <div>{{ t('reports.vat.batterySubtotal', { base: fmtMoney(store.vatReport.boxes.box_1d.known_battery_base), vat: fmtMoney(store.vatReport.boxes.box_1d.known_battery_vat) }) }}</div>
+          <ul v-if="(store.vatReport.boxes.box_1d.missing_inputs ?? []).length">
+            <li v-for="missing in (store.vatReport.boxes.box_1d.missing_inputs ?? [])" :key="`${missing.asset_id}-${missing.year}`">
+              <router-link :to="`/battery-assets/${missing.asset_id}?year=${missing.year}`">
+                {{ t('reports.vat.batteryMissing', { year: missing.year, code: t(`reports.vat.missingCodes.${missing.code}`) }) }}
+              </router-link>
+            </li>
+          </ul>
+        </n-alert>
 
         <n-card :title="t('reports.vat.eventSources')" style="margin-bottom: 16px">
           <ul>

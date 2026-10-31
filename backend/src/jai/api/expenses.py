@@ -43,6 +43,7 @@ from jai.schemas.expense import (
     ExpenseRead,
 )
 from jai.services.expense import (
+    ExpenseConflict,
     calculate_expense_cost_preview,
     calculate_expense_preview,
     create_expense,
@@ -325,6 +326,11 @@ async def update_expense_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except MileageExpenseUpdateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ExpenseConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "detail": str(exc)},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -351,3 +357,8 @@ async def delete_expense_endpoint(
         await delete_expense(session, expense_id, company_id, storage=storage)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ExpenseConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "detail": str(exc)},
+        ) from exc

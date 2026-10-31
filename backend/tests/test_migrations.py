@@ -394,6 +394,120 @@ class TestMigrations:
             f"upgrade head failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
+    def test_0051_production_shaped_upgrade_and_retained_battery_downgrade_guard(self) -> None:
+        """0051 upgrades from the prior head and refuses to discard confirmed records."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_battery_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        (
+            company_id,
+            category_id,
+            treatment_id,
+            rate_id,
+            expense_id,
+            asset_id,
+            annual_id,
+            confirmation_id,
+        ) = (uuid.uuid4() for _ in range(8))
+        params = {
+            "company_id": company_id,
+            "category_id": category_id,
+            "treatment_id": treatment_id,
+            "rate_id": rate_id,
+            "expense_id": expense_id,
+            "asset_id": asset_id,
+            "annual_id": annual_id,
+            "confirmation_id": confirmation_id,
+        }
+        try:
+            prior = _run_alembic("upgrade", "0050", url=isolated_url)
+            assert prior.returncode == 0, prior.stderr
+            upgraded = _run_alembic("upgrade", "head", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                isolated_url,
+                "INSERT INTO company (id,name,base_currency) "
+                "VALUES (:company_id,'M16 battery retained','EUR'); "
+                "INSERT INTO expense_category (id,company_id,name,default_deductible,active) "
+                "VALUES (:category_id,:company_id,'Equipment',true,true); "
+                "INSERT INTO vat_rate (id,company_id,label,percent,active) "
+                "VALUES (:rate_id,:company_id,'21%',21,true); "
+                "INSERT INTO vat_treatment "
+                "(id,company_id,code,label,side,effect,report_box,requires_icp,deductible,active) "
+                "VALUES (:treatment_id,:company_id,'NL_DOMESTIC_PURCH','Domestic purchase',"
+                "'PURCHASE','APPLY_RATE','5b',false,true,true); "
+                "INSERT INTO expense "
+                "(id,company_id,expense_date,category_id,category_name,supplier_name,"
+                "vat_treatment_id,vat_treatment_code,vat_treatment_label,vat_treatment_effect,"
+                "vat_rate_id,vat_rate_percent,vat_rate_label,net_amount,vat_amount,gross_amount,"
+                "deductible,currency,exchange_rate,base_net_amount,base_vat_amount,"
+                "base_gross_amount) "
+                "VALUES (:expense_id,:company_id,DATE '2024-12-20',:category_id,'Equipment',"
+                "'Supplier',:treatment_id,'NL_DOMESTIC_PURCH','Domestic purchase','APPLY_RATE',"
+                ":rate_id,21,'21%',10000,2100,12100,true,'EUR',1,10000,2100,12100); "
+                "INSERT INTO battery_asset "
+                "(id,company_id,acquisition_expense_id,acquisition_expense_date,in_service_date,"
+                "net_basis,purchase_vat,purchase_vat_rate_percent,currency,"
+                "ordinary_vat_full_deduction_confirmed,owner_confirmed_at,"
+                "historical_acknowledged_periods) "
+                "VALUES (:asset_id,:company_id,:expense_id,DATE '2024-12-20',DATE '2025-02-01',"
+                "10000,2100,21,'EUR',true,now(),'[\"2024-Q4\"]'::jsonb); "
+                "INSERT INTO battery_annual_use "
+                "(id,company_id,asset_id,year,private_use_percentage,basis_note,confirmed,"
+                "confirmed_at,calculation_base,calculation_vat,asset_version_used) "
+                "VALUES (:annual_id,:company_id,:asset_id,2025,45,'EMS annual statement',true,"
+                "now(),900,189,1); "
+                "INSERT INTO battery_annual_confirmation "
+                "(id,company_id,annual_use_id,version,private_use_percentage,calculation_base,"
+                "calculation_vat,asset_version_used) "
+                "VALUES (:confirmation_id,:company_id,:annual_id,1,45,900,189,1)",
+                params,
+                company_id=company_id,
+            )
+            assert _query(
+                _runtime_url(isolated_url),
+                "SELECT count(*) AS n FROM battery_asset",
+            ) == [{"n": 0}]
+            rls_flags = _query(
+                isolated_url,
+                "SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname LIKE 'battery_%' AND relkind='r' ORDER BY relname",
+            )
+            assert [
+                (row["relname"], row["relrowsecurity"], row["relforcerowsecurity"])
+                for row in rls_flags
+            ] == [
+                ("battery_annual_confirmation", True, True),
+                ("battery_annual_evidence", True, True),
+                ("battery_annual_use", True, True),
+                ("battery_asset", True, True),
+            ]
+            declined = _run_alembic("downgrade", "0050", url=isolated_url)
+            assert declined.returncode != 0
+            assert "Refusing to discard retained battery asset/annual confirmation data" in (
+                declined.stderr
+            )
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": "0051"}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT calculation_base,calculation_vat FROM battery_annual_use "
+                "WHERE id=:annual_id",
+                {"annual_id": annual_id},
+                company_id=company_id,
+            ) == [
+                {"calculation_base": Decimal("900.000"), "calculation_vat": Decimal("189.000")}
+            ]
+        finally:
+            _drop_database(isolated_url)
+
     def test_0046_backfills_legacy_expense_modes_without_changing_amounts(self) -> None:
         """The 0045→0046 production-shaped upgrade preserves NET/true legacy semantics."""
         isolated_url = URL.create(

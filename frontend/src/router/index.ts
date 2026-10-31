@@ -203,6 +203,24 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true },
       },
       {
+        path: 'battery-assets',
+        name: 'battery-assets',
+        component: () => import('../views/battery/BatteryAssets.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'battery-assets/new',
+        name: 'battery-asset-new',
+        component: () => import('../views/battery/BatteryAssets.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'battery-assets/:id',
+        name: 'battery-asset-detail',
+        component: () => import('../views/battery/BatteryAssets.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
         path: 'expenses/new',
         name: 'expense-new',
         component: () => import('../views/expenses/ExpenseEdit.vue'),

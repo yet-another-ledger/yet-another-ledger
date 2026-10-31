@@ -1,0 +1,549 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
+import { createMemoryHistory, createRouter } from 'vue-router'
+
+const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), postFile: vi.fn() }))
+vi.mock('../../src/api/http', async (importOriginal) => ({ ...await importOriginal<typeof import('../../src/api/http')>(), ...api }))
+vi.mock('naive-ui', () => {
+  const box = { inheritAttrs: false, template: '<div v-bind="$attrs"><slot /></div>' }
+  const button = { inheritAttrs: false, props: ['disabled', 'loading', 'type'], template: '<button v-bind="$attrs" :disabled="disabled"><slot /></button>' }
+  const input = { inheritAttrs: false, props: ['value', 'type', 'placeholder', 'disabled'], emits: ['update:value'], template: '<textarea v-if="type === \'textarea\'" v-bind="$attrs" :disabled="disabled" :value="value" @input="$emit(\'update:value\',$event.target.value)" /><input v-else v-bind="$attrs" :disabled="disabled" :value="value" :placeholder="placeholder" @input="$emit(\'update:value\',$event.target.value)" />' }
+  return {
+    NAlert: box, NButton: button, NCard: box,
+    NCheckbox: { props: ['checked'], emits: ['update:checked'], template: '<label><input type="checkbox" :checked="checked" @change="$emit(\'update:checked\',$event.target.checked)" /><slot /></label>' },
+    NDatePicker: { props: ['formattedValue'], emits: ['update:formattedValue'], template: '<input type="date" :value="formattedValue" @input="$emit(\'update:formattedValue\',$event.target.value)" />' },
+    NFormItem: box, NInput: input,
+    NInputNumber: { name: 'NInputNumber', inheritAttrs: false, props: ['value', 'disabled'], emits: ['update:value'], template: '<input type="number" v-bind="$attrs" :disabled="disabled" :value="value" @input="$emit(\'update:value\',($event.target.value === \'\' ? null : Number($event.target.value)))" />' },
+    NPagination: { name: 'NPagination', props: ['page', 'pageSize', 'itemCount', 'disabled'], emits: ['update:page'], template: '<nav><button :disabled="disabled || page === 1" @click="$emit(\'update:page\',page-1)">Previous page</button><button :disabled="disabled || page*pageSize >= itemCount" @click="$emit(\'update:page\',page+1)">Next page</button></nav>' },
+    NList: box, NListItem: box, NSelect: { props: ['value', 'options'], emits: ['update:value'], template: '<select :value="value" @change="$emit(\'update:value\',Number($event.target.value))"><option v-for="o in options" :key="o.value" :value="o.value">{{ o.label }}</option></select>' },
+    NSpace: box, NTag: box, NText: box, NUpload: { name: 'NUpload', template: '<div><slot /></div>' },
+  }
+})
+
+import en from '../../src/locales/en.json'
+import BatteryAssets from '../../src/views/battery/BatteryAssets.vue'
+
+const i18n = createI18n({ legacy: false, locale: 'en', messages: { en } })
+const asset = {
+  id: 'asset-1', acquisition_expense_id: 'expense-1', acquisition_expense_date: '2024-12-20',
+  in_service_date: '2025-02-01', applicable_years: [2025, 2026, 2027, 2028, 2029],
+  net_basis: '10000.00', purchase_vat: '2100.00', purchase_vat_rate_percent: '21.000', currency: 'EUR',
+  ordinary_vat_full_deduction_confirmed: true, historical_acknowledged_periods: ['2024-Q4'],
+}
+function render(path: string) {
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/battery-assets/:id?', component: BatteryAssets }] })
+  return router.push(path).then(async () => {
+    await router.isReady()
+    const wrapper = mount(BatteryAssets, { global: { plugins: [router, i18n] } })
+    await flushPromises()
+    return { wrapper, router }
+  })
+}
+
+describe('BatteryAssets', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.get.mockImplementation((url: string) => url.startsWith('/api/v1/battery-assets?')
+      ? Promise.resolve({ items: [], total: 0, limit: 100, offset: 0 }) : Promise.resolve(null))
+  })
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+  it('previews, requires historical acknowledgement, then registers and navigates to the first year', async () => {
+    api.post.mockImplementation((url: string) => url.endsWith('/preview')
+      ? Promise.resolve({ eligible: true, conflict_code: null, net_basis: '10000', purchase_vat: '2100', purchase_vat_rate_percent: '21', applicable_years: [2025, 2026, 2027, 2028, 2029], affected_historical_periods: ['2024-Q4'] })
+      : Promise.resolve(asset))
+    const { wrapper, router } = await render('/battery-assets?expense_id=expense-1')
+    const button = (label: string) => wrapper.findAll('button').find(row => row.text() === label)!
+    await button('Preview registration').trigger('click')
+    await flushPromises()
+    expect(button('Register asset').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('2024-Q4')
+    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
+    await button('Preview registration').trigger('click')
+    await flushPromises()
+    const checks = wrapper.findAll('input[type="checkbox"]')
+    ;(checks[1].element as HTMLInputElement).checked = true
+    await checks[1].trigger('change')
+    await flushPromises()
+    expect((button('Register asset').element as HTMLButtonElement).disabled).toBe(false)
+    await button('Register asset').trigger('click')
+    await flushPromises()
+    expect(api.post).toHaveBeenCalledWith('/api/v1/battery-assets', expect.objectContaining({
+      acquisition_expense_id: 'expense-1', owner_confirms_ordinary_vat_full_deduction: true,
+      acknowledge_affected_periods: true,
+    }))
+    expect(router.currentRoute.value.fullPath).toBe('/battery-assets/asset-1?year=2025')
+    wrapper.unmount()
+  })
+
+  it('saves an explicit zero, calculates and confirms server values, then locks confirmed inputs', async () => {
+    api.get.mockImplementation((url: string) => {
+      if (url.startsWith('/api/v1/battery-assets?')) return Promise.resolve({ items: [asset], total: 1, limit: 100, offset: 0 })
+      if (url === '/api/v1/battery-assets/asset-1') return Promise.resolve(asset)
+      if (url.endsWith('/annual-use/2025')) return Promise.resolve(null)
+      return Promise.resolve(null)
+    })
+    api.put.mockResolvedValue({ ...asset, version: 1, private_use_percentage: '0', basis_note: 'No private use', confirmed: false, calculation_base: null, calculation_vat: null, evidence: [] })
+    api.post.mockImplementation((url: string) => url.endsWith('/calculate')
+      ? Promise.resolve({ calculation_base: '0.00', calculation_vat: '0.00', annual_use_id: 'annual-1', year: 2025, version: 1 })
+      : Promise.resolve({ ...asset, version: 2, private_use_percentage: '0', basis_note: 'No private use', confirmed: true, calculation_base: '0.00', calculation_vat: '0.00', evidence: [] }))
+    const { wrapper } = await render('/battery-assets/asset-1?year=2025')
+    await wrapper.find('input[type="number"]').setValue('0')
+    await wrapper.find('textarea').setValue('No private use')
+    const button = (label: string) => wrapper.findAll('button').find(row => row.text() === label)!
+    await button('Save annual input').trigger('click')
+    await flushPromises()
+    expect(api.put).toHaveBeenCalledWith('/api/v1/battery-assets/asset-1/annual-use/2025', {
+      expected_version: null, private_use_percentage: 0, basis_note: 'No private use',
+    })
+    await button('Preview Q4 calculation').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Q4 box 1d: base 0.00, VAT 0.00')
+    await button('Confirm annual calculation').trigger('click')
+    await flushPromises()
+    expect(api.post).toHaveBeenLastCalledWith('/api/v1/battery-assets/asset-1/annual-use/2025/confirm', { expected_version: 1 })
+    expect((wrapper.find('input[type="number"]').element as HTMLInputElement).disabled).toBe(true)
+    expect((button('Save annual input').element as HTMLButtonElement).disabled).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('loads the annual selected by a navigated report link and renders request failures', async () => {
+    api.get.mockImplementation((url: string) => {
+      if (url.startsWith('/api/v1/battery-assets?')) return Promise.resolve({ items: [asset], total: 1, limit: 100, offset: 0 })
+      if (url === '/api/v1/battery-assets/asset-1') return Promise.resolve(asset)
+      if (url.endsWith('/annual-use/2026')) return Promise.reject(new Error('Annual input unavailable'))
+      return Promise.resolve(null)
+    })
+    const { wrapper, router } = await render('/battery-assets')
+    await router.push('/battery-assets/asset-1?year=2026')
+    await flushPromises()
+    expect(api.get).toHaveBeenCalledWith('/api/v1/battery-assets/asset-1/annual-use/2026')
+    expect(wrapper.text()).toContain('Annual input unavailable')
+    wrapper.unmount()
+  })
+})
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+function annualRecord(year = 2025, assetId = 'asset-1', pct: string | null = '45', note = `EMS ${year}`, version = 1) {
+  return { id: `${assetId}-${year}`, asset_id: assetId, year, version,
+    private_use_percentage: pct, basis_note: note, confirmed: false, evidence: [],
+    calculation_base: null, calculation_vat: null, confirmed_at: null, asset_version_used: null }
+}
+function calculationRecord(year = 2025) {
+  return { asset_id: 'asset-1', year, expected_version: 1, private_use_percentage: '45',
+    calculation_base: '900.00', calculation_vat: '189.00', report_quarter: 4 }
+}
+function configureAnnual() {
+  api.get.mockImplementation((url: string) => url.startsWith('/api/v1/battery-assets?')
+    ? Promise.resolve({ items: [asset, { ...asset, id: 'asset-2' }], total: 2, limit: 100, offset: 0 })
+    : !url.includes('/annual-use/') ? Promise.resolve({ ...asset, id: url.split('/').at(-1) })
+    : Promise.resolve(annualRecord(Number(url.split('/').at(-1)), url.split('/')[4])))
+  api.post.mockImplementation((url: string) => url.endsWith('/calculate')
+    ? Promise.resolve(calculationRecord())
+    : Promise.resolve({ ...annualRecord(), confirmed: true }))
+}
+
+describe('Battery annual target and saved snapshot safety', () => {
+  beforeEach(() => { vi.clearAllMocks(); configureAnnual() })
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+  it('discards reversed year responses and prevents writes until the current year loads', async () => {
+    const oldYear = deferred<ReturnType<typeof annualRecord>>()
+    const currentYear = deferred<ReturnType<typeof annualRecord>>()
+    const original = api.get.getMockImplementation()!
+    api.get.mockImplementation((url: string) => url.endsWith('/2026') ? oldYear.promise
+      : url.endsWith('/2027') ? currentYear.promise : original(url))
+    const { wrapper } = await render('/battery-assets/asset-1?year=2025')
+    const button = (text: string) => wrapper.findAll('button').find(row => row.text() === text)!
+    await wrapper.find('select').setValue('2026')
+    expect(wrapper.find('textarea').element.value).toBe('')
+    expect(button('Save annual input').attributes('disabled')).toBeDefined()
+    await button('Save annual input').trigger('click')
+    expect(api.put).not.toHaveBeenCalled()
+    await wrapper.find('select').setValue('2027')
+    currentYear.resolve(annualRecord(2027, 'asset-1', '70'))
+    await flushPromises()
+    oldYear.resolve(annualRecord(2026, 'asset-1', '20'))
+    await flushPromises()
+    expect(wrapper.find('textarea').element.value).toBe('EMS 2027')
+    expect(wrapper.find('input[type="number"]').element.value).toBe('70')
+    api.put.mockResolvedValue(annualRecord(2027, 'asset-1', '70', 'EMS 2027', 2))
+    await button('Save annual input').trigger('click')
+    await flushPromises()
+    expect(api.put).toHaveBeenCalledWith('/api/v1/battery-assets/asset-1/annual-use/2027', {
+      expected_version: 1, private_use_percentage: 70, basis_note: 'EMS 2027',
+    })
+    wrapper.unmount()
+  })
+
+  it('ignores old asset loads and errors after route/query changes', async () => {
+    const old = deferred<ReturnType<typeof annualRecord>>()
+    const original = api.get.getMockImplementation()!
+    api.get.mockImplementation((url: string) => url.endsWith('asset-1/annual-use/2025') ? old.promise : original(url))
+    const { wrapper, router } = await render('/battery-assets/asset-1?year=2025')
+    await router.push('/battery-assets/asset-2?year=2026')
+    await flushPromises()
+    old.reject(new Error('Stale asset error'))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Stale asset error')
+    expect(wrapper.find('textarea').element.value).toBe('EMS 2026')
+    await router.push('/battery-assets/asset-2?year=2027')
+    await flushPromises()
+    expect(wrapper.find('select').element.value).toBe('2027')
+    expect(wrapper.find('textarea').element.value).toBe('EMS 2027')
+    wrapper.unmount()
+  })
+
+  it.each(['percentage', 'basis', 'clear'])('invalidates preview on unsaved %s and requires save then recalculate', async (field) => {
+    const { wrapper } = await render('/battery-assets/asset-1?year=2025')
+    const button = (text: string) => wrapper.findAll('button').find(row => row.text() === text)!
+    await button('Preview Q4 calculation').trigger('click')
+    await flushPromises()
+    expect(button('Confirm annual calculation').attributes('disabled')).toBeUndefined()
+    if (field === 'basis') await wrapper.find('textarea').setValue('Updated basis')
+    else await wrapper.find('input[type="number"]').setValue(field === 'clear' ? '' : '0')
+    expect(wrapper.text()).not.toContain('Q4 box 1d: base 900.00')
+    expect(button('Confirm annual calculation').attributes('disabled')).toBeDefined()
+    expect(button('Preview Q4 calculation').attributes('disabled')).toBeDefined()
+    await button('Confirm annual calculation').trigger('click')
+    expect(api.post.mock.calls.filter(([url]) => url.endsWith('/confirm'))).toHaveLength(0)
+    const pct = field === 'clear' ? null : field === 'percentage' ? '0' : '45'
+    const note = field === 'basis' ? 'Updated basis' : 'EMS 2025'
+    api.put.mockRejectedValueOnce(new Error('Save rejected'))
+    await button('Save annual input').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Save rejected')
+    expect(button('Confirm annual calculation').attributes('disabled')).toBeDefined()
+    api.put.mockResolvedValue(annualRecord(2025, 'asset-1', pct, note, 2))
+    await button('Save annual input').trigger('click')
+    await flushPromises()
+    expect(api.put).toHaveBeenLastCalledWith('/api/v1/battery-assets/asset-1/annual-use/2025', {
+      expected_version: 1, private_use_percentage: pct === null ? null : Number(pct), basis_note: note,
+    })
+    expect(button('Confirm annual calculation').attributes('disabled')).toBeDefined()
+    if (field === 'clear') {
+      expect(button('Preview Q4 calculation').attributes('disabled')).toBeDefined()
+    } else {
+      await button('Preview Q4 calculation').trigger('click')
+      await flushPromises()
+      expect(api.post).toHaveBeenLastCalledWith('/api/v1/battery-assets/asset-1/annual-use/2025/calculate', { expected_version: 2 })
+      await button('Confirm annual calculation').trigger('click')
+      await flushPromises()
+      expect(api.post).toHaveBeenLastCalledWith('/api/v1/battery-assets/asset-1/annual-use/2025/confirm', { expected_version: 2 })
+    }
+    wrapper.unmount()
+  })
+
+  it.each(['save', 'calculate', 'confirm', 'upload'].flatMap(operation => [
+    { operation, fails: false }, { operation, fails: true },
+  ]))('does not apply late $operation (fails=$fails) to another target or clear its busy state', async ({ operation, fails }) => {
+    const old = deferred<unknown>()
+    const currentSave = deferred<ReturnType<typeof annualRecord>>()
+    const { wrapper, router } = await render('/battery-assets/asset-1?year=2025')
+    const button = (text: string) => wrapper.findAll('button').find(row => row.text() === text)!
+    if (operation === 'confirm') {
+      await button('Preview Q4 calculation').trigger('click')
+      await flushPromises()
+    }
+    if (operation === 'save') api.put.mockReturnValueOnce(old.promise)
+    else if (operation === 'upload') api.postFile.mockReturnValueOnce(old.promise)
+    else api.post.mockReturnValueOnce(old.promise)
+    if (operation === 'upload') {
+      // NUpload's actual custom-request callback is forwarded through the stub.
+      const uploadNode = wrapper.findAllComponents({ name: 'NUpload' })[0]
+      const request = uploadNode?.vm.$attrs['custom-request'] as ((options: any) => Promise<void>)
+      void request({ file: { file: new File(['%PDF-test'], 'ems.pdf', { type: 'application/pdf' }) } })
+    } else {
+      await button(operation === 'save' ? 'Save annual input' : operation === 'calculate' ? 'Preview Q4 calculation' : 'Confirm annual calculation').trigger('click')
+    }
+    await router.push('/battery-assets/asset-2?year=2026')
+    await flushPromises()
+    api.put.mockReturnValueOnce(currentSave.promise)
+    await button('Save annual input').trigger('click')
+    if (fails) old.reject(new Error('Stale command failed'))
+    else old.resolve(operation === 'calculate' ? calculationRecord() : { ...annualRecord(), confirmed: true })
+    await flushPromises()
+    expect(wrapper.find('textarea').element.value).toBe('EMS 2026')
+    expect(wrapper.text()).not.toContain('Stale command failed')
+    expect(wrapper.find('input[type="number"]').attributes('disabled')).toBeDefined()
+    expect(button('Confirm annual calculation').attributes('disabled')).toBeDefined()
+    currentSave.resolve(annualRecord(2026, 'asset-2', '45', 'EMS 2026', 2))
+    await flushPromises()
+    expect(button('Save annual input').attributes('disabled')).toBeUndefined()
+    expect(api.get.mock.calls.filter(([url]) => url.endsWith('asset-1/annual-use/2025'))).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('discards registration preview and completion after leaving that acquisition target', async () => {
+    const preview = deferred<unknown>()
+    api.post.mockReturnValueOnce(preview.promise)
+    const { wrapper, router } = await render('/battery-assets?expense_id=expense-1')
+    const button = (text: string) => wrapper.findAll('button').find(row => row.text() === text)!
+    await button('Preview registration').trigger('click')
+    await router.push('/battery-assets?expense_id=expense-2')
+    preview.resolve({ eligible: true, affected_historical_periods: [] })
+    await flushPromises()
+    expect(button('Register asset').attributes('disabled')).toBeDefined()
+    api.post.mockResolvedValueOnce({ eligible: true, affected_historical_periods: [] })
+    await button('Preview registration').trigger('click')
+    await flushPromises()
+    const register = deferred<unknown>()
+    api.post.mockReturnValueOnce(register.promise)
+    await button('Register asset').trigger('click')
+    await router.push('/battery-assets/asset-2?year=2026')
+    await flushPromises()
+    register.resolve(asset)
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/battery-assets/asset-2?year=2026')
+    wrapper.unmount()
+  })
+
+  it('discards a stale asset-list response and leaves failed current loads unwritable', async () => {
+    const list = deferred<unknown>()
+    api.get.mockReturnValueOnce(list.promise)
+    const { wrapper, router } = await render('/battery-assets/asset-1?year=2025')
+    await router.push('/battery-assets/asset-2?year=2026')
+    await flushPromises()
+    list.resolve({ items: [asset] })
+    await flushPromises()
+    expect(wrapper.find('textarea').element.value).toBe('EMS 2026')
+    api.get.mockRejectedValueOnce(new Error('Current load failed'))
+    await wrapper.find('select').setValue('2027')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Current load failed')
+    const save = wrapper.findAll('button').find(row => row.text() === 'Save annual input')!
+    expect(save.attributes('disabled')).toBeDefined()
+    await save.trigger('click')
+    expect(api.put).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps newer edits dirty when a save response arrives and discards a calculation after any edit', async () => {
+    const save = deferred<ReturnType<typeof annualRecord>>()
+    const calc = deferred<ReturnType<typeof calculationRecord>>()
+    const { wrapper } = await render('/battery-assets/asset-1?year=2025')
+    const button = (text: string) => wrapper.findAll('button').find(row => row.text() === text)!
+    api.put.mockReturnValueOnce(save.promise)
+    await button('Save annual input').trigger('click')
+    // Emit directly to model a queued input event while normal controls are busy.
+    const numberInput = wrapper.findAllComponents({ name: 'NInputNumber' })[0]!
+    numberInput.vm.$emit('update:value', 0)
+    save.resolve(annualRecord(2025, 'asset-1', '45', 'EMS 2025', 2))
+    await flushPromises()
+    expect(wrapper.find('input[type="number"]').element.value).toBe('0')
+    expect(button('Preview Q4 calculation').attributes('disabled')).toBeDefined()
+    api.put.mockResolvedValueOnce(annualRecord(2025, 'asset-1', '0', 'EMS 2025', 3))
+    await button('Save annual input').trigger('click')
+    await flushPromises()
+    api.post.mockReturnValueOnce(calc.promise)
+    await button('Preview Q4 calculation').trigger('click')
+    numberInput.vm.$emit('update:value', 10)
+    numberInput.vm.$emit('update:value', 0)
+    calc.resolve(calculationRecord())
+    await flushPromises()
+    expect(button('Confirm annual calculation').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+})
+
+// UUIDs and complete detail fields mirror the paginated API contract.
+const pagedAssets = Array.from({ length: 201 }, (_, index) => ({
+  ...asset, id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+  acquisition_expense_id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+  version: 1, rule_version: 1, owner_confirmed_at: '2025-01-01T00:00:00Z', registered_by: null,
+  historical_acknowledged_at: '2025-01-01T00:00:00Z', created_at: '2025-01-01T00:00:00Z',
+}))
+function configurePages() {
+  api.get.mockImplementation((url: string) => {
+    if (url.includes('?limit=')) {
+      const offset = Number(new URL(url, 'http://localhost').searchParams.get('offset'))
+      return Promise.resolve({ items: pagedAssets.slice(offset, offset + 100), total: pagedAssets.length, limit: 100, offset })
+    }
+    const id = url.split('/')[4]
+    if (!url.includes('/annual-use/')) return Promise.resolve(pagedAssets.find(row => row.id === id))
+    return Promise.resolve(annualRecord(Number(url.split('/').at(-1)), id))
+  })
+}
+
+describe('Battery collection pages and independent route detail', () => {
+  beforeEach(() => { vi.clearAllMocks(); configurePages() })
+
+  it('loads an off-page report target independently of a delayed first page and saves its missing annual input', async () => {
+    const list = deferred<unknown>()
+    const original = api.get.getMockImplementation()!
+    api.get.mockImplementation((url: string) => url.includes('?limit=') ? list.promise
+      : url.includes('/annual-use/') ? Promise.resolve(null) : original(url))
+    const target = pagedAssets[100]!
+    const { wrapper } = await render(`/battery-assets/${target.id}?year=2026`)
+    expect(api.get).toHaveBeenCalledWith(`/api/v1/battery-assets/${target.id}`)
+    expect(api.get).toHaveBeenCalledWith(`/api/v1/battery-assets/${target.id}/annual-use/2026`)
+    await wrapper.find('input[type="number"]').setValue('0')
+    await wrapper.find('textarea').setValue('Off-page EMS basis')
+    api.put.mockResolvedValue(annualRecord(2026, target.id, '0', 'Off-page EMS basis'))
+    await wrapper.findAll('button').find(row => row.text() === 'Save annual input')!.trigger('click')
+    await flushPromises()
+    expect(api.put).toHaveBeenCalledWith(`/api/v1/battery-assets/${target.id}/annual-use/2026`, {
+      expected_version: null, private_use_percentage: 0, basis_note: 'Off-page EMS basis',
+    })
+    list.resolve({ items: pagedAssets.slice(0, 100), total: 201, limit: 100, offset: 0 })
+    await flushPromises()
+    expect(wrapper.find('textarea').element.value).toBe('Off-page EMS basis')
+    wrapper.unmount()
+  })
+
+  it('pages through all assets and opens the last item without losing dirty inputs while paging', async () => {
+    const { wrapper, router } = await render(`/battery-assets/${pagedAssets[0]!.id}?year=2025`)
+    await wrapper.find('textarea').setValue('Unsaved current basis')
+    const next = () => wrapper.findAll('button').find(row => row.text() === 'Next page')!
+    await next().trigger('click')
+    await flushPromises()
+    expect(api.get).toHaveBeenCalledWith('/api/v1/battery-assets?limit=100&offset=100')
+    expect(wrapper.find('textarea').element.value).toBe('Unsaved current basis')
+    expect(wrapper.findAll('button').find(row => row.text() === 'Preview Q4 calculation')!.attributes('disabled')).toBeDefined()
+    await next().trigger('click')
+    await flushPromises()
+    expect(api.get).toHaveBeenCalledWith('/api/v1/battery-assets?limit=100&offset=200')
+    expect(next().attributes('disabled')).toBeDefined()
+    // The list item invokes the real route navigation handler.
+    await wrapper.find('.battery-layout').findAll('[clickable] > div')[0]!.trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.params.id).toBe(pagedAssets[200]!.id)
+    expect(wrapper.find('textarea').element.value).toBe('EMS 2025')
+    wrapper.unmount()
+  })
+
+  it('keeps a failed list page separate from editable detail and retries the same offset', async () => {
+    const original = api.get.getMockImplementation()!
+    let fail = true
+    api.get.mockImplementation((url: string) => url.endsWith('offset=100') && fail
+      ? Promise.reject(new Error('Page unavailable')) : original(url))
+    const { wrapper } = await render(`/battery-assets/${pagedAssets[100]!.id}?year=2026`)
+    await wrapper.find('textarea').setValue('Unsaved basis')
+    await wrapper.findAll('button').find(row => row.text() === 'Next page')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Page unavailable')
+    expect(wrapper.find('textarea').element.value).toBe('Unsaved basis')
+    expect(wrapper.findAll('button').find(row => row.text() === 'Save annual input')!.attributes('disabled')).toBeUndefined()
+    fail = false
+    await wrapper.findAll('button').find(row => row.text() === 'Retry')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Page unavailable')
+    expect(api.get.mock.calls.filter(([url]) => url.endsWith('offset=100'))).toHaveLength(2)
+    expect(wrapper.find('textarea').element.value).toBe('Unsaved basis')
+    wrapper.unmount()
+  })
+
+  it.each([false, true])('ignores superseded page completion (fails=%s) across route and page changes', async (fails) => {
+    const oldPage = deferred<unknown>()
+    const currentPage = deferred<unknown>()
+    const original = api.get.getMockImplementation()!
+    api.get.mockImplementation((url: string) => url.endsWith('offset=100') ? oldPage.promise
+      : url.endsWith('offset=200') ? currentPage.promise : original(url))
+    const { wrapper, router } = await render(`/battery-assets/${pagedAssets[0]!.id}?year=2025`)
+    const pagination = wrapper.findComponent({ name: 'NPagination' })
+    pagination.vm.$emit('update:page', 2)
+    await flushPromises()
+    await router.push(`/battery-assets/${pagedAssets[100]!.id}?year=2026`)
+    await flushPromises()
+    // A queued page event must get a distinct request generation.
+    pagination.vm.$emit('update:page', 3)
+    await flushPromises()
+    if (fails) oldPage.reject(new Error('Stale page failed'))
+    else oldPage.resolve({ items: pagedAssets.slice(100, 200), total: 201, limit: 100, offset: 100 })
+    await flushPromises()
+    expect(pagination.props('disabled')).toBe(true)
+    expect(wrapper.text()).not.toContain('Stale page failed')
+    expect(wrapper.find('textarea').element.value).toBe('EMS 2026')
+    currentPage.resolve({ items: pagedAssets.slice(200), total: 201, limit: 100, offset: 200 })
+    await flushPromises()
+    expect(pagination.props('disabled')).toBe(false)
+    expect(wrapper.findAll('[clickable] > div')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it.each([false, true])('ignores an off-page detail completion (fails=%s) after a new route wins', async (fails) => {
+    const old = deferred<unknown>()
+    const original = api.get.getMockImplementation()!
+    api.get.mockImplementation((url: string) => url === `/api/v1/battery-assets/${pagedAssets[100]!.id}` ? old.promise : original(url))
+    const { wrapper, router } = await render(`/battery-assets/${pagedAssets[100]!.id}?year=2025`)
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    await router.push(`/battery-assets/${pagedAssets[200]!.id}?year=2027`)
+    await flushPromises()
+    if (fails) old.reject(new Error('Stale detail failed'))
+    else old.resolve(pagedAssets[100])
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Stale detail failed')
+    expect(wrapper.find('textarea').element.value).toBe('EMS 2027')
+    expect(api.get).not.toHaveBeenCalledWith(`/api/v1/battery-assets/${pagedAssets[100]!.id}/annual-use/2025`)
+    wrapper.unmount()
+  })
+
+  it('loads the latest query year after delayed detail even when the first list request fails', async () => {
+    const detail = deferred<unknown>()
+    const original = api.get.getMockImplementation()!
+    const target = pagedAssets[100]!
+    api.get.mockImplementation((url: string) => url.includes('?limit=')
+      ? Promise.reject(new Error('First page unavailable'))
+      : url === `/api/v1/battery-assets/${target.id}` ? detail.promise : original(url))
+    const { wrapper, router } = await render(`/battery-assets/${target.id}?year=2025`)
+    expect(wrapper.text()).toContain('First page unavailable')
+    await router.push(`/battery-assets/${target.id}?year=2028`)
+    detail.resolve(target)
+    await flushPromises()
+    expect(wrapper.find('select').element.value).toBe('2028')
+    expect(wrapper.find('textarea').element.value).toBe('EMS 2028')
+    expect(api.get).not.toHaveBeenCalledWith(`/api/v1/battery-assets/${target.id}/annual-use/2025`)
+    wrapper.unmount()
+  })
+
+  it('shows a current detail failure and never substitutes a listed asset or writes an annual record', async () => {
+    const original = api.get.getMockImplementation()!
+    api.get.mockImplementation((url: string) => url === `/api/v1/battery-assets/${pagedAssets[0]!.id}`
+      ? Promise.reject(new Error('Detail unavailable')) : original(url))
+    const { wrapper } = await render(`/battery-assets/${pagedAssets[0]!.id}?year=2025`)
+    expect(wrapper.text()).toContain('Detail unavailable')
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(api.get.mock.calls.some(([url]) => url.includes('/annual-use/'))).toBe(false)
+    expect(api.put).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})
+
+describe('Battery registration local calendar date', () => {
+  beforeEach(() => { vi.clearAllMocks(); configurePages() })
+  afterEach(() => vi.useRealTimers())
+
+  it.each([
+    { local: [2027, 0, 1, 0, 30], expected: '2027-01-01' },
+    { local: [2027, 6, 15, 0, 30], expected: '2027-07-15' },
+  ])('defaults to $expected at local 00:30 and preserves a selected historical date and acknowledgement', async ({ local, expected }) => {
+    // Run with TZ=Europe/Amsterdam to cover UTC's preceding day, including New Year.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(local[0]!, local[1]!, local[2]!, local[3]!, local[4]!))
+    expect(new Date().getFullYear()).toBe(2027)
+    if (process.env.TZ === 'Europe/Amsterdam') expect(new Date().toISOString().slice(0, 10)).not.toBe(expected)
+    const { wrapper } = await render('/battery-assets?expense_id=expense-1')
+    const date = wrapper.find('input[type="date"]')
+    expect(date.element.value).toBe(expected)
+    api.post.mockResolvedValue({ eligible: true, affected_historical_periods: ['2024-Q4'] })
+    const preview = () => wrapper.findAll('button').find(row => row.text() === 'Preview registration')!
+    await preview().trigger('click')
+    await flushPromises()
+    expect(api.post).toHaveBeenLastCalledWith('/api/v1/battery-assets/preview', expect.objectContaining({ in_service_date: expected }))
+    await date.setValue('2024-03-31')
+    expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(1)
+    await preview().trigger('click')
+    await flushPromises()
+    await wrapper.findAll('input[type="checkbox"]')[1]!.setValue(true)
+    expect(date.element.value).toBe('2024-03-31')
+    expect(api.post).toHaveBeenLastCalledWith('/api/v1/battery-assets/preview', expect.objectContaining({ in_service_date: '2024-03-31' }))
+    expect(wrapper.findAll('input[type="checkbox"]')[1]!.element.checked).toBe(true)
+    wrapper.unmount()
+  })
+})

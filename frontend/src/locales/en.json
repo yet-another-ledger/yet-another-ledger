@@ -225,7 +225,8 @@
     "reports": "Reports",
     "openMenu": "Open navigation menu",
     "receiptInbox": "Receipt Inbox",
-    "externalSales": "External Sales"
+    "externalSales": "External Sales",
+    "batteryAssets": "Battery assets"
   },
   "health": {
     "backend": "backend: {status}",
@@ -1620,6 +1621,7 @@
       "boxes": "BTW Return Boxes",
       "totals": "Totals",
       "base": "Net (base)",
+      "baseUnknown": "Unknown",
       "vat": "BTW (tax)",
       "box1a": "1a – Hoog tarief (21%)",
       "box1b": "1b – Laag tarief (9%)",
@@ -1637,7 +1639,15 @@
       "netPayable": "Totaal te betalen / terug te vragen",
       "q4Note": "1d is non-zero only in Q4 (year-end private-use correction).",
       "eventSources": "Auditable source records",
-      "externalSale": "External sale"
+      "externalSale": "External sale",
+      "batterySubtotal": "Confirmed battery subtotal included in 1d: base {base}, VAT {vat}.",
+      "batteryMissing": "Battery asset year {year}: {code}; open annual input",
+      "missingCodes": {
+        "MISSING": "input missing",
+        "PERCENTAGE_MISSING": "percentage missing",
+        "UNCONFIRMED": "not confirmed",
+        "RECONFIRMATION_REQUIRED": "reconfirmation required"
+      }
     },
     "icp": {
       "title": "ICP Report (Opgaaf ICP)",
@@ -1848,6 +1858,34 @@
     "vatTotal": "Original VAT total",
     "status": "Status",
     "retryOriginals": "Retry originals"
+  },
+  "battery": {
+    "title": "Battery assets",
+    "registerTitle": "Register a home battery",
+    "eligibility": "Only an eligible ordinary VAT purchase with full initial VAT deduction can be registered. Confirm applicability as the owner.",
+    "inServiceDate": "In-service date",
+    "ownerConfirm": "I confirm this is an eligible ordinary VAT home battery with full initial purchase VAT deduction.",
+    "preview": "Preview registration",
+    "register": "Register asset",
+    "purchaseSnapshot": "Purchase snapshot: net {net}, VAT {vat}, rate {rate}%",
+    "affectedPeriods": "Historical report periods affected: {periods}",
+    "historyAck": "I reviewed and acknowledge the affected historical report periods.",
+    "assets": "Registered assets",
+    "empty": "No battery assets registered.",
+    "annualTitle": "Annual private use",
+    "snapshot": "Frozen net basis {basis}; purchase VAT rate {rate}%.",
+    "year": "Calendar year",
+    "confirmed": "Confirmed snapshot",
+    "confirmedCalculation": "Confirmed Q4 snapshot: base {base}, VAT {vat}.",
+    "percentage": "Private-use percentage",
+    "basisNote": "Calculation basis note",
+    "saveAnnual": "Save annual input",
+    "calculate": "Preview Q4 calculation",
+    "confirm": "Confirm annual calculation",
+    "calculation": "Q4 box 1d: base {base}, VAT {vat}",
+    "evidence": "EMS / energy-bill evidence",
+    "addEvidence": "Add evidence",
+    "registerFromExpense": "Register battery"
   },
   "sentCopy": {
     "enabled": "Save copies to Sent",
