@@ -79,6 +79,15 @@ class ExternalSale(Base):
     original_net_total: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     original_vat_total: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     mismatch_ack_reason: Mapped[str | None] = mapped_column(Text)
+    ai_suggestion: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    ai_state: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'NOT_RUN'"))
+    ai_error_code: Mapped[str | None] = mapped_column(Text)
+    file_revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    extraction_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    ai_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ai_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     creator_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL")
     )

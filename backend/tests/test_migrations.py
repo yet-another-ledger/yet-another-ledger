@@ -880,7 +880,7 @@ class TestMigrations:
                 in refused.stderr
             )
             assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
-                {"version_num": "0049"}
+                {"version_num": _script_head()}
             ]
             assert _query(
                 isolated_url,

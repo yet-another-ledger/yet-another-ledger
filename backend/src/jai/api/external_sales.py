@@ -41,6 +41,7 @@ from jai.services.external_sales import (
     create_sale,
     create_source,
     discard_sale,
+    extract_sale,
     get_sale,
     list_revisions,
     list_sales,
@@ -235,6 +236,22 @@ async def post_external_sale_files(
             get_settings().max_receipt_bytes,
             get_storage(),
         )
+    except (LookupError, ServiceConflict, ReceiptValidationError) as exc:
+        _raise_service_error(exc)
+
+
+@router.post(
+    "/external-sales/{sale_id}/extract",
+    response_model=ExternalSalesRead,
+    responses={409: {"model": ExternalSalesConflict}},
+)
+async def post_external_sale_extract(
+    sale_id: uuid.UUID,
+    user: User = Depends(_owner),
+    session: AsyncSession = Depends(get_session),
+) -> ExternalSalesRead:
+    try:
+        return await extract_sale(session, _company_id(user), sale_id, get_storage())
     except (LookupError, ServiceConflict, ReceiptValidationError) as exc:
         _raise_service_error(exc)
 

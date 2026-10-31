@@ -67,8 +67,13 @@ const voidReason = ref('')
 const loading = ref(false)
 let refreshGeneration = 0
 let draftRevision = 0
+let extractionGeneration = 0
+const extractionBusy = ref(false)
+const fileMutationBusy = ref(false)
 const error = ref('')
 const pickedFiles = ref<File[]>([])
+const manuallyEdited = new Set<string>()
+const taxSummariesManuallyEdited = ref(false)
 const sourceModal = ref(false)
 const editingSource = ref<string | null>(null)
 const sourceDraft = reactive<SourceDraft>({ name: '', kind: 'OTHER', default_include_in_pl: null, active: true })
@@ -115,7 +120,13 @@ function errorMessage(error: unknown): string {
 }
 
 function blankTax(): TaxDraft { return { treatment_id: null, rate_id: null, net_amount: null, vat_amount: null } }
+function invalidateExtraction() {
+  extractionGeneration++
+  extractionBusy.value = false
+}
 function resetDraft() {
+  invalidateExtraction()
+  fileMutationBusy.value = false
   Object.assign(draft, { source_id: null, original_number: null, document_kind: 'SALE', related_external_sale_id: null, historical_original_number: null, historical_original_explanation: null, document_date: null, covered_from: null, covered_to: null, counterparty: null, description: null, include_in_pl: null, tax_summaries: [blankTax()] })
   originalsGeneration++
   originalCandidates.value = []
@@ -130,6 +141,8 @@ function resetDraft() {
   acknowledgeMismatch.value = false
   mismatchReason.value = ''
   pickedFiles.value = []
+  manuallyEdited.clear()
+  taxSummariesManuallyEdited.value = false
   revisionMode.value = false
   revisionReason.value = ''
   revisionPreview.value = null
@@ -139,6 +152,9 @@ function resetDraft() {
   voidReason.value = ''
 }
 function loadDraft(sale: Sale) {
+  invalidateExtraction()
+  manuallyEdited.clear()
+  taxSummariesManuallyEdited.value = false
   Object.assign(draft, { source_id: sale.source_id, original_number: sale.original_number, document_kind: sale.document_kind, related_external_sale_id: sale.related_external_sale_id, historical_original_number: sale.historical_original_number, historical_original_explanation: sale.historical_original_explanation, document_date: sale.document_date, covered_from: sale.covered_from, covered_to: sale.covered_to, counterparty: sale.counterparty, description: sale.description, include_in_pl: sale.include_in_pl, tax_summaries: sale.tax_summaries.length ? sale.tax_summaries.map(({ id, treatment_id, rate_id, net_amount, vat_amount }) => ({ tax_summary_id: id, treatment_id, rate_id, net_amount: net_amount == null ? null : String(net_amount), vat_amount: vat_amount == null ? null : String(vat_amount) })) : [blankTax()] })
   current.value = sale
   savedDraftSnapshot.value = JSON.stringify(payload())
@@ -147,10 +163,53 @@ function loadDraft(sale: Sale) {
   mismatchReason.value = ''
 }
 function updateFiles(sale: Sale, generation: number) {
-  if (generation === refreshGeneration && editorReady.value && current.value?.id === sale.id) {
+  if (generation === refreshGeneration && editorReady.value && current.value?.id === sale.id
+    && current.value.status === sale.status && sale.version >= current.value.version) {
     current.value.files = sale.files
     current.value.version = sale.version
   }
+}
+function markEdited(field: string) { manuallyEdited.add(field) }
+// Compare dictionary percentages as decimal text; never calculate money in the SPA.
+function rateKey(value: string | number | null | undefined): string | null {
+  const match = /^(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(String(value))
+  if (!match) return null
+  const fraction = match[2] ?? ''
+  const digits = match[1] + fraction
+  if (/^0+$/.test(digits)) return '0.'
+  const point = match[1]!.length + Number(match[3] ?? 0)
+  if (!Number.isSafeInteger(point) || Math.abs(point) > 100) return null
+  const whole = point <= 0 ? '0' : digits.slice(0, point).padEnd(point, '0')
+  const tail = point <= 0 ? '0'.repeat(-point) + digits : digits.slice(point)
+  return `${whole.replace(/^0+(?=\d)/, '')}.${tail.replace(/0+$/, '')}`
+}
+function saleWithSuggestion(sale: Sale, expectedVersion: number) {
+  if (!editorReady.value || current.value?.id !== sale.id || current.value.status !== 'PENDING'
+    || sale.status !== 'PENDING' || current.value.version !== expectedVersion || sale.version !== expectedVersion) return
+  current.value = sale
+  if (sale.ai_state !== 'READY' || !sale.ai_suggestion) return
+  const suggestion = sale.ai_suggestion
+  if (!manuallyEdited.has('document_date') && !draft.document_date && suggestion.document_date) draft.document_date = suggestion.document_date
+  if (!manuallyEdited.has('original_number') && !draft.original_number && suggestion.original_number) draft.original_number = suggestion.original_number
+  if (!manuallyEdited.has('counterparty') && !draft.counterparty && suggestion.counterparty) draft.counterparty = suggestion.counterparty
+  if (!manuallyEdited.has('description') && !draft.description && suggestion.description) draft.description = suggestion.description
+  const hasTaxInput = draft.tax_summaries.some((row) => row.treatment_id || row.rate_id || row.net_amount || row.vat_amount)
+  const observedRows = suggestion.tax_summaries ?? []
+  if (!taxSummariesManuallyEdited.value && !hasTaxInput && observedRows.length) {
+    draft.tax_summaries = observedRows.map((observed) => {
+      const observedRate = rateKey(observed.rate_percent)
+      const rate = rates.value.find((candidate) => candidate.active && observedRate !== null && rateKey(candidate.percent) === observedRate)
+      return { treatment_id: null, rate_id: rate?.id ?? null, net_amount: observed.net_amount === null ? null : String(observed.net_amount), vat_amount: observed.vat_amount === null ? null : String(observed.vat_amount) }
+    })
+  }
+}
+function aiStateText(sale: Sale) {
+  if (sale.ai_state === 'READY') return t('externalSales.aiReady')
+  if (sale.ai_state === 'RUNNING') return t('externalSales.aiRunning')
+  if (sale.ai_error_code === 'AI_DISABLED') return t('externalSales.aiDisabled')
+  if (sale.ai_error_code === 'AI_NOT_CONFIGURED') return t('externalSales.aiNotConfigured')
+  if (sale.ai_state === 'FAILED') return t('externalSales.aiFailed')
+  return ''
 }
 async function allSources(): Promise<Source[]> {
   const rows: Source[] = []
@@ -251,7 +310,10 @@ async function refresh() {
   } catch (e) {
     if (generation === refreshGeneration) error.value = e instanceof Error ? e.message : t('externalSales.error')
   } finally {
-    if (generation === refreshGeneration) loading.value = false
+    if (generation === refreshGeneration) {
+      loading.value = false
+      if (current.value) saleWithSuggestion(current.value, current.value.version)
+    }
   }
 }
 watch(() => [route.name, route.params.id], () => { void refresh() }, { flush: 'sync' })
@@ -338,19 +400,45 @@ async function saveDraft() {
   }
 }
 async function uploadFiles() {
-  if (!editorReady.value || !pickedFiles.value.length || !current.value) return
+  if (!editorReady.value || fileMutationBusy.value || !pickedFiles.value.length || !current.value) return
   const generation = refreshGeneration
   const id = current.value.id
+  invalidateExtraction()
+  // File responses include automatic extraction. Wait for their new version
+  // before allowing retry, so a newer run cannot race an older file response.
+  fileMutationBusy.value = true
+  const expectedVersion = current.value.version + 1
   const form = new FormData()
   pickedFiles.value.forEach((file) => form.append('files', file))
   try {
     const response = await fetch(`/api/v1/external-sales/${id}/files`, { method: 'POST', credentials: 'include', body: form })
     if (!response.ok) throw new Error(await response.text())
-    updateFiles(await response.json() as Sale, generation)
+    const sale = await response.json() as Sale
+    updateFiles(sale, generation)
+    if (generation === refreshGeneration) saleWithSuggestion(sale, expectedVersion)
     calculation.value = null
     if (generation === refreshGeneration) pickedFiles.value = []
   } catch (e) {
     if (generation === refreshGeneration) message.error(e instanceof Error ? e.message : t('externalSales.error'))
+  } finally {
+    if (generation === refreshGeneration) fileMutationBusy.value = false
+  }
+}
+async function retryExtraction() {
+  if (!editorReady.value || isPosted.value || fileMutationBusy.value || extractionBusy.value || !current.value || !current.value.files.length) return
+  const extraction = ++extractionGeneration
+  extractionBusy.value = true
+  const generation = refreshGeneration
+  const id = current.value.id
+  const expectedVersion = current.value.version
+  try {
+    const sale = await post<Sale>(`/api/v1/external-sales/${id}/extract`, {})
+    if (generation !== refreshGeneration || extraction !== extractionGeneration || current.value?.id !== id) return
+    saleWithSuggestion(sale, expectedVersion)
+  } catch (e) {
+    if (generation === refreshGeneration && extraction === extractionGeneration) message.error(errorMessage(e))
+  } finally {
+    if (extraction === extractionGeneration) extractionBusy.value = false
   }
 }
 async function downloadFile(file: Original) {
@@ -372,12 +460,22 @@ async function downloadFile(file: Original) {
   }
 }
 async function removeFile(file: Original) {
-  if (!editorReady.value || isPosted.value || !current.value) return
+  if (!editorReady.value || isPosted.value || fileMutationBusy.value || !current.value) return
   const generation = refreshGeneration
   const id = current.value.id
-  try { updateFiles(await del<Sale>(`/api/v1/external-sales/${id}/files/${file.id}`), generation); calculation.value = null }
+  invalidateExtraction()
+  fileMutationBusy.value = true
+  const expectedVersion = current.value.version + 1
+  try {
+    const sale = await del<Sale>(`/api/v1/external-sales/${id}/files/${file.id}`)
+    updateFiles(sale, generation)
+    if (generation === refreshGeneration) saleWithSuggestion(sale, expectedVersion)
+    calculation.value = null
+  }
   catch (e) {
     if (generation === refreshGeneration) message.error(e instanceof Error ? e.message : t('externalSales.error'))
+  } finally {
+    if (generation === refreshGeneration) fileMutationBusy.value = false
   }
 }
 async function discard() {
@@ -531,7 +629,7 @@ async function confirmPosting() {
       <n-form v-if="!isPosted || revisionMode" :disabled="postingBusy" label-placement="top" @submit.prevent="isPosted ? previewRevision() : saveDraft()">
         <div class="grid">
           <n-form-item :label="t('externalSales.source')"><n-select data-testid="sale-source" v-model:value="draft.source_id" clearable :options="sourceOptions" :disabled="isPosted" /></n-form-item>
-          <n-form-item :label="t('externalSales.number')"><n-input data-testid="sale-number" v-model:value="draft.original_number" :disabled="isPosted" /></n-form-item>
+          <n-form-item :label="t('externalSales.number')"><n-input data-testid="sale-number" v-model:value="draft.original_number" :disabled="isPosted" @update:value="markEdited('original_number')" /></n-form-item>
           <n-form-item v-if="!isPosted" :label="t('externalSales.documentKind')"><n-select data-testid="document-kind" v-model:value="draft.document_kind" :options="(['SALE','CREDIT','SETTLEMENT_ADJUSTMENT'] as const).map((kind) => ({ label: t(`externalSales.${kind}`), value: kind }))" /></n-form-item>
           <n-form-item v-if="!isPosted && draft.document_kind === 'CREDIT'" :label="t('externalSales.relatedOriginal')"><n-select data-testid="related-original" v-model:value="draft.related_external_sale_id" clearable filterable :options="originalOptions" :loading="originalsLoading" /></n-form-item>
           <div v-if="!isPosted && draft.document_kind === 'CREDIT'" class="actions" data-testid="original-pagination">
@@ -542,19 +640,19 @@ async function confirmPosting() {
           </div>
           <n-form-item v-if="!isPosted && draft.document_kind === 'CREDIT' && !draft.related_external_sale_id" :label="t('externalSales.historicalNumber')"><n-input data-testid="historical-number" v-model:value="draft.historical_original_number" /></n-form-item>
           <n-form-item v-if="!isPosted && draft.document_kind === 'CREDIT' && !draft.related_external_sale_id" :label="t('externalSales.historicalExplanation')"><n-input data-testid="historical-explanation" v-model:value="draft.historical_original_explanation" type="textarea" /></n-form-item>
-          <n-form-item :label="t('externalSales.date')"><input v-model="draft.document_date" type="date" /></n-form-item>
-          <n-form-item :label="t('externalSales.counterparty')"><n-input v-model:value="draft.counterparty" /></n-form-item>
+          <n-form-item :label="t('externalSales.date')"><input v-model="draft.document_date" type="date" @input="markEdited('document_date')" /></n-form-item>
+          <n-form-item :label="t('externalSales.counterparty')"><n-input v-model:value="draft.counterparty" @update:value="markEdited('counterparty')" /></n-form-item>
           <n-form-item :label="t('externalSales.coveredFrom')"><input v-model="draft.covered_from" type="date" /></n-form-item>
           <n-form-item :label="t('externalSales.coveredTo')"><input v-model="draft.covered_to" type="date" /></n-form-item>
           <n-form-item :label="t('externalSales.includePl')"><n-select data-testid="include-in-pl" :value="draft.include_in_pl === null ? null : String(draft.include_in_pl)" :clearable="!isPosted" :options="includeOptions" @update:value="setIncludeInPl" /></n-form-item>
         </div>
-        <n-form-item :label="t('externalSales.description')"><n-input v-model:value="draft.description" type="textarea" /></n-form-item>
+        <n-form-item :label="t('externalSales.description')"><n-input v-model:value="draft.description" type="textarea" @update:value="markEdited('description')" /></n-form-item>
         <h2>{{ t('externalSales.taxSummaries') }}</h2>
         <div v-for="(row, index) in draft.tax_summaries" :key="index" class="tax-row">
-          <n-select v-model:value="row.treatment_id" clearable :options="treatmentOptionsFor(row)" :placeholder="t('externalSales.treatment')" />
-          <n-select v-model:value="row.rate_id" clearable :data-testid="`tax-rate-${index}`" :options="rateOptionsFor(row)" :placeholder="t('externalSales.rate')" />
-          <n-input v-model:value="row.net_amount" :placeholder="t('externalSales.net')" inputmode="decimal" />
-          <n-input v-model:value="row.vat_amount" :placeholder="t('externalSales.vat')" inputmode="decimal" />
+          <n-select v-model:value="row.treatment_id" clearable :options="treatmentOptionsFor(row)" :placeholder="t('externalSales.treatment')" @update:value="taxSummariesManuallyEdited = true" />
+          <n-select v-model:value="row.rate_id" clearable :data-testid="`tax-rate-${index}`" :options="rateOptionsFor(row)" :placeholder="t('externalSales.rate')" @update:value="taxSummariesManuallyEdited = true" />
+          <n-input v-model:value="row.net_amount" :placeholder="t('externalSales.net')" inputmode="decimal" @update:value="taxSummariesManuallyEdited = true" />
+          <n-input v-model:value="row.vat_amount" :placeholder="t('externalSales.vat')" inputmode="decimal" @update:value="taxSummariesManuallyEdited = true" />
           <n-button v-if="draft.tax_summaries.length > 1" @click="draft.tax_summaries.splice(index, 1)">×</n-button>
         </div>
         <n-button size="small" @click="draft.tax_summaries.push(blankTax())">{{ t('externalSales.addTax') }}</n-button>
@@ -568,6 +666,22 @@ async function confirmPosting() {
         </template>
       </n-form>
       <div v-if="current && !isPosted" class="posting-review">
+        <n-alert type="info" :show-icon="true">{{ t('externalSales.providerNotice') }}</n-alert>
+        <section class="ai-review">
+          <h2>{{ t('externalSales.aiState') }}</h2>
+          <p v-if="aiStateText(current)">{{ aiStateText(current) }}</p>
+          <p v-if="current.ai_suggestion?.confidence">{{ t('externalSales.aiConfidence') }}: {{ current.ai_suggestion.confidence }}</p>
+          <n-alert v-if="current.ai_suggestion?.explicit_electricity_sale_component === false" type="warning" :show-icon="true">{{ t('externalSales.energySaleNotIdentified') }}</n-alert>
+          <div v-if="current.ai_suggestion?.observed_net_total !== null && current.ai_suggestion?.observed_net_total !== undefined">{{ t('externalSales.observedNet') }}: {{ current.ai_suggestion.observed_net_total }}</div>
+          <div v-if="current.ai_suggestion?.observed_vat_total !== null && current.ai_suggestion?.observed_vat_total !== undefined">{{ t('externalSales.observedVat') }}: {{ current.ai_suggestion.observed_vat_total }}</div>
+          <ul v-if="current.ai_suggestion?.review_notes?.length"><li v-for="(note, index) in current.ai_suggestion?.review_notes || []" :key="index">{{ t('externalSales.aiReviewNotes') }}: {{ note }}</li></ul>
+          <div v-for="(row, index) in current.ai_suggestion?.tax_summaries || []" :key="index" class="observed-row">
+            <span>{{ t('externalSales.observedRate') }}: {{ row.rate_percent ?? t('externalSales.none') }}</span>
+            <span>{{ t('externalSales.net') }}: {{ row.net_amount ?? t('externalSales.none') }}</span>
+            <span>{{ t('externalSales.vat') }}: {{ row.vat_amount ?? t('externalSales.none') }}</span>
+          </div>
+          <n-button size="small" :disabled="!editorReady || current.files.length === 0 || extractionBusy || fileMutationBusy" @click="retryExtraction">{{ t('externalSales.aiRetry') }}</n-button>
+        </section>
         <n-button :disabled="!editorReady || current.files.length === 0 || isDirty" @click="calculate">
           {{ t('externalSales.calculate') }}
         </n-button>
@@ -591,9 +705,9 @@ async function confirmPosting() {
       </div>
       <div v-if="current" class="files">
         <h2>{{ isPosted ? t('externalSales.supportingEvidence') : t('externalSales.files') }} ({{ current.files.length }}/5)</h2>
-        <div v-for="file in current.files" :key="file.id" class="file-row"><span>{{ file.filename || t('externalSales.none') }} · {{ file.byte_size }} bytes <strong v-if="file.duplicate_warning">{{ t('externalSales.duplicateWarning') }}</strong></span><n-button size="small" :disabled="!editorReady" @click="downloadFile(file)">{{ t('externalSales.download') }}</n-button><n-button v-if="!isPosted" size="small" :disabled="!editorReady" @click="removeFile(file)">{{ t('externalSales.removeFile') }}</n-button></div>
-        <input type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf" :disabled="!editorReady || current.files.length >= 5" @change="pickedFiles = Array.from(($event.target as HTMLInputElement).files || []).slice(0, 5 - current!.files.length)" />
-        <n-button :disabled="!editorReady || !pickedFiles.length" @click="uploadFiles">{{ isPosted ? t('externalSales.appendEvidence') : t('externalSales.upload') }}</n-button>
+        <div v-for="file in current.files" :key="file.id" class="file-row"><span>{{ file.filename || t('externalSales.none') }} · {{ file.byte_size }} bytes <strong v-if="file.duplicate_warning">{{ t('externalSales.duplicateWarning') }}</strong></span><n-button size="small" :disabled="!editorReady" @click="downloadFile(file)">{{ t('externalSales.download') }}</n-button><n-button v-if="!isPosted" size="small" :disabled="!editorReady || fileMutationBusy" @click="removeFile(file)">{{ t('externalSales.removeFile') }}</n-button></div>
+        <input type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf" :disabled="!editorReady || fileMutationBusy || current.files.length >= 5" @change="pickedFiles = Array.from(($event.target as HTMLInputElement).files || []).slice(0, 5 - current!.files.length)" />
+        <n-button :disabled="!editorReady || fileMutationBusy || !pickedFiles.length" @click="uploadFiles">{{ isPosted ? t('externalSales.appendEvidence') : t('externalSales.upload') }}</n-button>
       </div>
     </n-card>
     <n-modal v-model:show="sourceModal" preset="card" style="width: min(520px, 92vw)" :title="t('externalSales.editSource')">

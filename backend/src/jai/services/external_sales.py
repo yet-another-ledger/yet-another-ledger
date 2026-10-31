@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import uuid
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -25,6 +26,9 @@ from jai.models.external_sales import (
 )
 from jai.models.vat import VatRate, VatTreatment
 from jai.schemas.external_sales import (
+    ExternalSalesAIErrorCode,
+    ExternalSalesAIState,
+    ExternalSalesAISuggestion,
     ExternalSalesCalculateRequest,
     ExternalSalesCalculation,
     ExternalSalesConfirmRequest,
@@ -127,6 +131,13 @@ def _sale_read(row: ExternalSale) -> ExternalSalesRead:
             )
             for p in row.postings
         ],
+        ai_suggestion=(
+            ExternalSalesAISuggestion.model_validate(row.ai_suggestion)
+            if row.ai_suggestion is not None
+            else None
+        ),
+        ai_state=ExternalSalesAIState(row.ai_state),
+        ai_error_code=ExternalSalesAIErrorCode(row.ai_error_code) if row.ai_error_code else None,
     )
 
 
@@ -398,6 +409,16 @@ async def update_sale(
         for key, value in values.items():
             setattr(row, key, value)
         row.version += 1
+        if row.ai_state in {"READY", "RUNNING"}:
+            # A saved manual draft supersedes this advisory run, including explicit
+            # empty fields. Retire it durably so a fresh page cannot reapply it.
+            # An explicit retry can still produce a new suggestion for this version.
+            row.extraction_generation += 1
+            row.ai_state = "NOT_RUN"
+            row.ai_error_code = None
+            row.ai_suggestion = None
+            row.ai_started_at = None
+            row.ai_completed_at = None
         # Dictionary lookups may autoflush header changes, including its unique number.
         await _replace_tax_rows(session, row, body.tax_summaries)
         await session.commit()
@@ -464,6 +485,168 @@ def _check_append(row: ExternalSale, file_count: int) -> None:
         )
 
 
+def _safe_observed_suggestion(
+    raw: dict[str, object], truncated: bool, *, require_explicit_energy_sale: bool = False
+) -> dict[str, object]:
+    """Coerce only bounded observed values; never retain provider-controlled extras."""
+    from pydantic import ValidationError
+
+    from jai.schemas.external_sales import ExternalSalesObservedTaxSummary
+
+    candidate: dict[str, object] = {}
+    explicit_energy_sale = raw.get("explicit_electricity_sale_component") is True
+    if require_explicit_energy_sale:
+        candidate["explicit_electricity_sale_component"] = explicit_energy_sale
+    for field in ("document_date", "observed_net_total", "observed_vat_total"):
+        if (
+            require_explicit_energy_sale
+            and not explicit_energy_sale
+            and field.startswith("observed_")
+        ):
+            continue
+        value = raw.get(field)
+        if value is not None:
+            candidate[field] = value
+    for field, limit in (("original_number", 255), ("counterparty", 255), ("description", 2000)):
+        value = raw.get(field)
+        if isinstance(value, str) and value.strip():
+            candidate[field] = re.sub(r"[\x00-\x1f\x7f]", " ", value).strip()[:limit]
+    confidence = raw.get("confidence")
+    if isinstance(confidence, str) and confidence in {"high", "medium", "low"}:
+        candidate["confidence"] = confidence
+    notes: list[str] = []
+    raw_notes = raw.get("review_notes")
+    if isinstance(raw_notes, list):
+        for note in raw_notes[:8]:
+            if isinstance(note, str) and note.strip():
+                clean = re.sub(r"[\x00-\x1f\x7f]", " ", note).strip()[:500]
+                if clean:
+                    notes.append(clean)
+    if truncated:
+        notes.append("PDF page limit reached; later pages were not reviewed by AI.")
+    if require_explicit_energy_sale and not explicit_energy_sale:
+        notes.append(
+            "No separately itemized electricity sale was identified; enter verified sales manually."
+        )
+    if notes:
+        candidate["review_notes"] = notes
+    tax_rows: list[dict[str, object]] = []
+    raw_rows = raw.get("tax_summaries")
+    if isinstance(raw_rows, list) and (not require_explicit_energy_sale or explicit_energy_sale):
+        for item in raw_rows[:20]:
+            if not isinstance(item, dict):
+                continue
+            row = {
+                key: item[key]
+                for key in ("rate_percent", "net_amount", "vat_amount")
+                if key in item
+            }
+            try:
+                parsed_row = ExternalSalesObservedTaxSummary.model_validate(row)
+            except ValidationError:
+                continue
+            if any(value is not None for value in parsed_row.model_dump().values()):
+                tax_rows.append(parsed_row.model_dump(mode="json"))
+    if tax_rows:
+        candidate["tax_summaries"] = tax_rows
+    try:
+        parsed = ExternalSalesAISuggestion.model_validate(candidate)
+    except ValidationError:
+        # Bad individual header values should not discard valid independent fields.
+        for field in ("document_date", "observed_net_total", "observed_vat_total"):
+            try:
+                ExternalSalesAISuggestion.model_validate({field: candidate.get(field)})
+            except ValidationError:
+                candidate.pop(field, None)
+        parsed = ExternalSalesAISuggestion.model_validate(candidate)
+    data = parsed.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
+    useful_fields = {
+        "document_date", "original_number", "counterparty", "description",
+        "observed_net_total", "observed_vat_total", "tax_summaries",
+    }
+    if not useful_fields.intersection(data) or not any(data.get(key) for key in useful_fields):
+        raise ValueError("No usable observed fields")
+    return data
+
+
+async def extract_sale(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    sale_id: uuid.UUID,
+    storage: Storage,
+) -> ExternalSalesRead:
+    """Run advisory extraction and conditionally persist only current parsed values."""
+    from jai.services import ai as ai_service
+
+    await set_rls_company(session, company_id)
+    row = await _owned_sale(session, company_id, sale_id, lock=True)
+    if row.status != "PENDING":
+        raise ExternalSalesConflict(
+            "EXTERNAL_SALE_NOT_PENDING", external_sale_id=row.id, current_version=row.version
+        )
+    if not row.files:
+        raise ReceiptValidationError("Upload at least one original before extraction.")
+    file_revision = row.file_revision
+    expected_version = row.version
+    row.extraction_generation += 1
+    generation = row.extraction_generation
+    row.ai_state = "RUNNING"
+    row.ai_error_code = None
+    row.ai_suggestion = None
+    row.ai_started_at = datetime.now(UTC)
+    row.ai_completed_at = None
+    refs = [(file.mime_type, file.storage_key) for file in row.files]
+    await session.commit()
+
+    state = "READY"
+    error_code: str | None = None
+    suggestion: dict[str, object] | None = None
+    try:
+        observed, truncated = await ai_service.extract_external_sales_from_files(
+            session,
+            company_id,
+            [(mime, storage.open(key)) for mime, key in refs],
+            energy_source=bool(row.source and row.source.kind == "ENERGY"),
+        )
+        suggestion = _safe_observed_suggestion(
+            observed,
+            truncated,
+            require_explicit_energy_sale=bool(row.source and row.source.kind == "ENERGY"),
+        )
+    except ai_service.AIUnavailableError as exc:
+        await session.rollback()
+        state, error_code = "UNAVAILABLE", exc.code
+    except ai_service.AIExtractionError as exc:
+        await session.rollback()
+        state, error_code = "FAILED", exc.code
+    except ValueError:
+        await session.rollback()
+        state, error_code = "FAILED", "AI_INVALID_RESPONSE"
+    except Exception:
+        await session.rollback()
+        # Storage and provider exceptions can contain paths, response bodies or bytes.
+        logger.warning("External sales AI extraction failed: AI_PROVIDER_ERROR")
+        state, error_code = "FAILED", "AI_PROVIDER_ERROR"
+
+    await set_rls_company(session, company_id)
+    await session.execute(
+        update(ExternalSale)
+        .where(
+            ExternalSale.id == sale_id,
+            ExternalSale.status == "PENDING",
+            ExternalSale.file_revision == file_revision,
+            ExternalSale.extraction_generation == generation,
+            ExternalSale.version == expected_version,
+        )
+        .values(
+            ai_state=state,
+            ai_error_code=error_code,
+            ai_suggestion=suggestion,
+            ai_completed_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+    return await get_sale(session, company_id, sale_id)
 async def append_files(
     session: AsyncSession,
     company_id: uuid.UUID,
@@ -504,6 +687,11 @@ async def append_files(
             existing_hashes.add(digest)
         if row.status == "PENDING":
             row.version += 1
+            row.file_revision += 1
+            row.extraction_generation += 1
+            row.ai_state = "NOT_RUN"
+            row.ai_error_code = None
+            row.ai_suggestion = None
         await session.commit()
     except Exception:
         await session.rollback()
@@ -513,6 +701,8 @@ async def append_files(
             except Exception:
                 logger.exception("Could not compensate external sale upload")
         raise
+    if row.status == "PENDING":
+        return await extract_sale(session, company_id, sale_id, storage)
     return await get_sale(session, company_id, sale_id)
 
 
@@ -535,12 +725,20 @@ async def remove_file(
     key = file_row.storage_key
     row.files.remove(file_row)
     row.version += 1
+    row.file_revision += 1
+    row.extraction_generation += 1
+    row.ai_suggestion = None
+    row.ai_error_code = None
+    row.ai_state = "NOT_RUN"
     await session.commit()
     try:
         storage.delete(key)
     except Exception:
         logger.exception("Could not remove external sale original")
-    return await get_sale(session, company_id, sale_id)
+    refreshed = await get_sale(session, company_id, sale_id)
+    if refreshed.files:
+        return await extract_sale(session, company_id, sale_id, storage)
+    return refreshed
 
 
 async def read_file(
@@ -702,6 +900,10 @@ async def confirm_sale(
             "Acknowledge the VAT mismatch and provide a reason before posting."
         )
     now = datetime.now(UTC)
+    if row.ai_state == "RUNNING":
+        row.ai_state = "NOT_RUN"
+        row.ai_error_code = None
+        row.extraction_generation += 1
     row.status = "POSTED"
     row.posted_at = now
     row.posted_by = actor_id

@@ -1988,6 +1988,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/external-sales/{sale_id}/extract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post External Sale Extract */
+        post: operations["post_external_sale_extract_api_v1_external_sales__sale_id__extract_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/external-sales/{sale_id}/files/{file_id}": {
         parameters: {
             query?: never;
@@ -5855,6 +5872,42 @@ export interface components {
              */
             event_date: string;
         };
+        /**
+         * ExternalSalesAIErrorCode
+         * @enum {string}
+         */
+        ExternalSalesAIErrorCode: "AI_DISABLED" | "AI_NOT_CONFIGURED" | "AI_TIMEOUT" | "AI_PROVIDER_ERROR" | "AI_INVALID_RESPONSE";
+        /**
+         * ExternalSalesAIState
+         * @enum {string}
+         */
+        ExternalSalesAIState: "NOT_RUN" | "RUNNING" | "READY" | "UNAVAILABLE" | "FAILED";
+        /**
+         * ExternalSalesAISuggestion
+         * @description Untrusted observed values; contains no tax/P&L decision fields.
+         */
+        ExternalSalesAISuggestion: {
+            /** Document Date */
+            document_date?: string | null;
+            /** Original Number */
+            original_number?: string | null;
+            /** Counterparty */
+            counterparty?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Observed Net Total */
+            observed_net_total?: string | null;
+            /** Observed Vat Total */
+            observed_vat_total?: string | null;
+            /** Explicit Electricity Sale Component */
+            explicit_electricity_sale_component?: boolean | null;
+            /** Tax Summaries */
+            tax_summaries?: components["schemas"]["ExternalSalesObservedTaxSummary"][];
+            /** Confidence */
+            confidence?: string | null;
+            /** Review Notes */
+            review_notes?: string[];
+        };
         /** ExternalSalesCalculateRequest */
         ExternalSalesCalculateRequest: {
             /** Expected Version */
@@ -5977,6 +6030,15 @@ export interface components {
             /** Offset */
             offset: number;
         };
+        /** ExternalSalesObservedTaxSummary */
+        ExternalSalesObservedTaxSummary: {
+            /** Rate Percent */
+            rate_percent?: string | null;
+            /** Net Amount */
+            net_amount?: string | null;
+            /** Vat Amount */
+            vat_amount?: string | null;
+        };
         /** ExternalSalesPostingRead */
         ExternalSalesPostingRead: {
             /**
@@ -6061,6 +6123,9 @@ export interface components {
             mismatch_ack_reason: string | null;
             /** Postings */
             postings: components["schemas"]["ExternalSalesPostingRead"][];
+            ai_suggestion?: components["schemas"]["ExternalSalesAISuggestion"] | null;
+            ai_state: components["schemas"]["ExternalSalesAIState"];
+            ai_error_code: components["schemas"]["ExternalSalesAIErrorCode"] | null;
         };
         /** ExternalSalesRevisionInput */
         ExternalSalesRevisionInput: {
@@ -15237,6 +15302,46 @@ export interface operations {
                 "multipart/form-data": components["schemas"]["Body_post_external_sale_files_api_v1_external_sales__sale_id__files_post"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_external_sale_extract_api_v1_external_sales__sale_id__extract_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

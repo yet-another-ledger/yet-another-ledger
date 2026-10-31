@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from jai.main import app
 from jai.schemas.external_sales import ExternalSalesInput, ExternalSalesTaxInput
 from jai.schemas.setting import VatRateTiers
+from jai.services import ai as ai_service
 from jai.services import external_sales
 
 
@@ -32,6 +33,7 @@ def test_external_sales_openapi_exposes_only_safe_file_metadata() -> None:
         ("/api/v1/external-sales/{sale_id}/files", "post"),
         ("/api/v1/external-sales/{sale_id}/files/{file_id}", "get"),
         ("/api/v1/external-sales/{sale_id}/files/{file_id}", "delete"),
+        ("/api/v1/external-sales/{sale_id}/extract", "post"),
         ("/api/v1/external-sales/{sale_id}/calculate", "post"),
         ("/api/v1/external-sales/{sale_id}/confirm", "post"),
         ("/api/v1/external-sales/{sale_id}/revisions/preview", "post"),
@@ -56,6 +58,17 @@ def test_external_sales_openapi_exposes_only_safe_file_metadata() -> None:
     props = schema["components"]["schemas"]["ExternalSalesFileRead"]["properties"]
     assert "storage_key" not in props
     assert "sha256" in props and "duplicate_warning" in props
+    sale_props = schema["components"]["schemas"]["ExternalSalesRead"]["properties"]
+    assert {"ai_suggestion", "ai_state", "ai_error_code"} <= set(sale_props)
+    suggestion_props = schema["components"]["schemas"]["ExternalSalesAISuggestion"]["properties"]
+    assert {
+        "observed_net_total",
+        "observed_vat_total",
+        "tax_summaries",
+        "confidence",
+        "review_notes",
+    } <= set(suggestion_props)
+    assert not {"treatment_id", "include_in_pl", "tax_eligible"} & set(suggestion_props)
     assert "treatment_id" in schema["components"]["schemas"]["ExternalSalesTaxInput"]["properties"]
     assert "rate_id" in schema["components"]["schemas"]["ExternalSalesTaxInput"]["properties"]
     assert (
@@ -112,6 +125,142 @@ def test_external_credit_sign_is_applied_once_and_settlement_can_be_signed() -> 
     )
     with pytest.raises(external_sales.ReceiptValidationError, match="cannot be negative"):
         external_sales.validate_signed_external_amounts("SALE", Decimal("-10.00"), Decimal("-2.10"))
+
+
+def test_external_sale_ai_suggestion_keeps_partial_multirate_observations_only() -> None:
+    data = external_sales._safe_observed_suggestion(
+        {
+            "counterparty": "Energy Co",
+            "observed_net_total": "10.125",
+            "tax_summaries": [
+                {"rate_percent": "21", "net_amount": "5", "vat_amount": "1.05"},
+                {"rate_percent": "9", "net_amount": "5.125", "vat_amount": "0.46"},
+            ],
+            "review_notes": ["Mixed statement: verify exported electricity only."],
+            "include_in_pl": True,
+            "raw_provider_response": "must not persist",
+        },
+        truncated=True,
+    )
+    assert data["counterparty"] == "Energy Co"
+    assert data["observed_net_total"] == "10.125"
+    assert len(data["tax_summaries"]) == 2
+    assert data["review_notes"][-1].startswith("PDF page limit reached")
+    assert "include_in_pl" not in data and "raw_provider_response" not in data
+
+
+def test_external_sale_ai_parser_rejects_empty_or_unusable_responses() -> None:
+    with pytest.raises(ValueError):
+        external_sales._safe_observed_suggestion(
+            {"confidence": "high", "review_notes": ["Check"]}, False
+        )
+    partial = external_sales._safe_observed_suggestion(
+        {"document_date": "malformed", "counterparty": "Export platform"}, False
+    )
+    assert partial["counterparty"] == "Export platform"
+    assert "document_date" not in partial
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ({"document_date": "2026-10-30", "observed_net_total": "unknown"},
+         {"document_date": "2026-10-30"}),
+        ({"document_date": "2026-10-30", "observed_vat_total": "NaN"},
+         {"document_date": "2026-10-30"}),
+        ({"document_date": "invalid", "observed_net_total": "12.345"},
+         {"observed_net_total": "12.345"}),
+        ({"document_date": "2026-02-30", "observed_vat_total": "0"},
+         {"observed_vat_total": "0"}),
+        ({"document_date": "2026-10-30", "observed_net_total": {},
+          "observed_vat_total": "123456789012345"}, {"document_date": "2026-10-30"}),
+    ],
+)
+def test_external_sale_ai_keeps_independent_valid_header_observations(
+    raw: dict[str, object], expected: dict[str, object]
+) -> None:
+    assert external_sales._safe_observed_suggestion(raw, False) == expected
+
+
+def test_energy_statement_does_not_prefill_ambiguous_household_or_net_settlement_amounts() -> None:
+    suggestion = external_sales._safe_observed_suggestion(
+        {
+            "counterparty": "Energy Co",
+            "observed_net_total": "500.00",
+            "observed_vat_total": "105.00",
+            "tax_summaries": [{"rate_percent": "21", "net_amount": "500", "vat_amount": "105"}],
+            "explicit_electricity_sale_component": False,
+        },
+        False,
+        require_explicit_energy_sale=True,
+    )
+    assert suggestion["counterparty"] == "Energy Co"
+    assert suggestion["explicit_electricity_sale_component"] is False
+    assert "observed_net_total" not in suggestion
+    assert "observed_vat_total" not in suggestion
+    assert "tax_summaries" not in suggestion
+    assert "No separately itemized" in suggestion["review_notes"][-1]
+
+
+@pytest.mark.asyncio
+async def test_external_sale_ai_prompt_is_energy_safe_and_parses_partial_provider_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from jai.schemas.setting import AiSettings
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        ai_service,
+        "_get_ai_config",
+        AsyncMock(
+            return_value=AiSettings(
+                enabled=True, base_url="https://ai.invalid", api_key="x", model="m"
+            )
+        ),
+    )
+    monkeypatch.setattr(ai_service, "_attachment_to_images", lambda _mime, _raw: [b"png"])
+
+    async def fake_call(**kwargs: object) -> str:
+        captured.update(kwargs)
+        return (
+            '{"counterparty":"Energy Co",'
+            '"explicit_electricity_sale_component":false,"raw":"private"}'
+        )
+
+    monkeypatch.setattr(ai_service, "_call_chat_completions", fake_call)
+    parsed, truncated = await ai_service.extract_external_sales_from_files(
+        AsyncMock(), uuid.uuid4(), [("image/png", b"receipt")], energy_source=True
+    )
+    prompt = str(captured["messages"])
+    assert "fixed charges" in prompt and "net settlement/payable" in prompt
+    assert parsed == {"counterparty": "Energy Co", "explicit_electricity_sale_component": False}
+    assert truncated is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("settings", "expected_code"),
+    [
+        ({"enabled": False, "api_key": "secret", "model": "model"}, "AI_DISABLED"),
+        ({"enabled": True, "api_key": "", "model": "model"}, "AI_NOT_CONFIGURED"),
+        ({"enabled": True, "api_key": "secret", "model": ""}, "AI_NOT_CONFIGURED"),
+    ],
+)
+async def test_external_sale_ai_disabled_or_missing_config_stays_on_manual_path(
+    monkeypatch: pytest.MonkeyPatch, settings: dict[str, object], expected_code: str
+) -> None:
+    from jai.schemas.setting import AiSettings
+
+    monkeypatch.setattr(
+        ai_service,
+        "_get_ai_config",
+        AsyncMock(return_value=AiSettings(**settings)),
+    )
+    with pytest.raises(ai_service.AIUnavailableError) as raised:
+        await ai_service.extract_external_sales_from_files(
+            AsyncMock(), uuid.uuid4(), [("image/png", b"original")]
+        )
+    assert raised.value.code == expected_code
 
 
 def test_posting_calculation_rounds_each_rate_row_and_preserves_original_vat() -> None:

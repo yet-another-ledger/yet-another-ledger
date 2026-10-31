@@ -22,6 +22,47 @@ class ExternalSalesStatus(StrEnum):
     VOID = "VOID"
 
 
+class ExternalSalesAIState(StrEnum):
+    NOT_RUN = "NOT_RUN"
+    RUNNING = "RUNNING"
+    READY = "READY"
+    UNAVAILABLE = "UNAVAILABLE"
+    FAILED = "FAILED"
+
+
+class ExternalSalesAIErrorCode(StrEnum):
+    AI_DISABLED = "AI_DISABLED"
+    AI_NOT_CONFIGURED = "AI_NOT_CONFIGURED"
+    AI_TIMEOUT = "AI_TIMEOUT"
+    AI_PROVIDER_ERROR = "AI_PROVIDER_ERROR"
+    AI_INVALID_RESPONSE = "AI_INVALID_RESPONSE"
+
+
+class ExternalSalesObservedTaxSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rate_percent: Decimal | None = Field(default=None, ge=0, le=100, max_digits=6, decimal_places=3)
+    net_amount: Decimal | None = Field(default=None, max_digits=14, decimal_places=3)
+    vat_amount: Decimal | None = Field(default=None, max_digits=14, decimal_places=3)
+
+
+class ExternalSalesAISuggestion(BaseModel):
+    """Untrusted observed values; contains no tax/P&L decision fields."""
+
+    model_config = ConfigDict(extra="forbid")
+    document_date: date | None = None
+    original_number: str | None = Field(default=None, max_length=255)
+    counterparty: str | None = Field(default=None, max_length=255)
+    description: str | None = Field(default=None, max_length=2000)
+    observed_net_total: Decimal | None = Field(default=None, max_digits=14, decimal_places=3)
+    observed_vat_total: Decimal | None = Field(default=None, max_digits=14, decimal_places=3)
+    explicit_electricity_sale_component: bool | None = None
+    tax_summaries: list[ExternalSalesObservedTaxSummary] = Field(
+        default_factory=list, max_length=20
+    )
+    confidence: str | None = Field(default=None, pattern="^(high|medium|low)$")
+    review_notes: list[str] = Field(default_factory=list, max_length=10)
+
+
 class ExternalSalesDocumentKind(StrEnum):
     SALE = "SALE"
     CREDIT = "CREDIT"
@@ -168,6 +209,9 @@ class ExternalSalesRead(BaseModel):
     original_vat_total: Decimal | None = Field(...)
     mismatch_ack_reason: str | None = Field(...)
     postings: list[ExternalSalesPostingRead]
+    ai_suggestion: ExternalSalesAISuggestion | None = None
+    ai_state: ExternalSalesAIState
+    ai_error_code: ExternalSalesAIErrorCode | None
 
 
 class ExternalSalesRevisionTaxInput(ExternalSalesTaxInput):

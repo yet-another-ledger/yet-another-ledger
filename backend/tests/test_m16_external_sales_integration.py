@@ -20,6 +20,7 @@ from starlette.datastructures import UploadFile
 import jai.api.external_sales as external_sales_api
 from jai.db import set_rls_company
 from jai.models.external_sales import ExternalSale
+from jai.services import ai as ai_service
 from jai.services import external_sales
 from jai.services.storage import Storage
 
@@ -844,6 +845,659 @@ async def test_external_sales_upload_ownership_precedes_read_and_file_validation
     assert response.status_code == 404
     read.assert_not_awaited()
     assert storage.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_external_sales_extract_rejects_cross_company_before_storage_or_ai(
+    db_client: AsyncClient,
+    db_session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _owner_company(db_client)
+    sale_id = uuid.uuid4()
+    async with db_session_maker() as session:
+        company_id = uuid.uuid4()
+        await session.execute(
+            text("INSERT INTO company (id,name,base_currency) VALUES (:id,'Other tenant','EUR')"),
+            {"id": company_id},
+        )
+        await set_rls_company(session, company_id)
+        await session.execute(
+            text("INSERT INTO external_sale (id,company_id) VALUES (:id,:company)"),
+            {"id": sale_id, "company": company_id},
+        )
+        await session.commit()
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    call_ai = AsyncMock(side_effect=AssertionError("Cross-company extraction must stop before AI"))
+    monkeypatch.setattr(ai_service, "extract_external_sales_from_files", call_ai)
+    response = await db_client.post(f"/api/v1/external-sales/{sale_id}/extract")
+    assert response.status_code == 404
+    call_ai.assert_not_awaited()
+    assert storage.data == {}
+
+
+@pytest.mark.asyncio
+async def test_external_sales_upload_auto_extract_and_safe_retry(
+    db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    monkeypatch.setattr(
+        external_sales_api, "get_settings", lambda: SimpleNamespace(max_receipt_bytes=64)
+    )
+    await _owner_company(db_client)
+    source = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Energy", "kind": "ENERGY"}
+        )
+    ).json()
+    draft_response = await db_client.post(
+        "/api/v1/external-sales", json={"source_id": source["id"]}
+    )
+    draft = draft_response.json()
+    model = AsyncMock(
+        side_effect=[
+            (
+                {
+                    "counterparty": "Energy Co",
+                    "observed_net_total": "500",
+                    "observed_vat_total": "105",
+                    "tax_summaries": [
+                        {"rate_percent": "21", "net_amount": "500", "vat_amount": "105"}
+                    ],
+                    "explicit_electricity_sale_component": False,
+                    "raw_provider_response": "must not persist",
+                },
+                False,
+            ),
+            (
+                {
+                    "counterparty": "Energy Co",
+                    "observed_net_total": "10.00",
+                    "observed_vat_total": "2.10",
+                    "tax_summaries": [
+                        {"rate_percent": "21", "net_amount": "10.00", "vat_amount": "2.10"},
+                        {"rate_percent": "9", "net_amount": "3.00", "vat_amount": "0.27"},
+                    ],
+                    "explicit_electricity_sale_component": True,
+                    "confidence": "medium",
+                },
+                True,
+            ),
+            ({"counterparty": "Changed file evidence"}, False),
+        ]
+    )
+    monkeypatch.setattr(ai_service, "extract_external_sales_from_files", model)
+    url = f"/api/v1/external-sales/{draft['id']}"
+    uploaded = await db_client.post(
+        f"{url}/files", files=[("files", ("statement.pdf", b"%PDF-safe", "application/pdf"))]
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert model.await_count == 1
+    first = uploaded.json()
+    assert first["ai_state"] == "READY"
+    assert first["ai_suggestion"]["explicit_electricity_sale_component"] is False
+    assert first["ai_suggestion"]["counterparty"] == "Energy Co"
+    assert first["ai_suggestion"]["tax_summaries"] == []
+    assert first["ai_suggestion"]["review_notes"]
+    assert "raw_provider_response" not in str(first["ai_suggestion"])
+    retried = await db_client.post(f"{url}/extract")
+    assert retried.status_code == 200, retried.text
+    assert model.await_count == 2
+    second = retried.json()["ai_suggestion"]
+    assert second["explicit_electricity_sale_component"] is True
+    assert len(second["tax_summaries"]) == 2
+    assert Decimal(second["tax_summaries"][0]["net_amount"]) == Decimal("10.00")
+    assert any("PDF page limit" in note for note in second["review_notes"])
+    changed_files = await db_client.post(
+        f"{url}/files", files=[("files", ("supplement.pdf", b"%PDF-new", "application/pdf"))]
+    )
+    assert changed_files.status_code == 200, changed_files.text
+    assert model.await_count == 3
+    assert changed_files.json()["ai_suggestion"]["counterparty"] == "Changed file evidence"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ({"document_date": "2026-10-30", "observed_net_total": "unknown"},
+         {"document_date": "2026-10-30", "observed_net_total": None}),
+        ({"document_date": "2026-10-30", "observed_vat_total": "NaN"},
+         {"document_date": "2026-10-30", "observed_vat_total": None}),
+        ({"document_date": "invalid", "observed_net_total": "12.345"},
+         {"document_date": None, "observed_net_total": "12.345"}),
+    ],
+)
+async def test_external_sales_partial_header_survives_upload_retry_and_detail(
+    db_client: AsyncClient,
+    db_session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    raw: dict[str, object],
+    expected: dict[str, object],
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    company, *_ = await _owner_company(db_client)
+    created = await db_client.post("/api/v1/external-sales", json={})
+    assert created.status_code == 201, created.text
+    url = f"/api/v1/external-sales/{created.json()['id']}"
+    model = AsyncMock(return_value=(raw, False))
+    monkeypatch.setattr(ai_service, "extract_external_sales_from_files", model)
+    uploaded = await db_client.post(
+        f"{url}/files", files=[("files", ("original.pdf", b"%PDF-safe", "application/pdf"))]
+    )
+    retried = await db_client.post(f"{url}/extract")
+    detail = await db_client.get(url)
+    for response in (uploaded, retried, detail):
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_state"] == "READY" and data["ai_error_code"] is None
+        assert data["document_date"] is None  # Suggestions never write authoritative fields.
+        for key, value in expected.items():
+            assert data["ai_suggestion"][key] == value
+    assert model.await_count == 2
+    async with db_session_maker() as session:
+        await set_rls_company(session, uuid.UUID(company["id"]))
+        persisted = await session.get(ExternalSale, uuid.UUID(created.json()["id"]))
+        assert persisted is not None and persisted.ai_state == "READY"
+        assert persisted.ai_suggestion is not None
+        for key, value in expected.items():
+            assert persisted.ai_suggestion.get(key) == value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cleared_description", ["", None])
+async def test_manual_save_retires_ready_suggestion_and_preserves_empty_values_on_get_and_retry(
+    db_client: AsyncClient,
+    db_session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    cleared_description: str | None,
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    company, treatment, rate, _, _ = await _owner_company(db_client)
+    source = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Platform", "kind": "PLATFORM"}
+        )
+    ).json()
+    payload = {
+        "source_id": source["id"],
+        "original_number": "MANUAL-EMPTY",
+        "document_date": "2026-03-04",
+        "counterparty": "",
+        "description": "AI summary",
+        "include_in_pl": False,
+        "tax_summaries": [{
+            "treatment_id": treatment["id"], "rate_id": rate["id"],
+            "net_amount": "0", "vat_amount": "0",
+        }],
+    }
+    created = await db_client.post("/api/v1/external-sales", json=payload)
+    assert created.status_code == 201, created.text
+    url = f"/api/v1/external-sales/{created.json()['id']}"
+    model = AsyncMock(return_value=({"description": "AI summary", "counterparty": "AI Co"}, False))
+    monkeypatch.setattr(ai_service, "extract_external_sales_from_files", model)
+    uploaded = await db_client.post(
+        f"{url}/files", files=[("files", ("original.pdf", b"%PDF-safe", "application/pdf"))]
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    ready = uploaded.json()
+    assert ready["ai_state"] == "READY"
+    assert ready["ai_suggestion"]["description"] == "AI summary"
+
+    # A rejected save must not consume the pending advisory result.
+    rejected = await db_client.put(url, json={**payload, "source_id": str(uuid.uuid4())})
+    assert rejected.status_code == 404, rejected.text
+    assert (await db_client.get(url)).json()["ai_state"] == "READY"
+
+    payload["description"] = cleared_description
+    updated = await db_client.put(url, json=payload)
+    assert updated.status_code == 200, updated.text
+    refreshed = (await db_client.get(url)).json()
+    for result in (updated.json(), refreshed):
+        assert result["description"] == cleared_description
+        assert result["counterparty"] == ""
+        assert result["include_in_pl"] is False
+        assert Decimal(result["tax_summaries"][0]["net_amount"]) == 0
+        assert Decimal(result["tax_summaries"][0]["vat_amount"]) == 0
+        assert result["ai_state"] == "NOT_RUN"
+        assert result["ai_suggestion"] is None
+        assert result["version"] == ready["version"] + 1
+    async with db_session_maker() as session:
+        await set_rls_company(session, uuid.UUID(company["id"]))
+        persisted = await session.get(ExternalSale, uuid.UUID(refreshed["id"]))
+        assert persisted is not None
+        assert persisted.description == cleared_description
+        assert persisted.ai_suggestion is None
+        assert persisted.ai_started_at is None and persisted.ai_completed_at is None
+
+    preview = await db_client.post(
+        f"{url}/calculate", json={"expected_version": refreshed["version"]}
+    )
+    assert preview.status_code == 200, preview.text
+    # The next explicit run is usable, but cannot itself change saved manual fields.
+    retried = await db_client.post(f"{url}/extract")
+    assert retried.status_code == 200, retried.text
+    assert model.await_count == 2
+    assert retried.json()["ai_state"] == "READY"
+    assert retried.json()["ai_suggestion"]["description"] == "AI summary"
+    assert retried.json()["description"] == cleared_description
+    confirmed = await db_client.post(
+        f"{url}/confirm", json={"expected_version": refreshed["version"]}
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "POSTED"
+    assert confirmed.json()["description"] == cleared_description
+
+
+@pytest.mark.asyncio
+async def test_external_sales_ai_timeout_is_safe_and_manual_entry_remains_available(
+    db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    monkeypatch.setattr(
+        external_sales_api, "get_settings", lambda: SimpleNamespace(max_receipt_bytes=64)
+    )
+    await _owner_company(db_client)
+    source = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Platform", "kind": "PLATFORM"}
+        )
+    ).json()
+    draft_response = await db_client.post(
+        "/api/v1/external-sales", json={"source_id": source["id"]}
+    )
+    draft = draft_response.json()
+
+    async def timeout(*_args: object, **_kwargs: object) -> tuple[dict[str, object], bool]:
+        raise ai_service.AIExtractionError("AI_TIMEOUT", "private provider response and key")
+
+    monkeypatch.setattr(ai_service, "extract_external_sales_from_files", timeout)
+    url = f"/api/v1/external-sales/{draft['id']}"
+    uploaded = await db_client.post(
+        f"{url}/files", files=[("files", ("original.pdf", b"%PDF-safe", "application/pdf"))]
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json()["ai_state"] == "FAILED"
+    assert uploaded.json()["ai_error_code"] == "AI_TIMEOUT"
+    assert "private provider response" not in uploaded.text
+    body = {
+        "source_id": source["id"],
+        "original_number": "MANUAL-ENTRY",
+        "document_date": "2026-10-30",
+        "include_in_pl": True,
+        "tax_summaries": [],
+    }
+    saved = await db_client.put(url, json=body)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["original_number"] == "MANUAL-ENTRY"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_code"),
+    [
+        ("provider", "AI_PROVIDER_ERROR"),
+        ("parser", "AI_INVALID_RESPONSE"),
+        ("storage", "AI_PROVIDER_ERROR"),
+    ],
+)
+async def test_external_sales_extraction_failures_are_safe_and_retryable(
+    db_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+    expected_code: str,
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    monkeypatch.setattr(
+        external_sales_api, "get_settings", lambda: SimpleNamespace(max_receipt_bytes=64)
+    )
+    await _owner_company(db_client)
+    source = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Platform", "kind": "PLATFORM"}
+        )
+    ).json()
+    draft = (
+        await db_client.post(
+            "/api/v1/external-sales", json={"source_id": source["id"]}
+        )
+    ).json()
+    url = f"/api/v1/external-sales/{draft['id']}"
+    monkeypatch.setattr(
+        ai_service,
+        "extract_external_sales_from_files",
+        AsyncMock(return_value=({"counterparty": "Platform"}, False)),
+    )
+    uploaded = await db_client.post(
+        f"{url}/files", files=[("files", ("original.pdf", b"%PDF-safe", "application/pdf"))]
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    if failure_kind == "provider":
+        async def provider_failure(*_args: object, **_kwargs: object) -> object:
+            raise RuntimeError("private provider body and API credential")
+
+        monkeypatch.setattr(ai_service, "extract_external_sales_from_files", provider_failure)
+    elif failure_kind == "parser":
+        async def parser_failure(*_args: object, **_kwargs: object) -> object:
+            raise ValueError("malformed private model response")
+
+        monkeypatch.setattr(ai_service, "extract_external_sales_from_files", parser_failure)
+    else:
+        storage.open = Mock(side_effect=OSError("private storage path and bytes"))
+
+    retried = await db_client.post(f"{url}/extract")
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["ai_state"] == "FAILED"
+    assert retried.json()["ai_error_code"] == expected_code
+    assert "private" not in retried.text
+
+
+@pytest.mark.asyncio
+async def test_stale_external_sales_extraction_cannot_overwrite_manual_edit(
+    db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    monkeypatch.setattr(
+        external_sales_api, "get_settings", lambda: SimpleNamespace(max_receipt_bytes=64)
+    )
+    await _owner_company(db_client)
+    source = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Platform", "kind": "PLATFORM"}
+        )
+    ).json()
+    draft_response = await db_client.post(
+        "/api/v1/external-sales", json={"source_id": source["id"]}
+    )
+    draft = draft_response.json()
+    ai = AsyncMock(return_value=({"counterparty": "Initial"}, False))
+    monkeypatch.setattr(ai_service, "extract_external_sales_from_files", ai)
+    url = f"/api/v1/external-sales/{draft['id']}"
+    uploaded = await db_client.post(
+        f"{url}/files", files=[("files", ("original.pdf", b"%PDF-safe", "application/pdf"))]
+    )
+    assert uploaded.status_code == 200
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def delayed(*_args: object, **_kwargs: object) -> tuple[dict[str, object], bool]:
+        started.set()
+        await release.wait()
+        return {"counterparty": "Stale AI value"}, False
+
+    monkeypatch.setattr(ai_service, "extract_external_sales_from_files", delayed)
+    pending_request = asyncio.create_task(db_client.post(f"{url}/extract"))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    current = (await db_client.get(url)).json()
+    updated = await db_client.put(
+        url,
+        json={
+            "source_id": current["source_id"],
+            "original_number": current["original_number"],
+            "document_kind": current["document_kind"],
+            "document_date": current["document_date"],
+            "counterparty": current["counterparty"],
+            "description": "Manual correction while extraction is running",
+            "include_in_pl": current["include_in_pl"],
+            "tax_summaries": [],
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    release.set()
+    stale_result = await pending_request
+    assert stale_result.status_code == 200, stale_result.text
+    final = stale_result.json()
+    assert final["description"] == "Manual correction while extraction is running"
+    assert final["ai_state"] == "NOT_RUN"
+    assert final["ai_suggestion"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("file_change", ["append", "remove"])
+async def test_external_sales_file_group_change_supersedes_inflight_extraction(
+    db_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    file_change: str,
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    monkeypatch.setattr(
+        external_sales_api, "get_settings", lambda: SimpleNamespace(max_receipt_bytes=64)
+    )
+    await _owner_company(db_client)
+    source = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Platform", "kind": "PLATFORM"}
+        )
+    ).json()
+    draft = (
+        await db_client.post(
+            "/api/v1/external-sales", json={"source_id": source["id"]}
+        )
+    ).json()
+    call_count = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def extraction(*_args: object, **_kwargs: object) -> tuple[dict[str, object], bool]:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 3:
+            started.set()
+            await release.wait()
+            return {"counterparty": "stale old file group"}, False
+        return {"counterparty": f"current file group {call_count}"}, False
+
+    monkeypatch.setattr(ai_service, "extract_external_sales_from_files", extraction)
+    url = f"/api/v1/external-sales/{draft['id']}"
+    first = await db_client.post(
+        f"{url}/files", files=[("files", ("first.pdf", b"%PDF-first", "application/pdf"))]
+    )
+    assert first.status_code == 200, first.text
+    second = await db_client.post(
+        f"{url}/files", files=[("files", ("second.pdf", b"%PDF-second", "application/pdf"))]
+    )
+    assert second.status_code == 200, second.text
+
+    stale_run = asyncio.create_task(db_client.post(f"{url}/extract"))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    if file_change == "append":
+        changed = await db_client.post(
+            f"{url}/files", files=[("files", ("third.pdf", b"%PDF-third", "application/pdf"))]
+        )
+    else:
+        changed = await db_client.delete(f"{url}/files/{second.json()['files'][1]['id']}")
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["ai_suggestion"]["counterparty"] == "current file group 4"
+
+    release.set()
+    stale_response = await stale_run
+    assert stale_response.status_code == 200, stale_response.text
+    final = stale_response.json()
+    assert final["ai_suggestion"]["counterparty"] == "current file group 4"
+    assert "stale old file group" not in stale_response.text
+
+
+@pytest.mark.asyncio
+async def test_out_of_order_external_sales_runs_keep_newer_generation(
+    db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    monkeypatch.setattr(
+        external_sales_api, "get_settings", lambda: SimpleNamespace(max_receipt_bytes=64)
+    )
+    await _owner_company(db_client)
+    source = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Platform", "kind": "PLATFORM"}
+        )
+    ).json()
+    draft = (
+        await db_client.post(
+            "/api/v1/external-sales", json={"source_id": source["id"]}
+        )
+    ).json()
+    await_call = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def extraction(*_args: object, **_kwargs: object) -> tuple[dict[str, object], bool]:
+        nonlocal await_call
+        await_call += 1
+        if await_call == 2:
+            started.set()
+            await release.wait()
+            return {"counterparty": "older run A"}, False
+        return {"counterparty": f"newer run {await_call}"}, False
+
+    monkeypatch.setattr(ai_service, "extract_external_sales_from_files", extraction)
+    url = f"/api/v1/external-sales/{draft['id']}"
+    uploaded = await db_client.post(
+        f"{url}/files", files=[("files", ("original.pdf", b"%PDF-same", "application/pdf"))]
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    original_revision = uploaded.json()["ai_suggestion"]
+    old_run = asyncio.create_task(db_client.post(f"{url}/extract"))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    newer = await db_client.post(f"{url}/extract")
+    assert newer.status_code == 200, newer.text
+    assert newer.json()["ai_suggestion"]["counterparty"] == "newer run 3"
+    release.set()
+    old_response = await old_run
+    assert old_response.status_code == 200, old_response.text
+    assert old_response.json()["ai_suggestion"]["counterparty"] == "newer run 3"
+    assert "older run A" not in old_response.text
+    assert original_revision["counterparty"] == "newer run 1"
+
+
+@pytest.mark.asyncio
+async def test_external_sales_confirmation_invalidates_inflight_extraction(
+    db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    monkeypatch.setattr(
+        external_sales_api, "get_settings", lambda: SimpleNamespace(max_receipt_bytes=64)
+    )
+    _, treatment, rate, _, _ = await _owner_company(db_client)
+    source = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Platform", "kind": "PLATFORM"}
+        )
+    ).json()
+    draft = (
+        await db_client.post(
+            "/api/v1/external-sales",
+            json={
+                "source_id": source["id"],
+                "original_number": "POST-RACE-1",
+                "document_date": "2026-10-30",
+                "include_in_pl": True,
+                "tax_summaries": [
+                    {
+                        "treatment_id": treatment["id"],
+                        "rate_id": rate["id"],
+                        "net_amount": "10.00",
+                        "vat_amount": "2.10",
+                    }
+                ],
+            },
+        )
+    ).json()
+    ai = AsyncMock(return_value=({"counterparty": "Platform"}, False))
+    monkeypatch.setattr(ai_service, "extract_external_sales_from_files", ai)
+    url = f"/api/v1/external-sales/{draft['id']}"
+    uploaded = await db_client.post(
+        f"{url}/files", files=[("files", ("original.pdf", b"%PDF-race", "application/pdf"))]
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def delayed(*_args: object, **_kwargs: object) -> tuple[dict[str, object], bool]:
+        started.set()
+        await release.wait()
+        return {"counterparty": "Too late"}, False
+
+    monkeypatch.setattr(ai_service, "extract_external_sales_from_files", delayed)
+    extraction = asyncio.create_task(db_client.post(f"{url}/extract"))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    current = (await db_client.get(url)).json()
+    confirmed = await db_client.post(
+        f"{url}/confirm", json={"expected_version": current["version"]}
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "POSTED"
+    assert confirmed.json()["ai_state"] == "NOT_RUN"
+    release.set()
+    extraction_result = await extraction
+    assert extraction_result.status_code == 200, extraction_result.text
+    final = extraction_result.json()
+    assert final["status"] == "POSTED"
+    assert final["ai_state"] == "NOT_RUN"
+    assert final["ai_suggestion"] is None
+
+
+@pytest.mark.asyncio
+async def test_discard_invalidates_inflight_external_sales_extraction(
+    db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = MemoryStorage()
+    monkeypatch.setattr(external_sales_api, "get_storage", lambda: storage)
+    monkeypatch.setattr(
+        external_sales_api, "get_settings", lambda: SimpleNamespace(max_receipt_bytes=64)
+    )
+    await _owner_company(db_client)
+    source = (
+        await db_client.post(
+            "/api/v1/external-sales-sources", json={"name": "Platform", "kind": "PLATFORM"}
+        )
+    ).json()
+    draft = (
+        await db_client.post(
+            "/api/v1/external-sales", json={"source_id": source["id"]}
+        )
+    ).json()
+    monkeypatch.setattr(
+        ai_service,
+        "extract_external_sales_from_files",
+        AsyncMock(return_value=({"counterparty": "Platform"}, False)),
+    )
+    url = f"/api/v1/external-sales/{draft['id']}"
+    uploaded = await db_client.post(
+        f"{url}/files", files=[("files", ("original.pdf", b"%PDF-race", "application/pdf"))]
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def delayed(*_args: object, **_kwargs: object) -> tuple[dict[str, object], bool]:
+        started.set()
+        await release.wait()
+        return {"counterparty": "Discarded"}, False
+
+    monkeypatch.setattr(ai_service, "extract_external_sales_from_files", delayed)
+    extraction = asyncio.create_task(db_client.post(f"{url}/extract"))
+    await asyncio.wait_for(started.wait(), timeout=5)
+    discarded = await db_client.delete(url)
+    assert discarded.status_code == 204, discarded.text
+    release.set()
+    stale_result = await extraction
+    assert stale_result.status_code == 404, stale_result.text
+    missing = await db_client.get(url)
+    assert missing.status_code == 404
 
 
 @pytest.mark.asyncio

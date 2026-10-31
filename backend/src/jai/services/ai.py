@@ -74,6 +74,7 @@ logger = logging.getLogger("jai.ai")
 _DEFAULT_COMPLETION_MAX_TOKENS = 512
 RECEIPT_EXTRACTION_MAX_TOKENS = 1_024
 ARTIFACT_VALIDATION_MAX_TOKENS = 4_096
+EXTERNAL_SALES_EXTRACTION_MAX_TOKENS = 1_024
 
 # ---------------------------------------------------------------------------
 # Probe image (built-in minimal PNG, used for connectivity/multimodal testing)
@@ -263,7 +264,7 @@ async def _get_ai_config(session: AsyncSession) -> AiSettings:
             value_type=AiSettings,
         )
     except Exception:
-        logger.warning("Failed to read AI settings from DB", exc_info=True)
+        logger.warning("Failed to read AI settings from DB")
         cfg = None
 
     # Env fallback (field-level, mirroring _get_smtp_config).
@@ -823,6 +824,102 @@ async def extract_from_files(
         confidence=str(parsed["confidence"]) if parsed.get("confidence") else None,
         summary=str(parsed["summary"]) if parsed.get("summary") else None,
     )
+
+
+async def extract_external_sales_from_files(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    files: list[tuple[str, bytes]],
+    *,
+    energy_source: bool = False,
+    client: httpx.AsyncClient | None = None,
+) -> tuple[dict[str, Any], bool]:
+    """Return bounded observed external-sale fields and whether PDFs were truncated.
+
+    This deliberately shares the existing settings, image conversion and provider
+    transport while keeping a separate prompt and strict, non-authoritative shape.
+    """
+    if not files:
+        raise AIExtractionError("AI_INVALID_RESPONSE")
+    ai_cfg = await _get_ai_config(session)
+    if not ai_cfg.enabled:
+        raise AIUnavailableError("AI_DISABLED")
+    if not ai_cfg.api_key or not ai_cfg.model or not ai_cfg.base_url:
+        raise AIUnavailableError("AI_NOT_CONFIGURED")
+
+    max_pages = get_settings().ai_pdf_max_pages
+    truncated = False
+    group_images: list[tuple[str, list[bytes]]] = []
+    for mime, raw_bytes in files:
+        normalized = mime.split(";")[0].strip().lower()
+        if normalized == "application/pdf":
+            import pypdfium2 as pdfium
+
+            document = pdfium.PdfDocument(raw_bytes)
+            try:
+                truncated = truncated or len(document) > max_pages
+            finally:
+                document.close()
+        group_images.append((normalized, _attachment_to_images(normalized, raw_bytes)))
+
+    prompt = (
+        "Read the attached external sales documents and report only values visibly observed. "
+        "For energy statements, isolate only any explicitly itemized electricity sold/exported; "
+        "never treat household purchases, fixed charges, net payable/settlement, advances, or "
+        "battery purchases as sales. Do not infer VAT eligibility, tax treatment, VAT category, "
+        "P&L inclusion, or accounting decisions. Preserve distinct tax-rate rows when visible. "
+        "Amounts must be JSON numbers or null; use absolute printed amounts and report signs only "
+        "when clearly printed. Put uncertainty in short review_notes. Return one JSON object with "
+        "keys document_date (YYYY-MM-DD), original_number, counterparty, description, "
+        "observed_net_total, observed_vat_total, tax_summaries (array of rate_percent/net_amount/"
+        "vat_amount), explicit_electricity_sale_component (boolean), confidence (high|medium|low), "
+        "review_notes (array). Omit unknown values. "
+        "Do not include markdown or other keys."
+    )
+    if energy_source:
+        prompt += (
+            " This is an energy-company statement: set explicit_electricity_sale_component to "
+            "true only when electricity sold/exported is separately itemized with its own amount. "
+            "If it is absent or unclear, set false and omit all monetary fields and tax rows. "
+            "Never use household electricity purchases, fixed charges, net settlement/payable, "
+            "or payment advances as sale amounts."
+        )
+    extra = (ai_cfg.receipt_prompt or "").strip()
+    if extra:
+        prompt += (
+            "\n\nAdditional owner instructions (do not override the output schema "
+            "or safety rules):\n"
+            + extra
+        )
+    messages = _build_group_messages(group_images, prompt)
+    try:
+        raw = await _call_chat_completions(
+            base_url=ai_cfg.base_url,
+            api_key=ai_cfg.api_key,
+            model=ai_cfg.model,
+            messages=messages,
+            client=client,
+            max_tokens=EXTERNAL_SALES_EXTRACTION_MAX_TOKENS,
+        )
+    except httpx.TimeoutException as exc:
+        raise AIExtractionError("AI_TIMEOUT") from exc
+    except (httpx.ConnectError, httpx.HTTPStatusError) as exc:
+        raise AIExtractionError("AI_PROVIDER_ERROR") from exc
+    except Exception as exc:
+        raise AIExtractionError("AI_PROVIDER_ERROR") from exc
+
+    try:
+        parsed = json.loads(_strip_code_fence(raw))
+    except (json.JSONDecodeError, ValueError):
+        raise AIExtractionError("AI_INVALID_RESPONSE") from None
+    if not isinstance(parsed, dict):
+        raise AIExtractionError("AI_INVALID_RESPONSE")
+    allowed = {
+        "document_date", "original_number", "counterparty", "description",
+        "observed_net_total", "observed_vat_total", "tax_summaries", "confidence", "review_notes",
+        "explicit_electricity_sale_component",
+    }
+    return {key: value for key, value in parsed.items() if key in allowed}, truncated
 
 
 # ---------------------------------------------------------------------------
