@@ -18,6 +18,9 @@ from jai.schemas.battery import (
     BatteryAnnualCalculateRequest,
     BatteryAnnualCalculation,
     BatteryAnnualConfirmRequest,
+    BatteryAnnualRevisionInput,
+    BatteryAnnualRevisionListRead,
+    BatteryAnnualRevisionPreview,
     BatteryAnnualUseInput,
     BatteryAnnualUseRead,
     BatteryAssetCreateRequest,
@@ -25,6 +28,9 @@ from jai.schemas.battery import (
     BatteryAssetPreview,
     BatteryAssetPreviewRequest,
     BatteryAssetRead,
+    BatteryAssetRevisionInput,
+    BatteryAssetRevisionListRead,
+    BatteryAssetRevisionPreview,
     BatteryConflictCode,
     BatteryConflictDetail,
     BatteryConflictResponse,
@@ -64,8 +70,12 @@ def _raise(exc: Exception) -> NoReturn:
                 "BATTERY_ACQUISITION_ALREADY_REGISTERED",
                 "BATTERY_HISTORICAL_ACK_REQUIRED",
                 "BATTERY_VERSION_CONFLICT",
+                "BATTERY_PREVIEW_STALE",
                 "BATTERY_ANNUAL_CONFIRMED",
                 "BATTERY_ANNUAL_ALREADY_CONFIRMED",
+                "BATTERY_REVISION_REQUIRED",
+                "BATTERY_REVISION_PERIOD_ACK_REQUIRED",
+                "BATTERY_REVISION_NO_CHANGES",
             }
             else 422
         )
@@ -134,6 +144,54 @@ async def get_asset(
         _raise(exc)
 
 
+@router.post(
+    "/{asset_id}/revisions/preview",
+    response_model=BatteryAssetRevisionPreview,
+    responses={409: {"model": BatteryConflictResponse}, 422: {"model": BatteryConflictResponse}},
+)
+async def preview_asset_revision(
+    asset_id: uuid.UUID,
+    body: BatteryAssetRevisionInput,
+    user: User = Depends(_owner),
+    session: AsyncSession = Depends(get_session),
+) -> BatteryAssetRevisionPreview:
+    try:
+        return await battery.preview_asset_revision(session, _company(user), asset_id, body)
+    except (LookupError, BatteryConflict) as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/{asset_id}/revisions",
+    response_model=BatteryAssetRead,
+    responses={409: {"model": BatteryConflictResponse}, 422: {"model": BatteryConflictResponse}},
+)
+async def revise_asset(
+    asset_id: uuid.UUID,
+    body: BatteryAssetRevisionInput,
+    user: User = Depends(_owner),
+    session: AsyncSession = Depends(get_session),
+) -> BatteryAssetRead:
+    try:
+        return await battery.revise_asset(session, _company(user), user.id, asset_id, body)
+    except (LookupError, BatteryConflict) as exc:
+        _raise(exc)
+
+
+@router.get("/{asset_id}/revisions", response_model=BatteryAssetRevisionListRead)
+async def get_asset_revisions(
+    asset_id: uuid.UUID,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    user: User = Depends(_owner),
+    session: AsyncSession = Depends(get_session),
+) -> BatteryAssetRevisionListRead:
+    try:
+        return await battery.list_asset_revisions(session, _company(user), asset_id, offset, limit)
+    except LookupError as exc:
+        _raise(exc)
+
+
 @router.get(
     "/{asset_id}/annual-use/{year}",
     response_model=BatteryAnnualUseRead | None,
@@ -191,9 +249,70 @@ async def calculate_annual_use(
 ) -> BatteryAnnualCalculation:
     try:
         return await battery.calculate_annual_use(
-            session, _company(user), asset_id, year, body.expected_version
+            session,
+            _company(user),
+            asset_id,
+            year,
+            body.expected_version,
+            body.expected_asset_version,
         )
     except (LookupError, BatteryConflict) as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/{asset_id}/annual-use/{year}/revisions/preview",
+    response_model=BatteryAnnualRevisionPreview,
+    responses={409: {"model": BatteryConflictResponse}, 422: {"model": BatteryConflictResponse}},
+)
+async def preview_annual_revision(
+    asset_id: uuid.UUID,
+    year: int,
+    body: BatteryAnnualRevisionInput,
+    user: User = Depends(_owner),
+    session: AsyncSession = Depends(get_session),
+) -> BatteryAnnualRevisionPreview:
+    try:
+        return await battery.preview_annual_revision(session, _company(user), asset_id, year, body)
+    except (LookupError, BatteryConflict) as exc:
+        _raise(exc)
+
+
+@router.post(
+    "/{asset_id}/annual-use/{year}/revisions",
+    response_model=BatteryAnnualUseRead,
+    responses={409: {"model": BatteryConflictResponse}, 422: {"model": BatteryConflictResponse}},
+)
+async def revise_annual_use(
+    asset_id: uuid.UUID,
+    year: int,
+    body: BatteryAnnualRevisionInput,
+    user: User = Depends(_owner),
+    session: AsyncSession = Depends(get_session),
+) -> BatteryAnnualUseRead:
+    try:
+        result = await battery.revise_annual_use(
+            session, _company(user), user.id, asset_id, year, body
+        )
+        return result
+    except (LookupError, BatteryConflict) as exc:
+        _raise(exc)
+
+
+@router.get("/{asset_id}/annual-use/{year}/revisions", response_model=BatteryAnnualRevisionListRead)
+async def get_annual_revisions(
+    asset_id: uuid.UUID,
+    year: int,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    user: User = Depends(_owner),
+    session: AsyncSession = Depends(get_session),
+) -> BatteryAnnualRevisionListRead:
+    try:
+        return await battery.list_annual_revisions(
+            session, _company(user), asset_id, year, offset, limit
+        )
+    except LookupError as exc:
         _raise(exc)
 
 

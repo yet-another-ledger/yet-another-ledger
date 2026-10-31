@@ -63,6 +63,10 @@ class BatteryAsset(Base):
     annual_uses: Mapped[list[BatteryAnnualUse]] = relationship(
         cascade="all, delete-orphan", passive_deletes=True, order_by="BatteryAnnualUse.year"
     )
+    revisions: Mapped[list[BatteryAssetRevision]] = relationship(
+        passive_deletes="all",
+        order_by="BatteryAssetRevision.version",
+    )
 
 
 class BatteryAnnualUse(Base):
@@ -95,6 +99,10 @@ class BatteryAnnualUse(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="BatteryAnnualEvidence.created_at",
+    )
+    revisions: Mapped[list[BatteryAnnualRevision]] = relationship(
+        passive_deletes="all",
+        order_by="BatteryAnnualRevision.version",
     )
 
 
@@ -149,6 +157,67 @@ class BatteryAnnualConfirmation(Base):
     calculation_base: Mapped[Decimal] = mapped_column(Numeric(18, 3), nullable=False)
     calculation_vat: Mapped[Decimal] = mapped_column(Numeric(18, 3), nullable=False)
     asset_version_used: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+
+
+class BatteryAssetRevision(Base):
+    __tablename__ = "battery_asset_revision"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "asset_id", "version", name="uq_battery_asset_revision_version"
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "asset_id"],
+            ["battery_asset.company_id", "battery_asset.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company.id", ondelete="RESTRICT"), nullable=False
+    )
+    asset_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL")
+    )
+    affected_periods: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    before_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    after_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+
+
+class BatteryAnnualRevision(Base):
+    __tablename__ = "battery_annual_revision"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id", "annual_use_id", "version", name="uq_battery_annual_revision_version"
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "annual_use_id"],
+            ["battery_annual_use.company_id", "battery_annual_use.id"],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company.id", ondelete="RESTRICT"), nullable=False
+    )
+    annual_use_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="SET NULL")
+    )
+    before_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    after_snapshot: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

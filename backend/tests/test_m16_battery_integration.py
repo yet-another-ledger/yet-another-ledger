@@ -150,9 +150,7 @@ async def test_battery_registration_annual_confirmation_report_and_expense_guard
     assert protected.status_code == 409
     async with db_session_maker() as session:
         owner = (
-            await session.execute(
-                select(User).where(User.email == "battery-step6@example.com")
-            )
+            await session.execute(select(User).where(User.email == "battery-step6@example.com"))
         ).scalar_one()
         assert owner.company_id is not None
         await set_rls_company(session, owner.company_id)
@@ -178,9 +176,7 @@ async def test_battery_registration_annual_confirmation_report_and_expense_guard
 
     missing_2026 = await db_client.get(f"/api/v1/battery-assets/{asset_id}/annual-use/2026")
     assert missing_2026.status_code == 200 and missing_2026.json() is None
-    untouched_annual = await db_client.get(
-        f"/api/v1/battery-assets/{asset_id}/annual-use/2026"
-    )
+    untouched_annual = await db_client.get(f"/api/v1/battery-assets/{asset_id}/annual-use/2026")
     assert untouched_annual.json() is None
     empty_report = await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=4")
     missing_box = empty_report.json()["boxes"]["box_1d"]
@@ -216,14 +212,20 @@ async def test_battery_registration_annual_confirmation_report_and_expense_guard
     assert evidence.status_code == 201, evidence.text
     calculation = await db_client.post(
         f"/api/v1/battery-assets/{asset_id}/annual-use/2025/calculate",
-        json={"expected_version": annual_input.json()["version"]},
+        json={
+            "expected_version": annual_input.json()["version"],
+            "expected_asset_version": asset["version"],
+        },
     )
     assert calculation.status_code == 200, calculation.text
     assert Decimal(calculation.json()["calculation_base"]) == Decimal("900.00")
     assert Decimal(calculation.json()["calculation_vat"]) == Decimal("189.00")
     confirmed = await db_client.post(
         f"/api/v1/battery-assets/{asset_id}/annual-use/2025/confirm",
-        json={"expected_version": annual_input.json()["version"]},
+        json={
+            "expected_version": annual_input.json()["version"],
+            "expected_asset_version": asset["version"],
+        },
     )
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["confirmed"] is True
@@ -241,10 +243,179 @@ async def test_battery_registration_annual_confirmation_report_and_expense_guard
     box_1d = year_one_report.json()["boxes"]["box_1d"]
     assert Decimal(box_1d["base"]) == Decimal("900.00")
     assert Decimal(box_1d["vat"]) == Decimal("189.00")
+
+    annual_revision_body = {
+        "expected_version": confirmed.json()["version"],
+        "expected_asset_version": asset["version"],
+        "private_use_percentage": "40",
+        "basis_note": "Corrected EMS allocation",
+        "reason": "The original EMS export used the wrong household meter",
+        "acknowledge_affected_periods": ["2025-Q4"],
+    }
+    annual_revision_preview = await db_client.post(
+        f"/api/v1/battery-assets/{asset_id}/annual-use/2025/revisions/preview",
+        json=annual_revision_body,
+    )
+    assert annual_revision_preview.status_code == 200, annual_revision_preview.text
+    assert Decimal(annual_revision_preview.json()["current_calculation_base"]) == Decimal("900.00")
+    assert Decimal(annual_revision_preview.json()["proposed_calculation_base"]) == Decimal("800.00")
+    annual_revision_unacknowledged = await db_client.post(
+        f"/api/v1/battery-assets/{asset_id}/annual-use/2025/revisions",
+        json={**annual_revision_body, "acknowledge_affected_periods": []},
+    )
+    assert annual_revision_unacknowledged.status_code == 409
+    revised_annual = await db_client.post(
+        f"/api/v1/battery-assets/{asset_id}/annual-use/2025/revisions",
+        json=annual_revision_body,
+    )
+    assert revised_annual.status_code == 200, revised_annual.text
+    assert revised_annual.json()["confirmed"] is False
+    assert revised_annual.json()["evidence"] == confirmed.json()["evidence"]
+    annual_history = await db_client.get(
+        f"/api/v1/battery-assets/{asset_id}/annual-use/2025/revisions"
+    )
+    assert annual_history.status_code == 200 and annual_history.json()["total"] == 1
+    assert annual_history.json()["items"][0]["reason"] == annual_revision_body["reason"]
+    assert annual_history.json()["items"][0]["actor_id"] is not None
+    assert annual_history.json()["items"][0]["created_at"]
+    stale_confirm = await db_client.post(
+        f"/api/v1/battery-assets/{asset_id}/annual-use/2025/confirm",
+        json={
+            "expected_version": confirmed.json()["version"],
+            "expected_asset_version": asset["version"],
+        },
+    )
+    assert stale_confirm.status_code == 409
+    incomplete_after_revision = await db_client.get(
+        "/api/v1/reports/vat-return?year=2025&quarter=4"
+    )
+    revised_box = incomplete_after_revision.json()["boxes"]["box_1d"]
+    assert revised_box["is_complete"] is False
+    assert Decimal(revised_box["known_battery_vat"]) == Decimal("0.00")
+    annual_reconfirmed = await db_client.post(
+        f"/api/v1/battery-assets/{asset_id}/annual-use/2025/confirm",
+        json={
+            "expected_version": revised_annual.json()["version"],
+            "expected_asset_version": asset["version"],
+        },
+    )
+    assert annual_reconfirmed.status_code == 200, annual_reconfirmed.text
+    revised_report = await db_client.get("/api/v1/reports/vat-return?year=2025&quarter=4")
+    assert Decimal(revised_report.json()["boxes"]["box_1d"]["base"]) == Decimal("800.00")
+    assert Decimal(revised_report.json()["boxes"]["box_1d"]["vat"]) == Decimal("168.00")
+
+    asset_revision_body = {
+        "expected_version": asset["version"],
+        "reason": "Corrected supplier invoice basis and service date",
+        "acquisition_expense_date": "2025-01-15",
+        "in_service_date": "2026-02-01",
+        "net_basis": "11000.00",
+        "purchase_vat": "2310.00",
+    }
+    asset_revision_preview = await db_client.post(
+        f"/api/v1/battery-assets/{asset_id}/revisions/preview",
+        json=asset_revision_body,
+    )
+    assert asset_revision_preview.status_code == 200, asset_revision_preview.text
+    assert asset_revision_preview.json()["expense_before"]["expense_date"] == "2024-12-20"
+    assert asset_revision_preview.json()["expense_after"]["expense_date"] == "2025-01-15"
+    assert Decimal(asset_revision_preview.json()["expense_after"]["base_net_amount"]) == Decimal(
+        "11000.00"
+    )
+    assert asset_revision_preview.json()["expense_before"]["currency"] == "EUR"
+    assert asset_revision_preview.json()["expense_after"]["currency"] == "EUR"
+    assert Decimal(asset_revision_preview.json()["expense_before"]["exchange_rate"]) == Decimal(
+        "1"
+    )
+    assert Decimal(asset_revision_preview.json()["expense_after"]["exchange_rate"]) == Decimal(
+        "1"
+    )
+    assert Decimal(asset_revision_preview.json()["expense_after"]["vat_rate_percent"]) == Decimal(
+        "21"
+    )
+    rates = await db_client.get("/api/v1/vat-rates")
+    alternative_rate = next(
+        row for row in rates.json()["items"] if Decimal(row["percent"]) == Decimal("9")
+    )
+    rate_revision_body = {**asset_revision_body, "vat_rate_id": alternative_rate["id"]}
+    rate_preview = await db_client.post(
+        f"/api/v1/battery-assets/{asset_id}/revisions/preview", json=rate_revision_body
+    )
+    assert rate_preview.status_code == 200, rate_preview.text
+    rate_revision_body["expected_rate_snapshot"] = rate_preview.json()["rate_snapshot"]
+    assert Decimal(rate_preview.json()["expense_after"]["vat_rate_percent"]) == Decimal("9")
+    affected_periods = asset_revision_preview.json()["affected_periods"]
+    assert "2024-Q4" in affected_periods and "2025-Q1" in affected_periods
+    assert "2025-Q4" in affected_periods and "2030-Q4" in affected_periods
+    asset_revision_missing_ack = await db_client.post(
+        f"/api/v1/battery-assets/{asset_id}/revisions",
+        json=asset_revision_body,
+    )
+    assert asset_revision_missing_ack.status_code == 409
+    concurrent_revisions = await asyncio.gather(
+        *(
+            db_client.post(
+                f"/api/v1/battery-assets/{asset_id}/revisions",
+                json={
+                    **rate_revision_body,
+                        "expected_annual_versions": {"2025": 2},
+                    "acknowledge_affected_periods": affected_periods,
+                },
+            )
+            for _ in range(2)
+        )
+    )
+    assert sorted(response.status_code for response in concurrent_revisions) == [200, 409]
+    revised_asset = next(
+        response.json() for response in concurrent_revisions if response.status_code == 200
+    )
+    assert revised_asset["version"] == asset["version"] + 1
+    updated_expense = await db_client.get(f"/api/v1/expenses/{expense_id}")
+    assert updated_expense.status_code == 200
+    assert updated_expense.json()["expense_date"] == "2025-01-15"
+    assert Decimal(updated_expense.json()["base_net_amount"]) == Decimal("11000.00")
+    assert Decimal(updated_expense.json()["net_amount"]) == Decimal("11000.00")
+    assert updated_expense.json()["vat_rate_id"] == alternative_rate["id"]
+    assert Decimal(updated_expense.json()["vat_rate_percent"]) == Decimal("9")
+    assert updated_expense.json()["include_in_pl"] is False
+    asset_history = await db_client.get(f"/api/v1/battery-assets/{asset_id}/revisions")
+    assert asset_history.status_code == 200 and asset_history.json()["total"] == 1
+    assert asset_history.json()["items"][0]["actor_id"] is not None
+    assert asset_history.json()["items"][0]["created_at"]
+    preserved_annual = next(
+        row
+        for row in asset_history.json()["items"][0]["before_snapshot"]["annual_before"]
+        if row["year"] == 2025
+    )
+    invalidated_annual = next(
+        row
+        for row in asset_history.json()["items"][0]["after_snapshot"]["annual_after"]
+        if row["year"] == 2025
+    )
+    assert Decimal(preserved_annual["calculation_base"]) == Decimal("800.00")
+    assert Decimal(preserved_annual["calculation_vat"]) == Decimal("168.00")
+    assert invalidated_annual["confirmed"] is False
+    assert invalidated_annual["calculation_base"] is None
+    historical_annual = await db_client.get(f"/api/v1/battery-assets/{asset_id}/annual-use/2025")
+    assert historical_annual.status_code == 200
+    assert historical_annual.json()["confirmed"] is False
+    assert historical_annual.json()["evidence"] == confirmed.json()["evidence"]
+    old_year_report = await db_client.get("/api/v1/reports/vat-return?year=2025&quarter=4")
+    assert Decimal(old_year_report.json()["boxes"]["box_1d"]["vat"]) == Decimal("0.00")
+    new_year_report = await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=4")
+    assert new_year_report.json()["boxes"]["box_1d"]["is_complete"] is False
+    new_year_missing = new_year_report.json()["boxes"]["box_1d"]["missing_inputs"]
+    assert {item["year"] for item in new_year_missing} >= {2026}
     acquisition_year = await db_client.get("/api/v1/reports/vat-return?year=2024&quarter=4")
     assert Decimal(acquisition_year.json()["boxes"]["box_1d"]["vat"]) == Decimal("0.00")
-    assert Decimal(acquisition_year.json()["boxes"]["box_5b"]["vat"]) == Decimal("2100.00")
+    assert Decimal(acquisition_year.json()["boxes"]["box_5b"]["vat"]) == Decimal("0.00")
     assert acquisition_year.json()["boxes"]["box_1d"]["missing_inputs"] == []
+    corrected_acquisition_period = await db_client.get(
+        "/api/v1/reports/vat-return?year=2025&quarter=1"
+    )
+    assert Decimal(
+        corrected_acquisition_period.json()["boxes"]["box_5b"]["vat"]
+    ) == Decimal("2310.00")
     pl = await db_client.get(
         "/api/v1/reports/profit-loss?from=2024-01-01&to=2024-12-31&granularity=quarter"
     )
@@ -252,20 +423,23 @@ async def test_battery_registration_annual_confirmation_report_and_expense_guard
     assert Decimal(pl.json()["expense_actual"]) == Decimal("0")
 
     fifth_year = await db_client.put(
-        f"/api/v1/battery-assets/{asset_id}/annual-use/2029",
+        f"/api/v1/battery-assets/{asset_id}/annual-use/2030",
         json={"private_use_percentage": "45", "basis_note": "Fifth-year EMS statement"},
     )
     assert fifth_year.status_code == 200
     fifth_confirmed = await db_client.post(
-        f"/api/v1/battery-assets/{asset_id}/annual-use/2029/confirm",
-        json={"expected_version": fifth_year.json()["version"]},
+        f"/api/v1/battery-assets/{asset_id}/annual-use/2030/confirm",
+        json={
+            "expected_version": fifth_year.json()["version"],
+            "expected_asset_version": revised_asset["version"],
+        },
     )
     assert fifth_confirmed.status_code == 200
-    fifth_report = await db_client.get("/api/v1/reports/vat-return?year=2029&quarter=4")
-    assert Decimal(fifth_report.json()["boxes"]["box_1d"]["vat"]) == Decimal("189.00")
-    non_q4 = await db_client.get("/api/v1/reports/vat-return?year=2029&quarter=2")
+    fifth_report = await db_client.get("/api/v1/reports/vat-return?year=2030&quarter=4")
+    assert Decimal(fifth_report.json()["boxes"]["box_1d"]["vat"]) == Decimal("89.10")
+    non_q4 = await db_client.get("/api/v1/reports/vat-return?year=2030&quarter=2")
     assert Decimal(non_q4.json()["boxes"]["box_1d"]["vat"]) == Decimal("0.00")
-    sixth_year = await db_client.get("/api/v1/reports/vat-return?year=2030&quarter=4")
+    sixth_year = await db_client.get("/api/v1/reports/vat-return?year=2031&quarter=4")
     sixth_box = sixth_year.json()["boxes"]["box_1d"]
     assert Decimal(sixth_box["vat"]) == Decimal("0.00")
     assert sixth_box["missing_inputs"] == []
@@ -277,7 +451,10 @@ async def test_battery_registration_annual_confirmation_report_and_expense_guard
     assert zero_input.status_code == 200
     zero_confirmed = await db_client.post(
         f"/api/v1/battery-assets/{asset_id}/annual-use/2026/confirm",
-        json={"expected_version": zero_input.json()["version"]},
+        json={
+            "expected_version": zero_input.json()["version"],
+            "expected_asset_version": revised_asset["version"],
+        },
     )
     assert zero_confirmed.status_code == 200
     complete_report = await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=4")
@@ -298,17 +475,35 @@ async def test_battery_registration_annual_confirmation_report_and_expense_guard
     )
     assert sorted(response.status_code for response in concurrent_writes) == [200, 409]
     winner = next(response.json() for response in concurrent_writes if response.status_code == 200)
-    next_version = await db_client.put(
-        f"/api/v1/battery-assets/{asset_id}/annual-use/2027",
-        json={"expected_version": winner["version"], **concurrent_body},
+    input_revision = {
+        "expected_version": winner["version"],
+        "expected_asset_version": revised_asset["version"],
+        **concurrent_body,
+        "reason": "Updated the annual meter estimate",
+        "acknowledge_affected_periods": ["2027-Q4"],
+    }
+    revision_preview = await db_client.post(
+        f"/api/v1/battery-assets/{asset_id}/annual-use/2027/revisions/preview",
+        json=input_revision,
     )
-    assert next_version.status_code == 200
-    stale = await db_client.put(
-        f"/api/v1/battery-assets/{asset_id}/annual-use/2027",
-        json={"expected_version": winner["version"], **concurrent_body},
+    assert revision_preview.status_code == 200, revision_preview.text
+    next_version = await db_client.post(
+        f"/api/v1/battery-assets/{asset_id}/annual-use/2027/revisions",
+        json=input_revision,
+    )
+    assert next_version.status_code == 200, next_version.text
+    stale = await db_client.post(
+        f"/api/v1/battery-assets/{asset_id}/annual-use/2027/revisions",
+        json=input_revision,
     )
     assert stale.status_code == 409
     assert stale.json()["detail"]["code"] == "BATTERY_VERSION_CONFLICT"
+    paged_history = await db_client.get(
+        f"/api/v1/battery-assets/{asset_id}/annual-use/2027/revisions?limit=100"
+    )
+    assert paged_history.status_code == 200
+    assert paged_history.json()["limit"] == 100
+    assert paged_history.json()["total"] == 1
 
     content = await db_client.get(
         f"/api/v1/battery-assets/{asset_id}/annual-use/2025/evidence/{evidence.json()['id']}/content"
@@ -317,9 +512,7 @@ async def test_battery_registration_annual_confirmation_report_and_expense_guard
 
     async with db_session_maker() as session:
         owner = (
-            await session.execute(
-                select(User).where(User.email == "battery-step6@example.com")
-            )
+            await session.execute(select(User).where(User.email == "battery-step6@example.com"))
         ).scalar_one()
         assert owner.company_id is not None
         await set_rls_company(session, owner.company_id)
@@ -395,9 +588,7 @@ async def test_battery_registration_annual_confirmation_report_and_expense_guard
         session.add(second_company)
         await session.flush()
         owner = (
-            await session.execute(
-                select(User).where(User.email == "battery-step6@example.com")
-            )
+            await session.execute(select(User).where(User.email == "battery-step6@example.com"))
         ).scalar_one()
         owner.company_id = second_company.id
         await session.commit()
@@ -455,7 +646,10 @@ async def test_vat_report_aggregates_each_battery_rounded_snapshot_with_unknown_
         assert annual.status_code == 200, annual.text
         confirmed = await db_client.post(
             f"/api/v1/battery-assets/{asset_id}/annual-use/{year}/confirm",
-            json={"expected_version": annual.json()["version"]},
+            json={
+                "expected_version": annual.json()["version"],
+                "expected_asset_version": registered.json()["version"],
+            },
         )
         assert confirmed.status_code == 200, confirmed.text
         assert Decimal(confirmed.json()["calculation_base"]) == Decimal("0.03")

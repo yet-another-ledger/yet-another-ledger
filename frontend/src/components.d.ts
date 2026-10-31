@@ -14,6 +14,7 @@ declare module 'vue' {
     AddressFieldsForm: typeof import('./components/AddressFieldsForm.vue')['default']
     AiSettingsForm: typeof import('./components/settings/AiSettingsForm.vue')['default']
     AppLayout: typeof import('./components/AppLayout.vue')['default']
+    BatteryAuditSnapshot: typeof import('./components/battery/BatteryAuditSnapshot.vue')['default']
     DictionarySettings: typeof import('./components/settings/DictionarySettings.vue')['default']
     DocumentDefaultsSettings: typeof import('./components/settings/DocumentDefaultsSettings.vue')['default']
     DocumentSendDialog: typeof import('./components/DocumentSendDialog.vue')['default']

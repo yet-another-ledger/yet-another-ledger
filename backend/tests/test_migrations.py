@@ -23,7 +23,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from jai.config import get_settings
@@ -395,7 +395,7 @@ class TestMigrations:
         )
 
     def test_0051_production_shaped_upgrade_and_retained_battery_downgrade_guard(self) -> None:
-        """0051 upgrades from the prior head and refuses to discard confirmed records."""
+        """0051 upgrades from 0050 and refuses to discard confirmed records."""
         isolated_url = URL.create(
             drivername="postgresql+asyncpg",
             username=get_settings().postgres_migration_user,
@@ -428,7 +428,7 @@ class TestMigrations:
         try:
             prior = _run_alembic("upgrade", "0050", url=isolated_url)
             assert prior.returncode == 0, prior.stderr
-            upgraded = _run_alembic("upgrade", "head", url=isolated_url)
+            upgraded = _run_alembic("upgrade", "0051", url=isolated_url)
             assert upgraded.returncode == 0, upgraded.stderr
             _query(
                 isolated_url,
@@ -505,6 +505,141 @@ class TestMigrations:
             ) == [
                 {"calculation_base": Decimal("900.000"), "calculation_vat": Decimal("189.000")}
             ]
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0052_runtime_revision_rls_append_only_and_retained_downgrade_guard(self) -> None:
+        """0052 isolates runtime audit reads and refuses to discard live history."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_revision_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        company_id, other_company_id, category_id, treatment_id, rate_id = (
+            uuid.uuid4() for _ in range(5)
+        )
+        expense_id, asset_id, annual_id, asset_revision_id, annual_revision_id = (
+            uuid.uuid4() for _ in range(5)
+        )
+        params = {
+            "company_id": company_id,
+            "category_id": category_id,
+            "treatment_id": treatment_id,
+            "rate_id": rate_id,
+            "expense_id": expense_id,
+            "asset_id": asset_id,
+            "annual_id": annual_id,
+            "asset_revision_id": asset_revision_id,
+            "annual_revision_id": annual_revision_id,
+        }
+        try:
+            prior = _run_alembic("upgrade", "0051", url=isolated_url)
+            assert prior.returncode == 0, prior.stderr
+            upgraded = _run_alembic("upgrade", "0052", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                isolated_url,
+                "INSERT INTO company (id,name,base_currency) "
+                "VALUES (:company_id,'M16 revisions','EUR'); "
+                "INSERT INTO expense_category (id,company_id,name,default_deductible,active) "
+                "VALUES (:category_id,:company_id,'Equipment',true,true); "
+                "INSERT INTO vat_rate (id,company_id,label,percent,active) "
+                "VALUES (:rate_id,:company_id,'21%',21,true); "
+                "INSERT INTO vat_treatment "
+                "(id,company_id,code,label,side,effect,report_box,requires_icp,deductible,active) "
+                "VALUES (:treatment_id,:company_id,'NL_DOMESTIC_PURCH','Domestic purchase',"
+                "'PURCHASE','APPLY_RATE','5b',false,true,true); "
+                "INSERT INTO expense "
+                "(id,company_id,expense_date,category_id,category_name,supplier_name,"
+                "vat_treatment_id,vat_treatment_code,vat_treatment_label,vat_treatment_effect,"
+                "vat_rate_id,vat_rate_percent,vat_rate_label,net_amount,vat_amount,gross_amount,"
+                "deductible,currency,exchange_rate,base_net_amount,base_vat_amount,"
+                "base_gross_amount) "
+                "VALUES (:expense_id,:company_id,DATE '2025-01-02',:category_id,'Equipment',"
+                "'Supplier',:treatment_id,'NL_DOMESTIC_PURCH','Domestic purchase','APPLY_RATE',"
+                ":rate_id,21,'21%',10000,2100,12100,true,'EUR',1,10000,2100,12100); "
+                "INSERT INTO battery_asset "
+                "(id,company_id,acquisition_expense_id,acquisition_expense_date,in_service_date,"
+                "net_basis,purchase_vat,purchase_vat_rate_percent,currency,"
+                "ordinary_vat_full_deduction_confirmed,owner_confirmed_at) "
+                "VALUES (:asset_id,:company_id,:expense_id,DATE '2025-01-02',DATE '2025-01-02',"
+                "10000,2100,21,'EUR',true,now()); "
+                "INSERT INTO battery_annual_use "
+                "(id,company_id,asset_id,year,private_use_percentage,basis_note) "
+                "VALUES (:annual_id,:company_id,:asset_id,2025,45,'EMS'); "
+                "INSERT INTO battery_asset_revision "
+                "(id,company_id,asset_id,version,reason,affected_periods,before_snapshot,"
+                "after_snapshot) "
+                "VALUES (:asset_revision_id,:company_id,:asset_id,2,'Corrected basis','[]',"
+                "'{}','{}'); "
+                "INSERT INTO battery_annual_revision "
+                "(id,company_id,annual_use_id,version,reason,before_snapshot,after_snapshot) "
+                "VALUES (:annual_revision_id,:company_id,:annual_id,2,'Corrected EMS','{}','{}')",
+                params,
+                company_id=company_id,
+            )
+            rls_flags = _query(
+                isolated_url,
+                "SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('battery_asset_revision','battery_annual_revision') "
+                "ORDER BY relname",
+            )
+            assert [
+                (row["relname"], row["relrowsecurity"], row["relforcerowsecurity"])
+                for row in rls_flags
+            ] == [
+                ("battery_annual_revision", True, True),
+                ("battery_asset_revision", True, True),
+            ]
+            runtime = _runtime_url(isolated_url)
+            assert _query(runtime, "SELECT count(*) AS n FROM battery_asset_revision") == [
+                {"n": 0}
+            ]
+            assert _query(
+                runtime,
+                "SELECT count(*) AS n FROM battery_asset_revision",
+                company_id=company_id,
+            ) == [{"n": 1}]
+            assert _query(
+                runtime,
+                "SELECT count(*) AS n FROM battery_annual_revision",
+                company_id=company_id,
+            ) == [{"n": 1}]
+            assert _query(
+                runtime,
+                "SELECT count(*) AS n FROM battery_annual_revision",
+                company_id=other_company_id,
+            ) == [{"n": 0}]
+            with pytest.raises(DBAPIError, match="battery revisions are append-only"):
+                _query(
+                    isolated_url,
+                    "UPDATE battery_asset_revision SET reason='rewritten' "
+                    "WHERE id=:asset_revision_id",
+                    {"asset_revision_id": asset_revision_id},
+                    company_id=company_id,
+                )
+            with pytest.raises(DBAPIError, match="battery revisions are append-only"):
+                _query(
+                    isolated_url,
+                    "DELETE FROM battery_annual_revision WHERE id=:annual_revision_id",
+                    {"annual_revision_id": annual_revision_id},
+                    company_id=company_id,
+                )
+            refused = _run_alembic("downgrade", "0051", url=isolated_url)
+            assert refused.returncode != 0
+            assert "Refusing to discard retained battery revision history" in refused.stderr
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": "0052"}
+            ]
+            assert _query(
+                runtime,
+                "SELECT count(*) AS n FROM battery_asset_revision",
+                company_id=company_id,
+            ) == [{"n": 1}]
         finally:
             _drop_database(isolated_url)
 

@@ -2161,6 +2161,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/battery-assets/{asset_id}/revisions/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Asset Revision */
+        post: operations["preview_asset_revision_api_v1_battery_assets__asset_id__revisions_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/{asset_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Asset Revisions */
+        get: operations["get_asset_revisions_api_v1_battery_assets__asset_id__revisions_get"];
+        put?: never;
+        /** Revise Asset */
+        post: operations["revise_asset_api_v1_battery_assets__asset_id__revisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/battery-assets/{asset_id}/annual-use/{year}": {
         parameters: {
             query?: never;
@@ -2190,6 +2225,41 @@ export interface paths {
         put?: never;
         /** Calculate Annual Use */
         post: operations["calculate_annual_use_api_v1_battery_assets__asset_id__annual_use__year__calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/{asset_id}/annual-use/{year}/revisions/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Annual Revision */
+        post: operations["preview_annual_revision_api_v1_battery_assets__asset_id__annual_use__year__revisions_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/{asset_id}/annual-use/{year}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Annual Revisions */
+        get: operations["get_annual_revisions_api_v1_battery_assets__asset_id__annual_use__year__revisions_get"];
+        put?: never;
+        /** Revise Annual Use */
+        post: operations["revise_annual_use_api_v1_battery_assets__asset_id__annual_use__year__revisions_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3695,6 +3765,8 @@ export interface components {
         BatteryAnnualCalculateRequest: {
             /** Expected Version */
             expected_version: number;
+            /** Expected Asset Version */
+            expected_asset_version: number;
         };
         /** BatteryAnnualCalculation */
         BatteryAnnualCalculation: {
@@ -3707,6 +3779,8 @@ export interface components {
             year: number;
             /** Expected Version */
             expected_version: number;
+            /** Expected Asset Version */
+            expected_asset_version: number;
             /** Private Use Percentage */
             private_use_percentage: string;
             /** Calculation Base */
@@ -3725,6 +3799,8 @@ export interface components {
         BatteryAnnualConfirmRequest: {
             /** Expected Version */
             expected_version: number;
+            /** Expected Asset Version */
+            expected_asset_version: number;
         };
         /** BatteryAnnualMissingInput */
         BatteryAnnualMissingInput: {
@@ -3736,6 +3812,116 @@ export interface components {
             /** Year */
             year: number;
             code: components["schemas"]["BatteryMissingCode"];
+        };
+        /** BatteryAnnualRevisionInput */
+        BatteryAnnualRevisionInput: {
+            /** Expected Version */
+            expected_version: number;
+            /** Private Use Percentage */
+            private_use_percentage?: number | string | null;
+            /** Basis Note */
+            basis_note: string;
+            /** Expected Asset Version */
+            expected_asset_version: number;
+            /** Reason */
+            reason: string;
+            /** Acknowledge Affected Periods */
+            acknowledge_affected_periods?: string[];
+        };
+        /** BatteryAnnualRevisionListRead */
+        BatteryAnnualRevisionListRead: {
+            /** Items */
+            items: components["schemas"]["BatteryAnnualRevisionRead"][];
+            /** Total */
+            total: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset?: number;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit?: number;
+        };
+        /** BatteryAnnualRevisionPreview */
+        BatteryAnnualRevisionPreview: {
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Year */
+            year: number;
+            /** Expected Version */
+            expected_version: number;
+            /** Expected Asset Version */
+            expected_asset_version: number;
+            /** Current Private Use Percentage */
+            current_private_use_percentage: string | null;
+            /** Current Calculation Base */
+            current_calculation_base: string | null;
+            /** Current Calculation Vat */
+            current_calculation_vat: string | null;
+            /** Proposed Private Use Percentage */
+            proposed_private_use_percentage: string | null;
+            /** Proposed Calculation Base */
+            proposed_calculation_base: string | null;
+            /** Proposed Calculation Vat */
+            proposed_calculation_vat: string | null;
+            /** Affected Periods */
+            affected_periods: string[];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** BatteryAnnualRevisionPreviewItem */
+        BatteryAnnualRevisionPreviewItem: {
+            /** Year */
+            year: number;
+            /** Current Version */
+            current_version: number | null;
+            /** Current Confirmed */
+            current_confirmed: boolean;
+            /** Current Private Use Percentage */
+            current_private_use_percentage: string | null;
+            /** Current Calculation Base */
+            current_calculation_base: string | null;
+            /** Current Calculation Vat */
+            current_calculation_vat: string | null;
+            /** Proposed Calculation Base */
+            proposed_calculation_base: string | null;
+            /** Proposed Calculation Vat */
+            proposed_calculation_vat: string | null;
+            /** Requires Reconfirmation */
+            requires_reconfirmation: boolean;
+        };
+        /** BatteryAnnualRevisionRead */
+        BatteryAnnualRevisionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version: number;
+            /** Reason */
+            reason: string;
+            /** Actor Id */
+            actor_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Before Snapshot */
+            before_snapshot: {
+                [key: string]: unknown;
+            };
+            /** After Snapshot */
+            after_snapshot: {
+                [key: string]: unknown;
+            };
         };
         /** BatteryAnnualUseInput */
         BatteryAnnualUseInput: {
@@ -3908,11 +4094,104 @@ export interface components {
              */
             created_at: string;
         };
+        /** BatteryAssetRevisionInput */
+        BatteryAssetRevisionInput: {
+            /** Expected Version */
+            expected_version: number;
+            /** Reason */
+            reason: string;
+            /** Acquisition Expense Date */
+            acquisition_expense_date?: string | null;
+            /** In Service Date */
+            in_service_date?: string | null;
+            /** Net Basis */
+            net_basis?: number | string | null;
+            /** Purchase Vat */
+            purchase_vat?: number | string | null;
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+            /** Expected Rate Snapshot */
+            expected_rate_snapshot?: string | null;
+            /** Expected Annual Versions */
+            expected_annual_versions?: {
+                [key: string]: number;
+            };
+            /** Acknowledge Affected Periods */
+            acknowledge_affected_periods?: string[];
+        };
+        /** BatteryAssetRevisionListRead */
+        BatteryAssetRevisionListRead: {
+            /** Items */
+            items: components["schemas"]["BatteryAssetRevisionRead"][];
+            /** Total */
+            total: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset?: number;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit?: number;
+        };
+        /** BatteryAssetRevisionPreview */
+        BatteryAssetRevisionPreview: {
+            /** Rate Snapshot */
+            rate_snapshot?: string | null;
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Expected Version */
+            expected_version: number;
+            before: components["schemas"]["BatteryAssetRead"];
+            after: components["schemas"]["BatteryAssetRead"];
+            expense_before: components["schemas"]["BatteryExpenseFinancialSnapshot"];
+            expense_after: components["schemas"]["BatteryExpenseFinancialSnapshot"];
+            /** Affected Periods */
+            affected_periods: string[];
+            /** Annual Previews */
+            annual_previews: components["schemas"]["BatteryAnnualRevisionPreviewItem"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** BatteryAssetRevisionRead */
+        BatteryAssetRevisionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version: number;
+            /** Reason */
+            reason: string;
+            /** Actor Id */
+            actor_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Affected Periods */
+            affected_periods: string[];
+            /** Before Snapshot */
+            before_snapshot: {
+                [key: string]: unknown;
+            };
+            /** After Snapshot */
+            after_snapshot: {
+                [key: string]: unknown;
+            };
+        };
         /**
          * BatteryConflictCode
          * @enum {string}
          */
-        BatteryConflictCode: "BATTERY_ACQUISITION_ALREADY_REGISTERED" | "BATTERY_EXPENSE_INELIGIBLE" | "BATTERY_OWNER_CONFIRMATION_REQUIRED" | "BATTERY_HISTORICAL_ACK_REQUIRED" | "BATTERY_VERSION_CONFLICT" | "BATTERY_YEAR_NOT_APPLICABLE" | "BATTERY_ANNUAL_INPUT_MISSING" | "BATTERY_ANNUAL_CONFIRMED" | "BATTERY_ANNUAL_ALREADY_CONFIRMED" | "BATTERY_EXPENSE_PROTECTED" | "BATTERY_EVIDENCE_INVALID";
+        BatteryConflictCode: "BATTERY_ACQUISITION_ALREADY_REGISTERED" | "BATTERY_EXPENSE_INELIGIBLE" | "BATTERY_OWNER_CONFIRMATION_REQUIRED" | "BATTERY_HISTORICAL_ACK_REQUIRED" | "BATTERY_VERSION_CONFLICT" | "BATTERY_YEAR_NOT_APPLICABLE" | "BATTERY_ANNUAL_INPUT_MISSING" | "BATTERY_ANNUAL_CONFIRMED" | "BATTERY_ANNUAL_ALREADY_CONFIRMED" | "BATTERY_REVISION_REQUIRED" | "BATTERY_REVISION_NO_CHANGES" | "BATTERY_REVISION_PERIOD_ACK_REQUIRED" | "BATTERY_PREVIEW_STALE" | "BATTERY_EXPENSE_PROTECTED" | "BATTERY_EVIDENCE_INVALID";
         /** BatteryConflictDetail */
         BatteryConflictDetail: {
             code: components["schemas"]["BatteryConflictCode"];
@@ -3945,6 +4224,39 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * BatteryExpenseFinancialSnapshot
+         * @description Expense values affected by a controlled asset correction.
+         */
+        BatteryExpenseFinancialSnapshot: {
+            /**
+             * Expense Date
+             * Format: date
+             */
+            expense_date: string;
+            /** Currency */
+            currency: string;
+            /** Exchange Rate */
+            exchange_rate: string;
+            /** Net Amount */
+            net_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Base Net Amount */
+            base_net_amount: string;
+            /** Base Vat Amount */
+            base_vat_amount: string;
+            /** Base Gross Amount */
+            base_gross_amount: string;
+            /** Vat Rate Id */
+            vat_rate_id: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
         };
         /**
          * BatteryMissingCode
@@ -16273,6 +16585,128 @@ export interface operations {
             };
         };
     };
+    preview_asset_revision_api_v1_battery_assets__asset_id__revisions_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatteryAssetRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAssetRevisionPreview"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
+    get_asset_revisions_api_v1_battery_assets__asset_id__revisions_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAssetRevisionListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revise_asset_api_v1_battery_assets__asset_id__revisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatteryAssetRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAssetRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
     get_annual_use_api_v1_battery_assets__asset_id__annual_use__year__get: {
         parameters: {
             query?: never;
@@ -16373,6 +16807,131 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BatteryAnnualCalculation"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
+    preview_annual_revision_api_v1_battery_assets__asset_id__annual_use__year__revisions_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatteryAnnualRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAnnualRevisionPreview"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
+    get_annual_revisions_api_v1_battery_assets__asset_id__annual_use__year__revisions_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAnnualRevisionListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revise_annual_use_api_v1_battery_assets__asset_id__annual_use__year__revisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatteryAnnualRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAnnualUseRead"];
                 };
             };
             /** @description Conflict */
