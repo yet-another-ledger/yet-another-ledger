@@ -4876,6 +4876,8 @@ export interface components {
             quarter: number;
             /** @description Key performance indicators. */
             kpi: components["schemas"]["DashboardKpi"];
+            /** @description Completeness and traceable missing inputs for the VAT KPI. */
+            current_quarter_vat_status: components["schemas"]["DashboardVatStatus"];
             /**
              * Monthly
              * @description 12-month series (Jan–Dec) for the selected year.
@@ -4910,6 +4912,22 @@ export interface components {
              * @description Total net expense amount in this category for the year (EUR).
              */
             net: string;
+        };
+        /**
+         * DashboardVatStatus
+         * @description Completeness of the VAT projection used by the dashboard KPI.
+         */
+        DashboardVatStatus: {
+            /**
+             * Is Complete
+             * @description False when the VAT KPI is a known subtotal; copied from VAT box 1d.
+             */
+            is_complete: boolean;
+            /**
+             * Missing Inputs
+             * @description Applicable annual battery inputs needing completion or confirmation.
+             */
+            missing_inputs: components["schemas"]["BatteryAnnualMissingInput"][];
         };
         /**
          * DiscountInput

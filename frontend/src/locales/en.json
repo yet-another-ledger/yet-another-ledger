@@ -288,6 +288,8 @@
     "ytdExpense": "YTD Expenses",
     "ytdProfit": "YTD Profit",
     "currentQuarterVat": "Current Quarter VAT Payable",
+    "currentQuarterVatSubtotal": "Current Quarter VAT — Known Subtotal",
+    "vatIncomplete": "Incomplete VAT projection: the displayed amount is a known subtotal. Review the missing inputs below and the VAT report before filing.",
     "currentQuarterVatHint": "Net VAT payable (+) or refundable (−) for Q{q}.",
     "monthlyTitle": "Monthly Revenue / Expenses / Profit",
     "topCategoriesTitle": "Top 5 Expense Categories",

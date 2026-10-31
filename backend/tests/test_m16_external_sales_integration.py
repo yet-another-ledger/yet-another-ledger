@@ -386,6 +386,7 @@ async def test_external_sales_runtime_rls_and_cross_company_child_ownership(
         await runtime.commit()
         await set_rls_company(runtime, company_b)
         assert await runtime.scalar(text("SELECT count(*) FROM external_sale_revision")) == 0
+        assert await runtime.scalar(text("SELECT count(*) FROM external_sale_posting")) == 0
         with pytest.raises(DBAPIError):
             await runtime.execute(
                 text("""INSERT INTO external_sale_revision

@@ -413,8 +413,9 @@ class TestMigrations:
             expense_id,
             asset_id,
             annual_id,
+            evidence_id,
             confirmation_id,
-        ) = (uuid.uuid4() for _ in range(8))
+        ) = (uuid.uuid4() for _ in range(9))
         params = {
             "company_id": company_id,
             "category_id": category_id,
@@ -423,6 +424,7 @@ class TestMigrations:
             "expense_id": expense_id,
             "asset_id": asset_id,
             "annual_id": annual_id,
+            "evidence_id": evidence_id,
             "confirmation_id": confirmation_id,
         }
         try:
@@ -463,6 +465,10 @@ class TestMigrations:
                 "confirmed_at,calculation_base,calculation_vat,asset_version_used) "
                 "VALUES (:annual_id,:company_id,:asset_id,2025,45,'EMS annual statement',true,"
                 "now(),900,189,1); "
+                "INSERT INTO battery_annual_evidence "
+                "(id,company_id,annual_use_id,storage_key,filename,media_type,byte_size,sha256) "
+                "VALUES (:evidence_id,:company_id,:annual_id,'battery/evidence/retained',"
+                "'annual.pdf','application/pdf',3,'retained-sha'); "
                 "INSERT INTO battery_annual_confirmation "
                 "(id,company_id,annual_use_id,version,private_use_percentage,calculation_base,"
                 "calculation_vat,asset_version_used) "
@@ -470,10 +476,25 @@ class TestMigrations:
                 params,
                 company_id=company_id,
             )
-            assert _query(
-                _runtime_url(isolated_url),
-                "SELECT count(*) AS n FROM battery_asset",
-            ) == [{"n": 0}]
+            runtime = _runtime_url(isolated_url)
+            other_company_id = uuid.uuid4()
+            for table in (
+                "battery_asset",
+                "battery_annual_use",
+                "battery_annual_evidence",
+                "battery_annual_confirmation",
+            ):
+                assert _query(runtime, f"SELECT count(*) AS n FROM {table}") == [{"n": 0}]
+                assert _query(
+                    runtime,
+                    f"SELECT count(*) AS n FROM {table}",
+                    company_id=company_id,
+                ) == [{"n": 1}]
+                assert _query(
+                    runtime,
+                    f"SELECT count(*) AS n FROM {table}",
+                    company_id=other_company_id,
+                ) == [{"n": 0}]
             rls_flags = _query(
                 isolated_url,
                 "SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class "
@@ -606,6 +627,11 @@ class TestMigrations:
             ) == [{"n": 1}]
             assert _query(
                 runtime,
+                "SELECT count(*) AS n FROM battery_asset_revision",
+                company_id=other_company_id,
+            ) == [{"n": 0}]
+            assert _query(
+                runtime,
                 "SELECT count(*) AS n FROM battery_annual_revision",
                 company_id=company_id,
             ) == [{"n": 1}]
@@ -644,7 +670,7 @@ class TestMigrations:
             _drop_database(isolated_url)
 
     def test_0046_backfills_legacy_expense_modes_without_changing_amounts(self) -> None:
-        """The 0045→0046 production-shaped upgrade preserves NET/true legacy semantics."""
+        """The 0045→head production-shaped upgrade preserves legacy business records."""
         isolated_url = URL.create(
             drivername="postgresql+asyncpg",
             username=get_settings().postgres_migration_user,
@@ -658,6 +684,9 @@ class TestMigrations:
             initial = _run_alembic("upgrade", "0045", url=isolated_url)
             assert initial.returncode == 0, initial.stderr
             ids = _insert_0025_expense_sentinel(isolated_url)
+            invoice = _insert_0028_downgrade_sentinel(
+                isolated_url, quote_provenance=False, payment_tax=True
+            )
             amount_columns = (
                 "net_amount, vat_amount, gross_amount, base_net_amount, "
                 "base_vat_amount, base_gross_amount, business_percentage, depreciation_years"
@@ -673,6 +702,20 @@ class TestMigrations:
                 "SELECT net_amount, vat_amount, gross_amount, business_percentage, "
                 "depreciation_years FROM recurring_expense WHERE id=:recurring_id",
                 {"recurring_id": ids["recurring_id"]},
+                company_id=ids["company_id"],
+            )
+            before_invoice = _query(
+                isolated_url,
+                "SELECT invoice_number, sequence_number, subtotal_excl_vat, vat_total, "
+                "total_incl_vat, due_amount FROM invoice WHERE id=:invoice_id",
+                {"invoice_id": invoice["invoice_id"]},
+                company_id=invoice["company_id"],
+            )
+            before_file = _query(
+                isolated_url,
+                "SELECT storage_key, filename, mime_type, byte_size, sha256 "
+                "FROM expense_attachment WHERE id=:attachment_id",
+                {"attachment_id": ids["attachment_id"]},
                 company_id=ids["company_id"],
             )
             upgrade = _run_alembic("upgrade", "head", url=isolated_url)
@@ -708,6 +751,32 @@ class TestMigrations:
                 )
                 == before_recurring
             )
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT invoice_number, sequence_number, subtotal_excl_vat, vat_total, "
+                    "total_incl_vat, due_amount FROM invoice WHERE id=:invoice_id",
+                    {"invoice_id": invoice["invoice_id"]},
+                    company_id=invoice["company_id"],
+                )
+                == before_invoice
+            )
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT storage_key, filename, mime_type, byte_size, sha256 "
+                    "FROM expense_attachment WHERE id=:attachment_id",
+                    {"attachment_id": ids["attachment_id"]},
+                    company_id=ids["company_id"],
+                )
+                == before_file
+            )
+            assert _query(
+                isolated_url,
+                "SELECT count(*) AS n FROM battery_asset WHERE acquisition_expense_id=:expense_id",
+                {"expense_id": ids["expense_id"]},
+                company_id=ids["company_id"],
+            ) == [{"n": 0}]
             original_expense_rls = _query(
                 isolated_url,
                 "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "

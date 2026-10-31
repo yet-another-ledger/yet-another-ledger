@@ -85,6 +85,9 @@ const kpiVat = computed(() =>
     : '—',
 )
 const currentQuarter = computed(() => store.dashboardReport?.quarter ?? '?')
+const vatIncomplete = computed(() =>
+  store.dashboardReport?.current_quarter_vat_status.is_complete === false,
+)
 
 const profitPositive = computed(() => {
   if (!store.dashboardReport) return true
@@ -236,7 +239,7 @@ const topCategoryColumns = computed<DataTableColumns<DashboardTopCategory>>(() =
                 </n-gi>
                 <n-gi>
                   <n-statistic
-                    :label="t('dashboard.currentQuarterVat')"
+                    :label="t(vatIncomplete ? 'dashboard.currentQuarterVatSubtotal' : 'dashboard.currentQuarterVat')"
                     :value="kpiVat"
                     :value-style="{
                       color: vatPositive ? 'var(--n-color-error)' : 'var(--n-color-success)',
@@ -250,6 +253,19 @@ const topCategoryColumns = computed<DataTableColumns<DashboardTopCategory>>(() =
                   </n-statistic>
                 </n-gi>
               </n-grid>
+              <n-alert v-if="vatIncomplete" type="warning" class="mt-4">
+                {{ t('dashboard.vatIncomplete') }}
+                <ul v-if="store.dashboardReport.current_quarter_vat_status.missing_inputs.length">
+                  <li
+                    v-for="missing in store.dashboardReport.current_quarter_vat_status.missing_inputs"
+                    :key="`${missing.asset_id}-${missing.year}`"
+                  >
+                    <router-link :to="`/battery-assets/${missing.asset_id}?year=${missing.year}`">
+                      {{ t('reports.vat.batteryMissing', { year: missing.year, code: t(`reports.vat.missingCodes.${missing.code}`) }) }}
+                    </router-link>
+                  </li>
+                </ul>
+              </n-alert>
             </n-card>
 
             <!-- Monthly bar chart -->

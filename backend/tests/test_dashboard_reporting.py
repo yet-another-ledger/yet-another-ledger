@@ -1050,3 +1050,40 @@ class TestAmountPrecision:
 def _make_vat_return_with_net_payable(net_payable: str, year: int, quarter: int) -> VatReturnReport:
     """Alias for _make_vat_report – clearly named for test readability."""
     return _make_vat_report(net_payable=net_payable, year=year, quarter=quarter)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code", [None, "MISSING", "PERCENTAGE_MISSING", "UNCONFIRMED", "RECONFIRMATION_REQUIRED"]
+)
+async def test_vat_completeness_preserves_known_subtotal(code: str | None) -> None:
+    """Propagate status without zeroing, recomputing or rounding the known VAT."""
+    from jai.schemas.battery import BatteryAnnualMissingInput, BatteryMissingCode
+
+    vat = _make_vat_report(net_payable="123.456", year=2025, quarter=4)
+    vat.boxes.box_1d.is_complete = code is None
+    if code is not None:
+        vat.boxes.box_1d.missing_inputs = [
+            BatteryAnnualMissingInput(
+                asset_id=uuid.uuid4(), year=2025, code=BatteryMissingCode(code)
+            )
+        ]
+    with (
+        patch(
+            "jai.services.reporting.dashboard.compute_profit_loss",
+            new=AsyncMock(return_value=_make_pl_report(year=2025)),
+        ),
+        patch(
+            "jai.services.reporting.dashboard.compute_vat_return", new=AsyncMock(return_value=vat)
+        ),
+        patch(
+            "jai.services.reporting.dashboard.compute_expense_report",
+            new=AsyncMock(return_value=_make_expense_report([], year=2025)),
+        ),
+    ):
+        result = await compute_dashboard(
+            _mock_session(), company=_make_company(), year=2025, tiers=_DEFAULT_TIERS
+        )
+    assert result.kpi.current_quarter_vat_payable == Decimal("123.456")
+    assert result.current_quarter_vat_status.is_complete is (code is None)
+    assert result.current_quarter_vat_status.missing_inputs == vat.boxes.box_1d.missing_inputs

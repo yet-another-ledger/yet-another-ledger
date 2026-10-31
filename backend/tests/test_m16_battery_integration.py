@@ -6,6 +6,7 @@ import asyncio
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pyotp
 import pytest
@@ -685,3 +686,119 @@ async def test_vat_report_aggregates_each_battery_rounded_snapshot_with_unknown_
     assert any(
         "base cannot be determined reliably" in warning for warning in report.json()["warnings"]
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("year", [2025, 2026])
+async def test_dashboard_preserves_battery_vat_completeness(
+    db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch, year: int
+) -> None:
+    """Current Q4 and a selected prior year retain missing and revised-input state."""
+    import jai.services.reporting.dashboard as dashboard_service
+
+    clock = Mock()
+    clock.now.return_value.date.return_value = date(2026, 11, 1)
+    monkeypatch.setattr(dashboard_service, "datetime", clock)
+    await _owner_company(db_client, f"dashboard-battery-{year}@example.com")
+    category, treatment, rate = await _purchase_dictionaries(db_client)
+    purchase = await db_client.post(
+        "/api/v1/expenses",
+        json={
+            "expense_date": f"{year}-01-01",
+            "category_id": category,
+            "vat_treatment_id": treatment,
+            "vat_rate_id": rate,
+            "net_amount": "10000",
+            "vat_amount": "2100",
+            "deductible": True,
+        },
+    )
+    assert purchase.status_code == 201, purchase.text
+    registered = await db_client.post(
+        "/api/v1/battery-assets",
+        json={
+            "acquisition_expense_id": purchase.json()["id"],
+            "in_service_date": f"{year}-01-01",
+            "owner_confirms_ordinary_vat_full_deduction": True,
+            "acknowledge_affected_periods": True,
+        },
+    )
+    assert registered.status_code == 201, registered.text
+    asset = registered.json()
+    annual_url = f"/api/v1/battery-assets/{asset['id']}/annual-use/{year}"
+
+    async def assert_projection(code: str | None, amount: str) -> None:
+        before = await db_client.get(annual_url)
+        vat = await db_client.get(f"/api/v1/reports/vat-return?year={year}&quarter=4")
+        dashboard = await db_client.get(f"/api/v1/reports/dashboard?year={year}")
+        assert vat.status_code == dashboard.status_code == 200
+        report = dashboard.json()
+        box = vat.json()["boxes"]["box_1d"]
+        assert report["year"] == year and report["quarter"] == 4
+        assert report["current_quarter_vat_status"] == {
+            "is_complete": code is None,
+            "missing_inputs": (
+                [] if code is None else [{"asset_id": asset["id"], "year": year, "code": code}]
+            ),
+        }
+        assert report["current_quarter_vat_status"]["is_complete"] == box["is_complete"]
+        assert report["current_quarter_vat_status"]["missing_inputs"] == box["missing_inputs"]
+        assert Decimal(report["kpi"]["current_quarter_vat_payable"]) == Decimal(amount)
+        assert Decimal(report["kpi"]["current_quarter_vat_payable"]) == Decimal(
+            vat.json()["totals"]["net_payable_or_refundable"]["vat"]
+        )
+        after = await db_client.get(annual_url)
+        assert before.json() == after.json()  # Report reads never create/confirm inputs.
+
+    await assert_projection("MISSING", "0")
+    annual = await db_client.put(annual_url, json={"basis_note": "Waiting for EMS data"})
+    assert annual.status_code == 200, annual.text
+    await assert_projection("PERCENTAGE_MISSING", "0")
+    annual = await db_client.post(
+        annual_url + "/revisions",
+        json={
+            "expected_version": annual.json()["version"],
+            "expected_asset_version": asset["version"],
+            "private_use_percentage": "45",
+            "basis_note": "EMS annual statement",
+            "reason": "EMS annual percentage is now available",
+            "acknowledge_affected_periods": [f"{year}-Q4"],
+        },
+    )
+    assert annual.status_code == 200, annual.text
+    await assert_projection("UNCONFIRMED", "0")
+    confirmed = await db_client.post(
+        annual_url + "/confirm",
+        json={"expected_version": annual.json()["version"], "expected_asset_version": 1},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    await assert_projection(None, "189")
+    body = {
+        "expected_version": 1,
+        "reason": "Corrected supplier acquisition basis",
+        "net_basis": "11000",
+        "purchase_vat": "2310",
+    }
+    revision_url = f"/api/v1/battery-assets/{asset['id']}/revisions"
+    preview = await db_client.post(revision_url + "/preview", json=body)
+    assert preview.status_code == 200, preview.text
+    revised = await db_client.post(
+        revision_url,
+        json={
+            **body,
+            "expected_annual_versions": {str(year): confirmed.json()["version"]},
+            "acknowledge_affected_periods": preview.json()["affected_periods"],
+        },
+    )
+    assert revised.status_code == 200, revised.text
+    await assert_projection("UNCONFIRMED", "0")
+    annual = await db_client.get(annual_url)
+    reconfirmed = await db_client.post(
+        annual_url + "/confirm",
+        json={
+            "expected_version": annual.json()["version"],
+            "expected_asset_version": revised.json()["version"],
+        },
+    )
+    assert reconfirmed.status_code == 200, reconfirmed.text
+    await assert_projection(None, "207.90")

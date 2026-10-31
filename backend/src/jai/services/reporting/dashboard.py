@@ -64,6 +64,7 @@ from jai.schemas.report import (
     DashboardMonthly,
     DashboardSummary,
     DashboardTopCategory,
+    DashboardVatStatus,
 )
 from jai.schemas.setting import VatRateTiers
 from jai.services.reporting.btw import compute_vat_return
@@ -228,6 +229,10 @@ async def compute_dashboard(
         year=year,
         quarter=quarter,
         kpi=kpi,
+        current_quarter_vat_status=DashboardVatStatus(
+            is_complete=vat_return.boxes.box_1d.is_complete,
+            missing_inputs=vat_return.boxes.box_1d.missing_inputs,
+        ),
         monthly=monthly,
         top_expense_categories=top_categories,
     )

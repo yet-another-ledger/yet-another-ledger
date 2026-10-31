@@ -2,7 +2,7 @@
 
 > 🌐 **English** · [中文](SI3_zh.md)
 
-> **Status: ↪ Incorporated into M16 on 2026-10-30; implementation has not started.** Retain this file as the original requirement record. The authoritative implementation plan is now [M16](../milestones/M16.md), especially D10 and Step 8; SI3 has no independent implementation schedule. M15 remains paused.
+> **Status: ↪ Incorporated into M16 on 2026-10-30; implemented and locally verified as Step 8 on 2026-10-31.** Retain this file as the original requirement record. The authoritative implementation plan is [M16](../milestones/M16.md), especially D10 and Step 8; SI3 has no independent implementation or acceptance. The M16 author walkthrough remains pending. M15 remains paused.
 
 ## Background
 

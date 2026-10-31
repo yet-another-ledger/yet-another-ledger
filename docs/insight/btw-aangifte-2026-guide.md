@@ -370,7 +370,7 @@ Key point: **In reverse-charge situations, both the "net amount (base)" and the 
 
 ## 7. M16 supplement · Home batteries and external sales originals
 
-> Added on 2026-10-30 from the official web sources below, separately from the original PDF analysis. M16 is planned, not implemented. Earlier milestone acceptance records remain historical.
+> Added on 2026-10-30 from the official web sources below, separately from the original PDF analysis. The [M16 design and status](../plan/milestones/M16.md) records current implementation progress, local automated-gate and independent-review status, and the separate author walkthrough and acceptance state. Earlier milestone acceptance records remain historical.
 
 ### 7.1 Home battery under the ordinary VAT regime
 

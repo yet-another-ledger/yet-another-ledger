@@ -535,6 +535,17 @@ class DashboardTopCategory(BaseModel):
     )
 
 
+class DashboardVatStatus(BaseModel):
+    """Completeness of the VAT projection used by the dashboard KPI."""
+
+    is_complete: bool = Field(
+        description="False when the VAT KPI is a known subtotal; copied from VAT box 1d."
+    )
+    missing_inputs: list[BatteryAnnualMissingInput] = Field(
+        description="Applicable annual battery inputs needing completion or confirmation."
+    )
+
+
 class DashboardSummary(BaseModel):
     """Response schema for GET /api/v1/reports/dashboard.
 
@@ -550,6 +561,9 @@ class DashboardSummary(BaseModel):
         )
     )
     kpi: DashboardKpi = Field(description="Key performance indicators.")
+    current_quarter_vat_status: DashboardVatStatus = Field(
+        description="Completeness and traceable missing inputs for the VAT KPI."
+    )
     monthly: list[DashboardMonthly] = Field(
         description="12-month series (Jan–Dec) for the selected year."
     )

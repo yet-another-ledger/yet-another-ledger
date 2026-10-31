@@ -288,6 +288,8 @@
     "ytdExpense": "本年实际开支",
     "ytdProfit": "本年利润",
     "currentQuarterVat": "本季度应缴 VAT",
+    "currentQuarterVatSubtotal": "本季度 VAT 已知小计",
+    "vatIncomplete": "VAT 汇总尚未完成：显示金额为已知小计。请核对下列缺项，并在申报前核对 VAT 报表。",
     "currentQuarterVatHint": "第 {q} 季度净应缴（+）/ 应退（−）VAT。",
     "monthlyTitle": "月度收入 / 支出 / 利润",
     "topCategoriesTitle": "开支分类 Top 5",
