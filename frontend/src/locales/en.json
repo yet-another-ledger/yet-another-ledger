@@ -420,6 +420,8 @@
       "companyProfile": "Company",
       "language": "Language",
       "languageHint": "Saved to your account (applies across devices).",
+      "batteryAssets": "Battery Assets",
+      "batteryAssetsHint": "Show Battery Assets in navigation. This does not change battery records or report calculations.",
       "moreSoon": "More preferences coming soon."
     },
     "panel": {

@@ -420,6 +420,8 @@
       "companyProfile": "公司",
       "language": "语言",
       "languageHint": "保存到当前账号（多设备通用）。",
+      "batteryAssets": "电池资产",
+      "batteryAssetsHint": "在导航栏显示电池资产入口。此设置不改变电池记录或报表计算。",
       "moreSoon": "更多偏好设置即将上线。"
     },
     "panel": {

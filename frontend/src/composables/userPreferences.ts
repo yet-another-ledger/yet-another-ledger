@@ -1,6 +1,6 @@
 /**
- * Server-backed user preferences — single source of truth for ``theme`` and
- * ``locale`` (both stored at USER level under ``user.preferences`` and served
+ * Server-backed user preferences — single source of truth for theme, locale
+ * and optional navigation entries (stored at USER level and served
  * by ``GET/PUT /api/v1/settings/me``).
  *
  * Why a shared module (not two independent composables)
@@ -8,7 +8,7 @@
  * The PUT endpoint *replaces* the whole ``UserPreferences`` object.  If theme
  * and locale were persisted independently with partial bodies, saving one
  * would reset the other to its default.  So both live here and every persist
- * sends the full ``{ theme, locale }``.  Loading is likewise a single GET that
+ * sends all preferences together. Loading is likewise a single GET that
  * populates both (no duplicate request).
  *
  * ``useTheme`` and ``useLocale`` are thin wrappers over this state: the former
@@ -20,6 +20,9 @@ import { ref } from 'vue'
 
 import { get, put } from '../api/http'
 import { i18n } from '../i18n'
+import type { components } from '../api/schema'
+
+type UserPreferences = components['schemas']['UserPreferences']
 
 export type ThemePreference = 'light' | 'dark' | 'system'
 export type LocalePreference = 'en' | 'zh'
@@ -42,6 +45,8 @@ function readStoredLocale(): LocalePreference | null {
 // Module-level shared state — every useTheme()/useLocale() caller sees these.
 export const themePreference = ref<ThemePreference>(readStoredTheme())
 export const localePreference = ref<LocalePreference>(readStoredLocale() ?? 'en')
+// Account-specific navigation starts hidden until its server preference loads.
+export const showBatteryAssets = ref(false)
 // ``true`` only after a *successful* load of the current account's server
 // values; before that (unauthenticated, mid-load, or a failed load) persisting
 // is skipped so a partial local snapshot can't full-replace the server.
@@ -88,17 +93,19 @@ export function initLocaleFromCache(): void {
  */
 export function resetUserPreferencesLoaded(): void {
   loaded.value = false
+  showBatteryAssets.value = false
   bumpAuthGeneration()
 }
 
-/** Load both preferences from the server (call after login). One GET. */
+/** Load the full preferences snapshot after login with one GET. */
 export async function loadUserPreferences(): Promise<void> {
   // Open a fresh auth context for this load and suspend persistence until it
   // resolves successfully.
   loaded.value = false
+  showBatteryAssets.value = false
   const generation = bumpAuthGeneration()
   try {
-    const data = await get<Partial<{ theme: ThemePreference; locale: LocalePreference }>>(
+    const data = await get<Partial<UserPreferences>>(
       '/api/v1/settings/me',
     )
     // A logout / newer load happened while this GET was in flight — discard the
@@ -112,6 +119,7 @@ export async function loadUserPreferences(): Promise<void> {
     if (data?.locale) {
       applyLocale(data.locale)
     }
+    showBatteryAssets.value = data?.show_battery_assets === true
     // Only now does the module state provably match this account's server
     // state, so the full-replace PUT becomes safe.
     loaded.value = true
@@ -131,7 +139,7 @@ export async function loadUserPreferences(): Promise<void> {
 // matches the last change.
 let writeChain: Promise<void> = Promise.resolve()
 
-/** Persist the full preferences object (PUT replaces — always send both). */
+/** Persist the full preferences object (PUT replaces — always send all fields). */
 export function persistUserPreferences(): Promise<void> {
   // Capture the auth context at enqueue time (when the user acted).
   const generation = authGeneration
@@ -146,10 +154,26 @@ export function persistUserPreferences(): Promise<void> {
       if (generation !== authGeneration || !loaded.value) {
         return
       }
-      return put<void>('/api/v1/settings/me', {
+      const preferences: UserPreferences = {
         theme: themePreference.value,
         locale: localePreference.value,
-      })
+        show_battery_assets: showBatteryAssets.value,
+      }
+      return put<void>('/api/v1/settings/me', preferences)
     })
   return writeChain
+}
+
+/** Change navigation visibility without affecting battery data or calculations. */
+export async function setShowBatteryAssets(visible: boolean): Promise<void> {
+  if (!loaded.value) return
+  const generation = authGeneration
+  const previous = showBatteryAssets.value
+  showBatteryAssets.value = visible
+  try {
+    await persistUserPreferences()
+  } catch (error) {
+    if (generation === authGeneration) showBatteryAssets.value = previous
+    throw error
+  }
 }

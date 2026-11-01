@@ -21,6 +21,7 @@ import { useI18n } from 'vue-i18n'
 import { useSettingsPanel } from '../composables/useSettingsPanel'
 import { useLocale } from '../composables/useLocale'
 import { useBreakpoint } from '../composables/useBreakpoint'
+import { showBatteryAssets } from '../composables/userPreferences'
 import {
   SettingsOutline,
   BusinessOutline,
@@ -77,7 +78,9 @@ const navOptions = computed<MenuOption[]>(() => [
   { label: t('nav.expenses'), key: 'expense-list', icon: renderIcon(CardOutline) },
   { label: t('nav.receiptInbox'), key: 'receipt-inbox', icon: renderIcon(AlbumsOutline) },
   { label: t('nav.externalSales'), key: 'external-sales-list', icon: renderIcon(CashOutline) },
-  { label: t('nav.batteryAssets'), key: 'battery-assets', icon: renderIcon(BatteryChargingOutline) },
+  ...(showBatteryAssets.value
+    ? [{ label: t('nav.batteryAssets'), key: 'battery-assets', icon: renderIcon(BatteryChargingOutline) }]
+    : []),
   { label: t('nav.recurring'), key: 'recurring-expense-list', icon: renderIcon(RepeatOutline) },
   {
     label: t('nav.reports'),

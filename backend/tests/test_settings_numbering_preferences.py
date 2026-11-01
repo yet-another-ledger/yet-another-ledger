@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import jai.services.mfa as mfa_svc
 import jai.services.settings as settings_svc
 from jai.models._enums import SettingLevel
+from jai.models.setting import Setting
 from jai.models.user import User
 from jai.schemas.setting import (
     SETTING_KEY_USER_PREFERENCES,
@@ -210,6 +211,45 @@ class TestUserPreferencesAPI:
         body = resp.json()
         assert body["theme"] == "system"
         assert body["locale"] == "en"
+        assert body["show_battery_assets"] is False
+
+    async def test_battery_navigation_round_trip(self, db_client: AsyncClient) -> None:
+        """Navigation visibility persists without changing other preferences."""
+        await _full_auth(db_client)
+        for enabled in (True, False):
+            preferences = {"theme": "dark", "locale": "zh", "show_battery_assets": enabled}
+            response = await db_client.put("/api/v1/settings/me", json=preferences)
+            assert response.status_code == 200
+            assert response.json() == preferences
+            settings_svc._cache.clear()
+            response = await db_client.get("/api/v1/settings/me")
+            assert response.status_code == 200
+            assert response.json() == preferences
+
+    async def test_old_preferences_hide_battery_navigation(
+        self,
+        db_client: AsyncClient,
+        db_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        """Existing JSON values without the new key keep theme and locale."""
+        await _full_auth(db_client)
+        user = (await db_client.get("/api/v1/users/me")).json()
+        async with db_session_maker() as session:
+            session.add(
+                Setting(
+                    key=SETTING_KEY_USER_PREFERENCES,
+                    value={"theme": "dark", "locale": "zh"},
+                    level=SettingLevel.USER,
+                    scope_id=uuid.UUID(user["id"]),
+                )
+            )
+            await session.commit()
+        settings_svc._cache.clear()
+        response = await db_client.get("/api/v1/settings/me")
+        assert response.status_code == 200
+        assert response.json() == {
+            "theme": "dark", "locale": "zh", "show_battery_assets": False
+        }
 
     async def test_put_and_get_round_trip(self, db_client: AsyncClient) -> None:
         """PUT then GET returns the stored preference."""
