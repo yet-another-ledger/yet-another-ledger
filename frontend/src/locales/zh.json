@@ -1785,6 +1785,7 @@
     "includePl": "计入损益",
     "coveredFrom": "覆盖起始日期",
     "coveredTo": "覆盖结束日期",
+    "coveredPeriodHelp": "可填写原始单据所覆盖的期间，例如平台结算单或能源结算单；并非必填。",
     "taxSummaries": "税额汇总",
     "treatment": "税务处理代码",
     "rate": "VAT 税率（%）",

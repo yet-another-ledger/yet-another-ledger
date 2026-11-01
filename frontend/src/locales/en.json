@@ -1785,6 +1785,7 @@
     "includePl": "Include in P/L",
     "coveredFrom": "Covered from",
     "coveredTo": "Covered to",
+    "coveredPeriodHelp": "Optional dates for the period represented by the original document, such as a platform statement or an energy settlement.",
     "taxSummaries": "Tax summaries",
     "treatment": "Tax treatment code",
     "rate": "VAT rate (%)",

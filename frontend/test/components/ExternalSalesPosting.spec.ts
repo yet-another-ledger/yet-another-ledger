@@ -63,6 +63,17 @@ vi.mock('naive-ui', () => ({
     emits: ['update:value'],
     template: '<select :disabled="disabled" :value="value ?? \'\'" @change="$emit(\'update:value\', $event.target.value)"><option value=""></option></select>',
   },
+  NDatePicker: {
+    props: ['formattedValue'],
+    emits: ['update:formatted-value'],
+    template: '<input type="date" :value="formattedValue || \'\'" @input="$emit(\'update:formatted-value\',$event.target.value || null)">',
+  },
+  NUpload: {
+    props: ['max', 'multiple', 'disabled', 'accept', 'defaultUpload'],
+    emits: ['change'],
+    methods: { selectFiles(event: Event) { const input = event.target as HTMLInputElement; const fileList = Array.from(input.files || []).slice(0, Number(this.max)).map((file) => ({ id: file.name, name: file.name, status: 'pending', file })); this.$emit('change', { fileList }) } },
+    template: '<div><input type="file" :multiple="multiple" :disabled="disabled" :accept="accept" @change="selectFiles"><slot /></div>',
+  },
   useMessage: () => ({ success: mocks.success, error: mocks.error }),
 }))
 

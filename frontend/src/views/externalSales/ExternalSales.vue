@@ -2,7 +2,8 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { NAlert, NButton, NCard, NCheckbox, NForm, NFormItem, NInput, NModal, NSelect, useMessage } from 'naive-ui'
+import { NAlert, NButton, NCard, NCheckbox, NDatePicker, NForm, NFormItem, NInput, NModal, NSelect, NUpload, useMessage } from 'naive-ui'
+import type { UploadFileInfo } from 'naive-ui'
 import { ApiError, del, get, post, put } from '../../api/http'
 import ExternalSaleSnapshot from '../../components/externalSales/ExternalSaleSnapshot.vue'
 import type { components } from '../../api/schema'
@@ -72,6 +73,7 @@ const extractionBusy = ref(false)
 const fileMutationBusy = ref(false)
 const error = ref('')
 const pickedFiles = ref<File[]>([])
+const uploadKey = ref(0)
 const manuallyEdited = new Set<string>()
 const taxSummariesManuallyEdited = ref(false)
 const sourceModal = ref(false)
@@ -141,6 +143,7 @@ function resetDraft() {
   acknowledgeMismatch.value = false
   mismatchReason.value = ''
   pickedFiles.value = []
+  uploadKey.value++
   manuallyEdited.clear()
   taxSummariesManuallyEdited.value = false
   revisionMode.value = false
@@ -170,6 +173,9 @@ function updateFiles(sale: Sale, generation: number) {
   }
 }
 function markEdited(field: string) { manuallyEdited.add(field) }
+function onFiles(info: { fileList: UploadFileInfo[] }) {
+  pickedFiles.value = info.fileList.flatMap((item) => item.file ? [item.file] : [])
+}
 // Compare dictionary percentages as decimal text; never calculate money in the SPA.
 function rateKey(value: string | number | null | undefined): string | null {
   const match = /^(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(String(value))
@@ -417,7 +423,10 @@ async function uploadFiles() {
     updateFiles(sale, generation)
     if (generation === refreshGeneration) saleWithSuggestion(sale, expectedVersion)
     calculation.value = null
-    if (generation === refreshGeneration) pickedFiles.value = []
+    if (generation === refreshGeneration) {
+      pickedFiles.value = []
+      uploadKey.value++
+    }
   } catch (e) {
     if (generation === refreshGeneration) message.error(e instanceof Error ? e.message : t('externalSales.error'))
   } finally {
@@ -640,10 +649,11 @@ async function confirmPosting() {
           </div>
           <n-form-item v-if="!isPosted && draft.document_kind === 'CREDIT' && !draft.related_external_sale_id" :label="t('externalSales.historicalNumber')"><n-input data-testid="historical-number" v-model:value="draft.historical_original_number" /></n-form-item>
           <n-form-item v-if="!isPosted && draft.document_kind === 'CREDIT' && !draft.related_external_sale_id" :label="t('externalSales.historicalExplanation')"><n-input data-testid="historical-explanation" v-model:value="draft.historical_original_explanation" type="textarea" /></n-form-item>
-          <n-form-item :label="t('externalSales.date')"><input v-model="draft.document_date" type="date" @input="markEdited('document_date')" /></n-form-item>
+          <n-form-item :label="t('externalSales.date')"><n-date-picker v-model:formatted-value="draft.document_date" value-format="yyyy-MM-dd" type="date" clearable style="width: 100%" @update:formatted-value="markEdited('document_date')" /></n-form-item>
           <n-form-item :label="t('externalSales.counterparty')"><n-input v-model:value="draft.counterparty" @update:value="markEdited('counterparty')" /></n-form-item>
-          <n-form-item :label="t('externalSales.coveredFrom')"><input v-model="draft.covered_from" type="date" /></n-form-item>
-          <n-form-item :label="t('externalSales.coveredTo')"><input v-model="draft.covered_to" type="date" /></n-form-item>
+          <n-form-item :label="t('externalSales.coveredFrom')"><n-date-picker v-model:formatted-value="draft.covered_from" value-format="yyyy-MM-dd" type="date" clearable style="width: 100%" /></n-form-item>
+          <n-form-item :label="t('externalSales.coveredTo')"><n-date-picker v-model:formatted-value="draft.covered_to" value-format="yyyy-MM-dd" type="date" clearable style="width: 100%" /></n-form-item>
+          <p class="covered-period-note">{{ t('externalSales.coveredPeriodHelp') }}</p>
           <n-form-item :label="t('externalSales.includePl')"><n-select data-testid="include-in-pl" :value="draft.include_in_pl === null ? null : String(draft.include_in_pl)" :clearable="!isPosted" :options="includeOptions" @update:value="setIncludeInPl" /></n-form-item>
         </div>
         <n-form-item :label="t('externalSales.description')"><n-input v-model:value="draft.description" type="textarea" @update:value="markEdited('description')" /></n-form-item>
@@ -656,7 +666,7 @@ async function confirmPosting() {
           <n-button v-if="draft.tax_summaries.length > 1" @click="draft.tax_summaries.splice(index, 1)">×</n-button>
         </div>
         <n-button size="small" @click="draft.tax_summaries.push(blankTax())">{{ t('externalSales.addTax') }}</n-button>
-        <n-form-item v-if="!isPosted" class="actions"><n-button type="primary" attr-type="submit" :disabled="!editorReady">{{ t('externalSales.saveDraft') }}</n-button><n-button v-if="current" type="error" :disabled="!editorReady" @click="discard">{{ t('externalSales.discard') }}</n-button></n-form-item>
+        <n-form-item v-if="!isPosted"><div class="actions" data-testid="pending-actions"><n-button type="primary" attr-type="submit" :disabled="!editorReady">{{ t('externalSales.saveDraft') }}</n-button><n-button v-if="current" type="error" :disabled="!editorReady" @click="discard">{{ t('externalSales.discard') }}</n-button></div></n-form-item>
         <template v-if="isPosted">
           <n-form-item :label="t('externalSales.revisionReason')"><n-input data-testid="revision-reason" v-model:value="revisionReason" type="textarea" /></n-form-item>
           <n-checkbox v-model:checked="acknowledgeMismatch">{{ t('externalSales.acknowledgeMismatch') }}</n-checkbox>
@@ -680,11 +690,13 @@ async function confirmPosting() {
             <span>{{ t('externalSales.net') }}: {{ row.net_amount ?? t('externalSales.none') }}</span>
             <span>{{ t('externalSales.vat') }}: {{ row.vat_amount ?? t('externalSales.none') }}</span>
           </div>
-          <n-button size="small" :disabled="!editorReady || current.files.length === 0 || extractionBusy || fileMutationBusy" @click="retryExtraction">{{ t('externalSales.aiRetry') }}</n-button>
         </section>
-        <n-button :disabled="!editorReady || current.files.length === 0 || isDirty" @click="calculate">
+        <div class="actions review-actions" data-testid="review-actions">
+          <n-button :disabled="!editorReady || current.files.length === 0 || extractionBusy || fileMutationBusy" @click="retryExtraction">{{ t('externalSales.aiRetry') }}</n-button>
+          <n-button :disabled="!editorReady || current.files.length === 0 || isDirty" @click="calculate">
           {{ t('externalSales.calculate') }}
-        </n-button>
+          </n-button>
+        </div>
         <p v-if="isDirty">{{ t('externalSales.saveBeforeCalculate') }}</p>
         <template v-if="calculation">
           <p>{{ t('externalSales.originalTotals') }}: {{ calculation.original_net_total }} / {{ calculation.original_vat_total }}</p>
@@ -706,8 +718,12 @@ async function confirmPosting() {
       <div v-if="current" class="files">
         <h2>{{ isPosted ? t('externalSales.supportingEvidence') : t('externalSales.files') }} ({{ current.files.length }}/5)</h2>
         <div v-for="file in current.files" :key="file.id" class="file-row"><span>{{ file.filename || t('externalSales.none') }} · {{ file.byte_size }} bytes <strong v-if="file.duplicate_warning">{{ t('externalSales.duplicateWarning') }}</strong></span><n-button size="small" :disabled="!editorReady" @click="downloadFile(file)">{{ t('externalSales.download') }}</n-button><n-button v-if="!isPosted" size="small" :disabled="!editorReady || fileMutationBusy" @click="removeFile(file)">{{ t('externalSales.removeFile') }}</n-button></div>
-        <input type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf" :disabled="!editorReady || fileMutationBusy || current.files.length >= 5" @change="pickedFiles = Array.from(($event.target as HTMLInputElement).files || []).slice(0, 5 - current!.files.length)" />
-        <n-button :disabled="!editorReady || fileMutationBusy || !pickedFiles.length" @click="uploadFiles">{{ isPosted ? t('externalSales.appendEvidence') : t('externalSales.upload') }}</n-button>
+        <div class="file-upload" data-testid="file-upload">
+          <n-upload :key="uploadKey" :max="5 - current.files.length" :default-upload="false" :multiple="true" accept="image/png,image/jpeg,image/webp,application/pdf" :disabled="!editorReady || fileMutationBusy || current.files.length >= 5" @change="onFiles">
+            <n-button :disabled="!editorReady || fileMutationBusy || current.files.length >= 5">{{ t('externalSales.chooseFiles') }}</n-button>
+          </n-upload>
+          <n-button :disabled="!editorReady || fileMutationBusy || !pickedFiles.length" @click="uploadFiles">{{ isPosted ? t('externalSales.appendEvidence') : t('externalSales.upload') }}</n-button>
+        </div>
       </div>
     </n-card>
     <n-modal v-model:show="sourceModal" preset="card" style="width: min(520px, 92vw)" :title="t('externalSales.editSource')">
@@ -733,7 +749,11 @@ async function confirmPosting() {
 .sale-row:hover { background: var(--n-color-hover); }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
 .tax-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 8px; margin: 8px 0; }
-.actions { display: flex; gap: 12px; margin-top: 16px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }
+.review-actions { margin-top: 8px; }
+.file-upload { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; margin-top: 12px; }
+.file-upload :deep(.n-upload) { width: auto; }
+.covered-period-note { grid-column: 1 / -1; margin: -4px 0 16px; color: var(--n-text-color-3); }
 .files { margin-top: 24px; }
 .posted-detail dd { margin: 4px 0 16px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .posted-detail dt { font-weight: 600; }

@@ -10,10 +10,12 @@ vi.mock('naive-ui', () => {
   const button = { inheritAttrs: false, props: ['disabled', 'type', 'attrType'], template: '<button v-bind="$attrs" :disabled="disabled" :type="attrType || \'button\'"><slot /></button>' }
   const input = { inheritAttrs: false, props: ['value', 'type', 'placeholder'], emits: ['update:value'], template: '<textarea v-if="type === \'textarea\'" v-bind="$attrs" :value="value" @input="$emit(\'update:value\',$event.target.value)" /><input v-else v-bind="$attrs" :value="value" :placeholder="placeholder" @input="$emit(\'update:value\',$event.target.value)" />' }
   const select = { inheritAttrs: false, props: ['value', 'options', 'placeholder'], emits: ['update:value'], template: '<select v-bind="$attrs" :value="value" @change="$emit(\'update:value\',$event.target.value)"><option value=""></option><option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option></select>' }
+  const datePicker = { inheritAttrs: false, props: ['formattedValue'], emits: ['update:formatted-value'], template: '<input type="date" v-bind="$attrs" :value="formattedValue || \'\'" @input="$emit(\'update:formatted-value\',$event.target.value || null)" />' }
+  const upload = { inheritAttrs: false, props: ['max', 'multiple', 'disabled', 'accept', 'defaultUpload'], emits: ['change'], methods: { selectFiles(event: Event) { const input = event.target as HTMLInputElement; const fileList = Array.from(input.files || []).slice(0, Number(this.max)).map((file) => ({ id: file.name, name: file.name, status: 'pending', file })); this.$emit('change', { fileList }) } }, template: '<div><input type="file" :multiple="multiple" :disabled="disabled" :accept="accept" @change="selectFiles"><slot /></div>' }
   return {
     NAlert: box, NButton: button, NCard: box, NCheckbox: { props: ['checked'], template: '<input type="checkbox" />' },
     NForm: { inheritAttrs: false, template: '<form v-bind="$attrs"><slot /></form>' }, NFormItem: box,
-    NInput: input, NModal: box, NSelect: select, useMessage: () => ({ success: vi.fn(), error: vi.fn() }),
+    NInput: input, NModal: box, NSelect: select, NDatePicker: datePicker, NUpload: upload, useMessage: () => ({ success: vi.fn(), error: vi.fn() }),
   }
 })
 
@@ -649,6 +651,33 @@ describe('External Sales manual draft editor', () => {
     await flushPromises()
     const request = path.endsWith('/new') ? api.post : api.put
     expect(request).toHaveBeenCalledWith(path.endsWith('/new') ? '/api/v1/external-sales' : '/api/v1/external-sales/sale-1', expect.objectContaining({ document_date: null, covered_from: null, covered_to: null }))
+    wrapper.unmount()
+  })
+
+  it('keeps selected File objects for retry after upload failure and clears them after success', async () => {
+    const wrapper = await setup('/external-sales/sale-1').mount()
+    const picker = wrapper.get('[data-testid="file-upload"] input[type="file"]')
+    const selected = new File(['%PDF-evidence'], 'evidence.pdf', { type: 'application/pdf' })
+    Object.defineProperty(picker.element, 'files', { value: [selected], configurable: true })
+    await picker.trigger('change')
+    const upload = () => wrapper.findAll('button').find((button) => button.text() === 'Upload originals')!
+    expect(upload().attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="file-upload"] input[type="file"]').attributes('accept')).toBe('image/png,image/jpeg,image/webp,application/pdf')
+
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error('Network unavailable'))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ...structuredClone(saved), files: [...saved.files, { ...saved.files[0], id: 'file-2', filename: 'evidence.pdf' }] }) })
+    vi.stubGlobal('fetch', fetchMock)
+    await upload().trigger('click')
+    await flushPromises()
+    expect(upload().attributes('disabled')).toBeUndefined()
+    await upload().trigger('click')
+    await flushPromises()
+    const form = fetchMock.mock.calls[1]![1]!.body as FormData
+    expect(form.getAll('files')).toEqual([selected])
+    expect((form.get('files') as File).name).toBe('evidence.pdf')
+    expect(upload().attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="file-upload"] input[type="file"]').element).not.toBe(picker.element)
     wrapper.unmount()
   })
 
