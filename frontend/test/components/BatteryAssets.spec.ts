@@ -94,6 +94,8 @@ describe('BatteryAssets', () => {
       ? Promise.resolve({ calculation_base: '0.00', calculation_vat: '0.00', annual_use_id: 'annual-1', year: 2025, version: 1 })
       : Promise.resolve({ ...asset, version: 2, private_use_percentage: '0', basis_note: 'No private use', confirmed: true, calculation_base: '0.00', calculation_vat: '0.00', evidence: [] }))
     const { wrapper } = await render('/battery-assets/asset-1?year=2025')
+    const addEvidence = () => wrapper.findAll('button').find(row => row.text() === 'Add evidence')!
+    expect(addEvidence().attributes('disabled')).toBeDefined()
     await wrapper.find('input[type="number"]').setValue('0')
     await wrapper.find('textarea').setValue('No private use')
     const button = (label: string) => wrapper.findAll('button').find(row => row.text() === label)!
@@ -102,6 +104,7 @@ describe('BatteryAssets', () => {
     expect(api.put).toHaveBeenCalledWith('/api/v1/battery-assets/asset-1/annual-use/2025', {
       expected_version: null, private_use_percentage: 0, basis_note: 'No private use',
     })
+    expect(addEvidence().attributes('disabled')).toBeUndefined()
     await button('Preview Q4 calculation').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Q4 box 1d: base 0.00, VAT 0.00')
@@ -110,6 +113,84 @@ describe('BatteryAssets', () => {
     expect(api.post).toHaveBeenLastCalledWith('/api/v1/battery-assets/asset-1/annual-use/2025/confirm', { expected_version: 1, expected_asset_version: 1 })
     expect((wrapper.find('input[type="number"]').element as HTMLInputElement).disabled).toBe(false)
     expect(button('Preview annual correction').exists()).toBe(true)
+    expect(addEvidence().attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('keeps evidence locked through correction preview and unlocks it after saving the zero revision', async () => {
+    let current = { ...annualRecord(), confirmed: true,
+      calculation_base: '900.00', calculation_vat: '189.00',
+      evidence: [{ id: 'old-evidence', filename: 'original-45.pdf', media_type: 'application/pdf' }] }
+    api.get.mockImplementation((url: string) => {
+      if (url.startsWith('/api/v1/battery-assets?')) return Promise.resolve({ items: [asset], total: 1 })
+      if (url === '/api/v1/battery-assets/asset-1') return Promise.resolve(asset)
+      if (url.endsWith('/annual-use/2025')) return Promise.resolve(current)
+      return Promise.resolve({ items: [] })
+    })
+    api.post.mockImplementation((url: string) => {
+      if (url.endsWith('/revisions/preview')) return Promise.resolve({ affected_periods: ['2025-Q4'],
+        current_calculation_base: '900.00', current_calculation_vat: '189.00',
+        proposed_calculation_base: '0.00', proposed_calculation_vat: '0.00' })
+      current = { ...current, private_use_percentage: '0', basis_note: 'Zero private use',
+        version: 2, confirmed: false, calculation_base: null, calculation_vat: null }
+      return Promise.resolve(current)
+    })
+    api.postFile.mockResolvedValue({ id: 'new-evidence' })
+    const { wrapper } = await render('/battery-assets/asset-1?year=2025')
+    const button = (label: string) => wrapper.findAll('button').find(row => row.text() === label)!
+    const uploadNode = wrapper.findComponent({ name: 'NUpload' })
+    const upload = uploadNode.vm.$attrs['custom-request'] as (options: { file: { file: File } }) => Promise<void>
+    const options = { file: { file: new File(['%PDF-test'], 'zero.pdf', { type: 'application/pdf' }) } }
+    expect(button('Add evidence').attributes('disabled')).toBeDefined()
+    expect(uploadNode.vm.$attrs.disabled).toBe(true)
+    expect(wrapper.text()).toContain('Previewing a correction does not save it')
+    await wrapper.find('input[type="number"]').setValue('0')
+    await wrapper.find('textarea').setValue('Zero private use')
+    await revisionReasonInput(wrapper).setValue('Correct EMS observation')
+    await button('Preview annual correction').trigger('click')
+    await flushPromises()
+    await upload(options)
+    expect(api.postFile).not.toHaveBeenCalled()
+    expect(button('Add evidence').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('original-45.pdf')
+    await wrapper.findAll('input[type="checkbox"]').at(-1)!.setValue(true)
+    await button('Confirm annual correction').trigger('click')
+    await flushPromises()
+    expect(api.post).toHaveBeenLastCalledWith('/api/v1/battery-assets/asset-1/annual-use/2025/revisions', {
+      expected_version: 1, expected_asset_version: 1, private_use_percentage: 0,
+      basis_note: 'Zero private use', reason: 'Correct EMS observation', acknowledge_affected_periods: ['2025-Q4'],
+    })
+    expect(button('Add evidence').attributes('disabled')).toBeUndefined()
+    expect(uploadNode.vm.$attrs.disabled).toBe(false)
+    expect(wrapper.text()).not.toContain('Previewing a correction does not save it')
+    await upload(options)
+    await flushPromises()
+    expect(api.postFile).toHaveBeenCalledExactlyOnceWith(
+      '/api/v1/battery-assets/asset-1/annual-use/2025/evidence', options.file.file,
+    )
+    expect(wrapper.text()).toContain('original-45.pdf')
+    expect(wrapper.find('input[type="number"]').element.value).toBe('0')
+    wrapper.unmount()
+  })
+
+  it.each([
+    { status: 409, detail: { code: 'BATTERY_ANNUAL_CONFIRMED', detail: 'BATTERY_ANNUAL_CONFIRMED' }, message: 'select Confirm annual correction first' },
+    { status: 422, detail: { code: 'BATTERY_EVIDENCE_INVALID', detail: 'Invalid PDF content.' }, message: 'Invalid PDF content.' },
+    { status: 500, detail: { unknown: true }, message: 'Request failed (500).' },
+  ])('renders readable evidence errors for status $status', async ({ status, detail, message }) => {
+    api.get.mockImplementation((url: string) => {
+      if (url.startsWith('/api/v1/battery-assets?')) return Promise.resolve({ items: [asset], total: 1 })
+      if (url === '/api/v1/battery-assets/asset-1') return Promise.resolve(asset)
+      if (url.endsWith('/annual-use/2025')) return Promise.resolve(annualRecord())
+      return Promise.resolve({ items: [] })
+    })
+    api.postFile.mockRejectedValueOnce(new ApiError(status, { detail }, '[object Object]'))
+    const { wrapper } = await render('/battery-assets/asset-1?year=2025')
+    const upload = wrapper.findComponent({ name: 'NUpload' }).vm.$attrs['custom-request'] as (options: { file: { file: File } }) => Promise<void>
+    await upload({ file: { file: new File(['bad-pdf'], 'ems.pdf', { type: 'application/pdf' }) } })
+    await flushPromises()
+    expect(wrapper.text()).toContain(message)
+    expect(wrapper.text()).not.toContain('[object Object]')
     wrapper.unmount()
   })
 

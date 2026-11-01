@@ -1895,6 +1895,8 @@
     "calculation": "Q4 box 1d: base {base}, VAT {vat}",
     "evidence": "EMS / energy-bill evidence",
     "addEvidence": "Add evidence",
+    "evidenceConfirmed": "This annual calculation is confirmed. Previewing a correction does not save it: acknowledge the affected period and select Confirm annual correction first. Then upload evidence before confirming the annual calculation again.",
+    "requestFailed": "Request failed ({status}). Reload the page and try again.",
     "openEvidence": "Open original",
     "noEvidence": "No evidence uploaded for this year.",
     "registerFromExpense": "Register battery",

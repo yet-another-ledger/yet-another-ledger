@@ -89,6 +89,7 @@ const dirty = computed(() => percentage.value !== (
   annual.value?.private_use_percentage == null ? null : Number(annual.value.private_use_percentage)
 ) || basisNote.value !== (annual.value?.basis_note ?? ''))
 const canEdit = computed(() => annualReady.value && isApplicableYear.value && !annualLoading.value && !annualBusy.value)
+const canUploadEvidence = computed(() => canEdit.value && !!annual.value && !annual.value.confirmed)
 const canCalculate = computed(() => canEdit.value && !!annual.value && !dirty.value && percentage.value !== null && !!basisNote.value.trim())
 const assetRevisionPeriods = computed(() => assetRevisionPreview.value?.affected_periods ?? [])
 
@@ -188,11 +189,24 @@ function showError(error: unknown) {
   if (error instanceof ApiError && error.detail && typeof error.detail === 'object'
     && 'detail' in error.detail) {
     const detail = error.detail.detail
-    if (detail && typeof detail === 'object' && 'code' in detail
-      && detail.code === 'BATTERY_PREVIEW_STALE') {
-      pageError.value = t('battery.previewStale')
-      return
+    if (detail && typeof detail === 'object') {
+      if ('code' in detail && detail.code === 'BATTERY_PREVIEW_STALE') {
+        pageError.value = t('battery.previewStale')
+        return
+      }
+      if ('code' in detail && detail.code === 'BATTERY_ANNUAL_CONFIRMED') {
+        pageError.value = t('battery.evidenceConfirmed')
+        return
+      }
+      if ('detail' in detail && typeof detail.detail === 'string') {
+        pageError.value = detail.detail
+        return
+      }
     }
+  }
+  if (error instanceof ApiError && error.message === '[object Object]') {
+    pageError.value = t('battery.requestFailed', { status: error.status })
+    return
   }
   pageError.value = error instanceof ApiError ? error.message : String(error)
 }
@@ -473,7 +487,7 @@ async function confirmAnnual() {
 
 async function uploadEvidence(options: { file: UploadFileInfo }) {
   const target = annualTarget()
-  if (!target || !canEdit.value || annualBusy.value || !annual.value || !options.file.file) return
+  if (!target || !canUploadEvidence.value || !options.file.file) return
   annualBusy.value = true
   pageError.value = ''
   calculation.value = null
@@ -606,8 +620,11 @@ onBeforeUnmount(() => { assetHistoryGeneration += 1; assetRevisionGeneration += 
         </n-alert>
         <section class="evidence">
           <h3>{{ t('battery.evidence') }}</h3>
-          <n-upload :custom-request="uploadEvidence" :show-file-list="false" :disabled="!canEdit || !annual || annualBusy" accept="image/png,image/jpeg,image/webp,application/pdf">
-            <n-button :disabled="!canEdit || !annual || annualBusy">{{ t('battery.addEvidence') }}</n-button>
+          <n-alert v-if="annual?.confirmed && isApplicableYear" type="info" style="margin-bottom: 12px">
+            {{ t('battery.evidenceConfirmed') }}
+          </n-alert>
+          <n-upload :custom-request="uploadEvidence" :show-file-list="false" :disabled="!canUploadEvidence" accept="image/png,image/jpeg,image/webp,application/pdf">
+            <n-button :disabled="!canUploadEvidence">{{ t('battery.addEvidence') }}</n-button>
           </n-upload>
           <n-list v-if="annual?.evidence?.length" bordered class="evidence-list">
             <n-list-item v-for="item in annual?.evidence ?? []" :key="item.id">

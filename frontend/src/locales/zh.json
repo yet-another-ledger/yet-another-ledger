@@ -1895,6 +1895,8 @@
     "calculation": "Q4 申报框 1d：基数 {base}，VAT {vat}",
     "evidence": "EMS / 能源账单证据",
     "addEvidence": "添加证据",
+    "evidenceConfirmed": "该年度计算已确认。预览更正不会保存：请先勾选受影响期间并点击“确认年度更正”，再上传证据，最后重新确认年度计算。",
+    "requestFailed": "请求失败（{status}）。请刷新页面后重试。",
     "openEvidence": "打开原件",
     "noEvidence": "本年度尚未上传证据。",
     "registerFromExpense": "登记电池",
