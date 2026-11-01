@@ -19,6 +19,8 @@ import {
   NDataTable,
   NGrid,
   NGridItem,
+  NList,
+  NListItem,
   NSelect,
   NSpin,
   NStatistic,
@@ -330,13 +332,15 @@ const externalSaleSources = computed(() => {
 
         <n-alert v-if="store.vatReport.is_last_period_of_year" :type="store.vatReport.boxes.box_1d.is_complete ? 'info' : 'warning'" style="margin-bottom: 16px">
           <div>{{ t('reports.vat.batterySubtotal', { base: fmtMoney(store.vatReport.boxes.box_1d.known_battery_base), vat: fmtMoney(store.vatReport.boxes.box_1d.known_battery_vat) }) }}</div>
-          <ul v-if="(store.vatReport.boxes.box_1d.missing_inputs ?? []).length">
-            <li v-for="missing in (store.vatReport.boxes.box_1d.missing_inputs ?? [])" :key="`${missing.asset_id}-${missing.year}`">
-              <router-link :to="`/battery-assets/${missing.asset_id}?year=${missing.year}`">
-                {{ t('reports.vat.batteryMissing', { year: missing.year, code: t(`reports.vat.missingCodes.${missing.code}`) }) }}
+          <n-list v-if="(store.vatReport.boxes.box_1d.missing_inputs ?? []).length" bordered class="battery-missing-list">
+            <n-list-item v-for="missing in (store.vatReport.boxes.box_1d.missing_inputs ?? [])" :key="`${missing.asset_id}-${missing.year}`">
+              <router-link :to="`/battery-assets/${missing.asset_id}?year=${missing.year}`" custom v-slot="{ href, navigate }">
+                <n-button class="battery-missing-button" tag="a" type="primary" :href="href" @click="navigate">
+                  {{ t('reports.vat.batteryMissing', { year: missing.year, code: t(`reports.vat.missingCodes.${missing.code}`) }) }}
+                </n-button>
               </router-link>
-            </li>
-          </ul>
+            </n-list-item>
+          </n-list>
         </n-alert>
 
         <!-- Totals -->
@@ -374,6 +378,19 @@ const externalSaleSources = computed(() => {
       </template>
   </div>
 </template>
+
+<style scoped>
+.battery-missing-list { margin-top: 12px; }
+.battery-missing-button {
+  box-sizing: border-box;
+  height: auto;
+  min-height: var(--n-height);
+  padding-block: calc((var(--n-height) - var(--n-font-size)) / 2);
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+</style>
 
 <style scoped>
 .page-content {

@@ -1895,6 +1895,8 @@
     "calculation": "Q4 申报框 1d：基数 {base}，VAT {vat}",
     "evidence": "EMS / 能源账单证据",
     "addEvidence": "添加证据",
+    "openEvidence": "打开原件",
+    "noEvidence": "本年度尚未上传证据。",
     "registerFromExpense": "登记电池",
     "assetRevisionTitle": "更正已登记的购置记录",
     "acquisitionDate": "购置日期",

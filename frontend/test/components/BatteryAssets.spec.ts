@@ -227,8 +227,9 @@ describe('BatteryAssets', () => {
     expect(wrapper.text()).toContain('900.00')
     const addEvidence = wrapper.findAll('button').find(row => row.text() === 'Add evidence')!
     expect((addEvidence.element as HTMLButtonElement).disabled).toBe(true)
-    const evidenceLink = wrapper.findAll('button').find(row => row.text() === 'old-bill.pdf')!
-    await evidenceLink.trigger('click')
+    expect(wrapper.text()).toContain('old-bill.pdf')
+    const openEvidence = wrapper.findAll('button').find(row => row.text() === 'Open original')!
+    await openEvidence.trigger('click')
     expect(open).toHaveBeenCalledWith(
       '/api/v1/battery-assets/asset-1/annual-use/2025/evidence/evidence-1/content', '_blank', 'noopener',
     )

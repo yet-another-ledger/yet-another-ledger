@@ -473,7 +473,7 @@ async function confirmAnnual() {
 
 async function uploadEvidence(options: { file: UploadFileInfo }) {
   const target = annualTarget()
-  if (!target || !canEdit.value || !annual.value || !options.file.file) return
+  if (!target || !canEdit.value || annualBusy.value || !annual.value || !options.file.file) return
   annualBusy.value = true
   pageError.value = ''
   calculation.value = null
@@ -606,10 +606,18 @@ onBeforeUnmount(() => { assetHistoryGeneration += 1; assetRevisionGeneration += 
         </n-alert>
         <section class="evidence">
           <h3>{{ t('battery.evidence') }}</h3>
-          <n-upload :custom-request="uploadEvidence" :show-file-list="false" accept="image/png,image/jpeg,image/webp,application/pdf">
-            <n-button :disabled="!canEdit || !annual">{{ t('battery.addEvidence') }}</n-button>
+          <n-upload :custom-request="uploadEvidence" :show-file-list="false" :disabled="!canEdit || !annual || annualBusy" accept="image/png,image/jpeg,image/webp,application/pdf">
+            <n-button :disabled="!canEdit || !annual || annualBusy">{{ t('battery.addEvidence') }}</n-button>
           </n-upload>
-          <ul><li v-for="item in annual?.evidence ?? []" :key="item.id"><button class="link" @click="openEvidence(item.id)">{{ item.filename || item.media_type }}</button></li></ul>
+          <n-list v-if="annual?.evidence?.length" bordered class="evidence-list">
+            <n-list-item v-for="item in annual?.evidence ?? []" :key="item.id">
+              <div class="evidence-row">
+                <n-text class="evidence-filename">{{ item.filename || item.media_type }}</n-text>
+                <n-button class="evidence-open" text type="primary" @click="openEvidence(item.id)">{{ t('battery.openEvidence') }}</n-button>
+              </div>
+            </n-list-item>
+          </n-list>
+          <n-text v-else-if="annual" class="evidence-empty">{{ t('battery.noEvidence') }}</n-text>
         </section>
         <section class="history annual-history">
           <n-text v-if="annualHistoryLoading">{{ t('battery.historyLoading') }}</n-text>
@@ -696,6 +704,10 @@ onBeforeUnmount(() => { assetHistoryGeneration += 1; assetRevisionGeneration += 
 .battery-page { max-width: 1120px; margin: 0 auto; padding: 24px; }
 .battery-layout { display: grid; grid-template-columns: minmax(260px, 0.8fr) minmax(420px, 1.2fr); gap: 16px; }
 .asset-snapshot, .evidence, .history { margin: 12px 0; }
-.link { border: 0; background: none; color: var(--primary-color); cursor: pointer; text-decoration: underline; }
+.evidence-list { margin-top: 12px; }
+.evidence-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-width: 0; }
+.evidence-filename { min-width: 0; overflow-wrap: anywhere; }
+.evidence-open { flex: 0 0 auto; }
+.evidence-empty { display: inline-block; margin-top: 8px; }
 @media (max-width: 760px) { .battery-layout { grid-template-columns: 1fr; } }
 </style>
