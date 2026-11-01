@@ -28,6 +28,7 @@ import {
 import type { DataTableColumns } from 'naive-ui'
 import { useReportsStore } from '../../stores/reports'
 import type { ProfitLossSeriesItem } from '../../stores/reports'
+import ReportSourcePanel from '../../components/reports/ReportSourcePanel.vue'
 import { localDateStr } from '../../utils/date'
 
 const { t } = useI18n()
@@ -298,19 +299,16 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
               size="small"
             />
           </n-card>
-          <n-card
-            v-if="store.plReport && store.plReport.external_sales?.length"
+          <ReportSourcePanel
+            v-if="store.plReport?.external_sales?.length"
             :title="t('reports.pl.externalSales')"
-            class="series-card"
-          >
-            <ul>
-              <li v-for="sale in (store.plReport.external_sales ?? [])" :key="sale.external_sale_id">
-                <router-link :to="`/external-sales/${sale.external_sale_id}`">
-                  {{ sale.source_name }} · {{ sale.original_number }} · {{ sale.event_date }}
-                </router-link>
-              </li>
-            </ul>
-          </n-card>
+            :action-label="t('reports.sourceAction')"
+            :empty-label="t('reports.noSources')"
+            :items="(store.plReport.external_sales ?? []).map((sale) => ({
+              id: sale.external_sale_id,
+              label: `${sale.source_name} · ${sale.original_number} · ${sale.event_date}`,
+            }))"
+          />
     </div>
   </div>
 </template>

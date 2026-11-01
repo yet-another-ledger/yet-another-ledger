@@ -26,6 +26,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { useReportsStore } from '../../stores/reports'
+import ReportSourcePanel from '../../components/reports/ReportSourcePanel.vue'
 
 const { t } = useI18n()
 const store = useReportsStore()
@@ -203,6 +204,27 @@ const periodLabel = computed<string>(() => {
   if (!r) return ''
   return `${r.year} Q${r.quarter} (${r.from} – ${r.to})`
 })
+
+// Several tax events can belong to one external sale. Keep the first event's
+// frozen source label for display, while leaving every event row intact.
+const externalSaleSources = computed(() => {
+  const seen = new Set<string>()
+  const sources: { id: string; label: string }[] = []
+  for (const event of store.vatReport?.event_rows ?? []) {
+    if (event.source_type !== 'EXTERNAL_SALE') continue
+    const id = event.external_sale_id
+    if (typeof id !== 'string' || !id.trim() || seen.has(id)) continue
+    seen.add(id)
+    const label = [
+      t('reports.vat.externalSale'),
+      event.external_source_name,
+      event.external_original_number,
+      event.event_date,
+    ].filter((part): part is string => typeof part === 'string' && part.trim().length > 0).join(' · ')
+    sources.push({ id, label })
+  }
+  return sources
+})
 </script>
 
 <template>
@@ -317,23 +339,6 @@ const periodLabel = computed<string>(() => {
           </ul>
         </n-alert>
 
-        <n-card :title="t('reports.vat.eventSources')" style="margin-bottom: 16px">
-          <ul>
-            <li
-              v-for="(event, index) in (store.vatReport.event_rows ?? []).filter(row => row.source_type === 'EXTERNAL_SALE')"
-              :key="`${event.external_sale_id}-${index}`"
-            >
-              <router-link :to="`/external-sales/${event.external_sale_id}`">
-                {{ t('reports.vat.externalSale') }} · {{ event.external_source_name }} ·
-                {{ event.external_original_number }} · {{ event.event_date }}
-              </router-link>
-            </li>
-          </ul>
-          <n-text v-if="!(store.vatReport.event_rows ?? []).some(row => row.source_type === 'EXTERNAL_SALE')" depth="3">
-            —
-          </n-text>
-        </n-card>
-
         <!-- Totals -->
         <n-card :title="t('reports.vat.totals')" style="margin-bottom: 16px">
           <n-grid :cols="2" :x-gap="24" :y-gap="16">
@@ -351,6 +356,13 @@ const periodLabel = computed<string>(() => {
             </n-grid-item>
           </n-grid>
         </n-card>
+
+        <ReportSourcePanel
+          :title="t('reports.vat.eventSources')"
+          :action-label="t('reports.sourceAction')"
+          :empty-label="t('reports.noSources')"
+          :items="externalSaleSources"
+        />
 
         <!-- Disclaimer (D-DISCLAIMER) -->
         <n-alert type="default" :show-icon="false" style="margin-bottom: 16px">

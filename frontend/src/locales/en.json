@@ -1589,6 +1589,8 @@
     "statusFAILED": "Failed"
   },
   "reports": {
+    "sourceAction": "Open record",
+    "noSources": "No external sales in this period.",
     "pl": {
       "title": "Profit & Loss",
       "from": "From",

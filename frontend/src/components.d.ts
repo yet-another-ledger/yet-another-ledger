@@ -70,6 +70,7 @@ declare module 'vue' {
     PdfPreviewDialog: typeof import('./components/PdfPreviewDialog.vue')['default']
     PreferenceSettings: typeof import('./components/settings/PreferenceSettings.vue')['default']
     QuotePaymentPanel: typeof import('./components/QuotePaymentPanel.vue')['default']
+    ReportSourcePanel: typeof import('./components/reports/ReportSourcePanel.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SettingsPanel: typeof import('./components/settings/SettingsPanel.vue')['default']

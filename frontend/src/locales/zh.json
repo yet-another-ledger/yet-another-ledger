@@ -1589,6 +1589,8 @@
     "statusFAILED": "发送失败"
   },
   "reports": {
+    "sourceAction": "打开记录",
+    "noSources": "此期间没有外部销售。",
     "pl": {
       "title": "盈亏报表（P/L）",
       "from": "开始日期",
