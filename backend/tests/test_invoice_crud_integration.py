@@ -24,10 +24,23 @@ Test coverage:
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 import pyotp
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from jai.db import Base
+from jai.models._enums import VatTreatmentEffect
+from jai.models.company import Company
+from jai.models.document import InvoiceCreditBasisLine
+from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax
+from jai.models.user import User
+from jai.models.vat import VatRate, VatTreatment
+from jai.services.dictionary import seed_for_company as seed_dictionaries
+from jai.services.vat import seed_for_company as seed_vat
 
 # ---------------------------------------------------------------------------
 # Shared helpers (same as calculate integration tests)
@@ -164,6 +177,52 @@ async def _issue_invoice(client: AsyncClient, invoice_id: str) -> dict:
     )
     assert resp.status_code == 200, resp.text
     return resp.json()
+
+
+async def _all_business_rows(
+    session_maker: async_sessionmaker[AsyncSession],
+) -> tuple[list[tuple[str, tuple[tuple[object, ...], ...]]], list[tuple[object, ...]]]:
+    """Snapshot every mapped table and sequence state around a read-only preview."""
+    async with session_maker() as session:
+        tables: list[tuple[str, tuple[tuple[object, ...], ...]]] = []
+        for table in sorted(Base.metadata.tables.values(), key=lambda table: table.name):
+            statement = select(table)
+            if table.primary_key.columns:
+                statement = statement.order_by(*table.primary_key.columns)
+            rows = (await session.execute(statement)).all()
+            tables.append((table.name, tuple(tuple(row) for row in rows)))
+        sequences = (
+            await session.execute(
+                text(
+                    "SELECT sequencename, last_value FROM pg_sequences "
+                    "WHERE schemaname = current_schema() ORDER BY sequencename"
+                )
+            )
+        ).all()
+        return tables, [tuple(row) for row in sequences]
+
+
+async def _create_issued_invoice(
+    client: AsyncClient,
+    customer_id: str,
+    rate_id: str,
+    **options: object,
+) -> dict:
+    created = await client.post(
+        "/api/v1/invoices",
+        json=_invoice_payload(customer_id, rate_id, **options),
+    )
+    assert created.status_code == 201, created.text
+    return await _issue_invoice(client, created.json()["id"])
+
+
+async def _revision_preview(
+    client: AsyncClient, invoice: dict, changes: dict
+) -> object:
+    return await client.post(
+        f"/api/v1/invoices/{invoice['id']}/revisions/calculate",
+        json={"expected_updated_at": invoice["updated_at"], "changes": changes},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1409,3 +1468,785 @@ class TestInvoiceFKValidation:
         assert resp.json()["lines"][0]["vat_rate_id"] == rate_9
         # Tax is driven by document rate (21%), not line rate (9%)
         assert resp.json()["vat_total"] == "21.000"
+
+
+@pytest.mark.integration
+class TestInvoiceRevisionPreview:
+    async def test_preview_preserves_text_only_snapshot_and_has_no_writes(
+        self,
+        db_client: AsyncClient,
+        admin_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_id = seeds["rates"]["NL standard (21%)"]["id"]
+        created = await db_client.post(
+            "/api/v1/invoices", json=_invoice_payload(customer_id, rate_id)
+        )
+        assert created.status_code == 201
+        invoice = await _issue_invoice(db_client, created.json()["id"])
+        line = invoice["lines"][0]
+        async with admin_session_maker() as session:
+            invoice_row = await session.get(Invoice, uuid.UUID(invoice["id"]))
+            line_row = await session.get(InvoiceLine, uuid.UUID(line["id"]))
+            assert invoice_row is not None and line_row is not None
+            invoice_row.subtotal_excl_vat = Decimal("100.992")
+            invoice_row.vat_total = Decimal("20.007")
+            invoice_row.total_incl_vat = Decimal("120.999")
+            line_row.subtotal_excl_vat = Decimal("99.997")
+            line_row.vat_total = Decimal("20.007")
+            line_row.total_incl_vat = Decimal("120.999")
+            tax_row = await session.scalar(
+                select(InvoiceLineTax).where(InvoiceLineTax.invoice_line_id == line_row.id)
+            )
+            assert tax_row is not None
+            tax_row.tax_amount = Decimal("20.007")
+            tax_row.taxable_amount = Decimal("99.997")
+            await session.commit()
+        invoice = (await db_client.get(f"/api/v1/invoices/{invoice['id']}")).json()
+        line = invoice["lines"][0]
+        before = await db_client.get(f"/api/v1/invoices/{invoice['id']}")
+        database_before = await _all_business_rows(admin_session_maker)
+        response = await db_client.post(
+            f"/api/v1/invoices/{invoice['id']}/revisions/calculate",
+            json={
+                "expected_updated_at": invoice["updated_at"],
+                "changes": {
+                    "notes": "Preview only",
+                    "lines": [
+                        {
+                            "line_id": line["id"],
+                            "name": "Renamed",
+                            "quantity": line["quantity"],
+                            "unit_price": line["unit_price"],
+                            "vat_rate_id": line["vat_rate_id"],
+                        }
+                    ],
+                },
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["vat_total"] == "20.007"
+        assert response.json()["total_incl_vat"] == "120.999"
+        assert response.json()["subtotal_excl_vat"] == "100.992"
+        assert response.json()["lines"][0]["subtotal_excl_vat"] == "99.997"
+        assert response.json()["line_taxes"][0]["tax_amount"] == "20.007"
+        assert response.json()["lines"][0]["name"] == "Renamed"
+        assert (await db_client.get(f"/api/v1/invoices/{invoice['id']}")).json() == before.json()
+        history = await db_client.get(f"/api/v1/invoices/{invoice['id']}/revisions")
+        assert history.json()["total"] == 0
+        duplicate = await db_client.post(
+            f"/api/v1/invoices/{invoice['id']}/revisions/calculate",
+            json={
+                "expected_updated_at": invoice["updated_at"],
+                "changes": {
+                    "lines": [
+                        {"line_id": line["id"], "name": "A", "quantity": "1", "unit_price": "1"},
+                        {"line_id": line["id"], "name": "B", "quantity": "1", "unit_price": "1"},
+                    ]
+                },
+            },
+        )
+        assert duplicate.status_code == 422
+        changed = await db_client.post(
+            f"/api/v1/invoices/{invoice['id']}/revisions/calculate",
+            json={
+                "expected_updated_at": invoice["updated_at"],
+                "changes": {
+                    "due_date": None,
+                    "lines": [
+                        {
+                            "line_id": line["id"],
+                            "name": line["name"],
+                            "quantity": "2.500",
+                            "unit_price": line["unit_price"],
+                            "vat_rate_id": line["vat_rate_id"],
+                        }
+                    ],
+                },
+            },
+        )
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["lines"][0]["quantity"] == "2.500"
+        assert changed.json()["vat_total"] == "52.50"
+        stale = await db_client.post(
+            f"/api/v1/invoices/{invoice['id']}/revisions/calculate",
+            json={"expected_updated_at": "2000-01-01T00:00:00Z", "changes": {"notes": "stale"}},
+        )
+        assert stale.status_code == 409
+        invalid_dates = await _revision_preview(
+            db_client, invoice, {"invoice_date": "2026-12-10", "due_date": "2026-12-09"}
+        )
+        assert invalid_dates.status_code == 422
+        true_noop = await _revision_preview(db_client, invoice, {})
+        assert true_noop.status_code == 200
+        assert true_noop.json()["vat_total"] == "20.007"
+        assert true_noop.json()["total_incl_vat"] == "120.999"
+        assert await _all_business_rows(admin_session_maker) == database_before
+
+    async def test_same_rate_id_retains_per_line_snapshot_after_master_rate_changes(
+        self,
+        db_client: AsyncClient,
+        admin_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate = seeds["rates"]["NL standard (21%)"]
+        invoice = await _create_issued_invoice(
+            db_client,
+            customer_id,
+            rate["id"],
+            lines=[
+                _line_payload(rate["id"], name="Frozen 21", unit_price="100"),
+                _line_payload(rate["id"], name="Frozen 9", unit_price="100"),
+            ],
+        )
+        rows = invoice["lines"]
+        async with admin_session_maker() as session:
+            master_rate = await session.get(VatRate, uuid.UUID(rate["id"]))
+            assert master_rate is not None
+            master_rate.label = "Current rate changed"
+            master_rate.percent = Decimal("99")
+            master_rate.active = False
+            second_line = await session.get(InvoiceLine, uuid.UUID(rows[1]["id"]))
+            assert second_line is not None
+            second_line.vat_rate_label = "Frozen historical 9%"
+            second_line.vat_rate_percent = Decimal("9")
+            line_tax = await session.scalar(
+                select(InvoiceLineTax).where(InvoiceLineTax.invoice_line_id == second_line.id)
+            )
+            assert line_tax is not None
+            line_tax.vat_rate_label = "Frozen historical 9%"
+            line_tax.vat_rate_percent = Decimal("9")
+            line_tax.effective_vat_percent = Decimal("9")
+            basis = await session.scalar(
+                select(InvoiceCreditBasisLine).where(
+                    InvoiceCreditBasisLine.invoice_line_id == second_line.id
+                )
+            )
+            assert basis is not None
+            basis.vat_rate_label = "Frozen historical 9%"
+            basis.vat_rate_percent = Decimal("9")
+            basis.effective_vat_percent = Decimal("9")
+            await session.commit()
+        invoice = (await db_client.get(f"/api/v1/invoices/{invoice['id']}")).json()
+        database_before = await _all_business_rows(admin_session_maker)
+        response = await _revision_preview(
+            db_client,
+            invoice,
+            {
+                "lines": [
+                    {
+                        "line_id": rows[0]["id"],
+                        "name": "Frozen 21",
+                        "quantity": "2",
+                        "unit_price": "100",
+                        "vat_rate_id": rate["id"],
+                    },
+                    {
+                        "line_id": rows[1]["id"],
+                        "name": "Frozen 9",
+                        "quantity": "2",
+                        "unit_price": "100",
+                        "vat_rate_id": rate["id"],
+                    },
+                ]
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert [tax["vat_rate_id"] for tax in body["line_taxes"]] == [rate["id"], rate["id"]]
+        assert [tax["vat_rate_label"] for tax in body["line_taxes"]] == [
+            rate["label"],
+            "Frozen historical 9%",
+        ]
+        assert [tax["vat_rate_percent"] for tax in body["line_taxes"]] == ["21.000", "9.000"]
+        assert [tax["tax_amount"] for tax in body["line_taxes"]] == ["42.00", "18.00"]
+        assert await _all_business_rows(admin_session_maker) == database_before
+        new_line = await _revision_preview(
+            db_client,
+            invoice,
+            {
+                "lines": [
+                    {
+                        "name": "New on inactive rate",
+                        "quantity": "1",
+                        "unit_price": "10",
+                        "vat_rate_id": rate["id"],
+                    },
+                    {
+                        "line_id": rows[0]["id"],
+                        "name": "Frozen 21",
+                        "quantity": "2",
+                        "unit_price": "100",
+                        "vat_rate_id": rate["id"],
+                    },
+                ]
+            },
+        )
+        assert new_line.status_code == 422
+
+    async def test_mixed_rate_inclusive_add_delete_reorder_uses_existing_pricing(
+        self,
+        db_client: AsyncClient,
+    ) -> None:
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]["id"]
+        rate_9 = seeds["rates"]["NL reduced (9%)"]["id"]
+        unit_response = await db_client.post(
+            "/api/v1/units", json={"code": "rev-test", "name": "Revision unit"}
+        )
+        assert unit_response.status_code == 201
+        unit_id = unit_response.json()["id"]
+        product_response = await db_client.post(
+            "/api/v1/products",
+            json={
+                "name": "Costly catalog product",
+                "unit_id": unit_id,
+                "purchase_cost_excl_vat": "900.000",
+                "margin_rate": "0.5000",
+            },
+        )
+        assert product_response.status_code == 201, product_response.text
+        product_id = product_response.json()["id"]
+        initial_lines = [
+            {
+                **_line_payload(
+                    rate_21,
+                    name="A",
+                    unit_price="121",
+                    discount={"type": "PERCENTAGE", "value": "10"},
+                )
+            },
+            _line_payload(rate_9, name="B", unit_price="218"),
+            _line_payload(rate_21, name="Delete me", unit_price="50"),
+        ]
+        invoice = await _create_issued_invoice(
+            db_client,
+            customer_id,
+            rate_21,
+            amounts_include_vat=True,
+            discount={"type": "FIXED", "value": "12"},
+            lines=initial_lines,
+        )
+        ids = {line["name"]: line["id"] for line in invoice["lines"]}
+        target = [
+            {
+                "line_id": ids["B"],
+                "name": "B reordered",
+                "quantity": "1.250",
+                "unit_price": "218",
+                "vat_rate_id": rate_9,
+            },
+            {
+                "name": "Catalog item with entered price",
+                "product_id": product_id,
+                "unit_id": unit_id,
+                "quantity": "1.5",
+                "unit_price": "17.345",
+                "vat_rate_id": rate_9,
+                "discount": {"type": "FIXED", "value": "2"},
+            },
+            {
+                "line_id": ids["A"],
+                "name": "A updated",
+                "quantity": "2",
+                "unit_price": "121",
+                "vat_rate_id": rate_21,
+                "discount": {"type": "PERCENTAGE", "value": "10"},
+            },
+        ]
+        preview = await _revision_preview(db_client, invoice, {"lines": target})
+        assert preview.status_code == 200, preview.text
+        body = preview.json()
+        assert [line["name"] for line in body["lines"]] == [
+            "B reordered",
+            "Catalog item with entered price",
+            "A updated",
+        ]
+        assert body["lines"][1]["unit_price"] == "17.345"
+        assert body["lines"][1]["product_id"] == product_id
+        raw_lines = [
+            {key: value for key, value in line.items() if key != "line_id"} for line in target
+        ]
+        expected = await db_client.post(
+            "/api/v1/invoices/calculate",
+            json={
+                "customer_id": customer_id,
+                "invoice_date": invoice["invoice_date"],
+                "tax_mode": "LINE",
+                "amounts_include_vat": True,
+                "vat_treatment_id": invoice["vat_treatment_id"],
+                "discount": {"type": "FIXED", "value": "12.000"},
+                "lines": raw_lines,
+            },
+        )
+        assert expected.status_code == 200, expected.text
+        assert body == expected.json()
+
+    async def test_foreign_and_unknown_references_and_owner_company_boundaries(
+        self,
+        db_client: AsyncClient,
+        admin_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _full_auth(db_client, email="revision-owner-a@example.com")
+        seeds_a = await _setup_company(db_client)
+        customer_a = await _create_customer(db_client)
+        invoice_a = await _create_issued_invoice(
+            db_client, customer_a, seeds_a["rates"]["NL standard (21%)"]["id"]
+        )
+        company_a = (await db_client.get("/api/v1/company")).json()
+        async with admin_session_maker() as session:
+            owner = await session.scalar(
+                select(User).where(User.email == "revision-owner-a@example.com")
+            )
+            assert owner is not None
+            company_b = Company(name="Second isolated company", base_currency="EUR")
+            session.add(company_b)
+            await session.flush()
+            owner.company_id = company_b.id
+            await seed_vat(session, company_b.id)
+            await seed_dictionaries(session, company_b.id)
+            await session.commit()
+        rates_b = (await db_client.get("/api/v1/vat-rates")).json()["items"]
+        rate_b = next(row for row in rates_b if row["label"] == "NL standard (21%)")
+        customer_b = await _create_customer(db_client, name="Other company customer")
+        units_b = (await db_client.get("/api/v1/units")).json()["items"]
+        unit_b = next(row for row in units_b if row["code"] == "pcs")
+        product_b = await db_client.post(
+            "/api/v1/products",
+            json={"name": "Other company product", "unit_id": unit_b["id"]},
+        )
+        assert product_b.status_code == 201
+        invoice_b = await _create_issued_invoice(
+            db_client,
+            customer_b,
+            rate_b["id"],
+            lines=[
+                {
+                    **_line_payload(rate_b["id"]),
+                    "product_id": product_b.json()["id"],
+                    "unit_id": unit_b["id"],
+                }
+            ],
+        )
+        async with admin_session_maker() as session:
+            owner = await session.scalar(
+                select(User).where(User.email == "revision-owner-a@example.com")
+            )
+            assert owner is not None
+            owner.company_id = uuid.UUID(company_a["id"])
+            await session.commit()
+        hidden = await db_client.get(f"/api/v1/invoices/{invoice_b['id']}/revisions")
+        hidden_preview = await _revision_preview(db_client, invoice_b, {"notes": "cross company"})
+        assert hidden.status_code == 404
+        assert hidden_preview.status_code == 404
+        line_a = invoice_a["lines"][0]
+        foreign_line = await _revision_preview(
+            db_client,
+            invoice_a,
+            {
+                "lines": [
+                    {
+                        "line_id": invoice_b["lines"][0]["id"],
+                        "name": "Foreign",
+                        "quantity": "1",
+                        "unit_price": "100",
+                        "vat_rate_id": line_a["vat_rate_id"],
+                    }
+                ]
+            },
+        )
+        unknown_line = await _revision_preview(
+            db_client,
+            invoice_a,
+            {
+                "lines": [
+                    {
+                        "line_id": str(uuid.uuid4()),
+                        "name": "Unknown",
+                        "quantity": "1",
+                        "unit_price": "100",
+                        "vat_rate_id": line_a["vat_rate_id"],
+                    }
+                ]
+            },
+        )
+        foreign_product = await _revision_preview(
+            db_client,
+            invoice_a,
+            {
+                "lines": [
+                    {
+                        "line_id": line_a["id"],
+                        "name": "Invalid product",
+                        "quantity": "1",
+                        "unit_price": "100",
+                        "vat_rate_id": line_a["vat_rate_id"],
+                        "product_id": product_b.json()["id"],
+                    }
+                ]
+            },
+        )
+        foreign_unit = await _revision_preview(
+            db_client,
+            invoice_a,
+            {
+                "lines": [
+                    {
+                        "line_id": line_a["id"],
+                        "name": "Invalid unit",
+                        "quantity": "1",
+                        "unit_price": "100",
+                        "vat_rate_id": line_a["vat_rate_id"],
+                        "unit_id": unit_b["id"],
+                    }
+                ]
+            },
+        )
+        unknown_product = await _revision_preview(
+            db_client,
+            invoice_a,
+            {
+                "lines": [
+                    {
+                        "line_id": line_a["id"],
+                        "name": "Invalid product",
+                        "quantity": "1",
+                        "unit_price": "100",
+                        "vat_rate_id": line_a["vat_rate_id"],
+                        "product_id": str(uuid.uuid4()),
+                    }
+                ]
+            },
+        )
+        unknown_unit = await _revision_preview(
+            db_client,
+            invoice_a,
+            {
+                "lines": [
+                    {
+                        "line_id": line_a["id"],
+                        "name": "Invalid unit",
+                        "quantity": "1",
+                        "unit_price": "100",
+                        "vat_rate_id": line_a["vat_rate_id"],
+                        "unit_id": str(uuid.uuid4()),
+                    }
+                ]
+            },
+        )
+        assert all(
+            response.status_code == 422
+            for response in (
+                foreign_line,
+                unknown_line,
+                foreign_product,
+                foreign_unit,
+                unknown_product,
+                unknown_unit,
+            )
+        )
+        async with admin_session_maker() as session:
+            owner = await session.scalar(
+                select(User).where(User.email == "revision-owner-a@example.com")
+            )
+            assert owner is not None
+            owner.role = "accountant"
+            await session.commit()
+        non_owner = await _revision_preview(db_client, invoice_a, {"notes": "forbidden"})
+        assert non_owner.status_code == 403
+
+    async def test_unchanged_treatment_uses_frozen_snapshot_and_changed_treatment_resolves(
+        self,
+        db_client: AsyncClient,
+        admin_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_id = seeds["rates"]["NL standard (21%)"]["id"]
+        domestic = seeds["treatments"]["NL_DOMESTIC"]
+        exported = seeds["treatments"]["EXPORT_NON_EU"]
+        invoice = await _create_issued_invoice(
+            db_client, customer_id, rate_id, treatment_id=domestic["id"]
+        )
+        async with admin_session_maker() as session:
+            treatment = await session.get(VatTreatment, uuid.UUID(domestic["id"]))
+            assert treatment is not None
+            treatment.label = "Current treatment label"
+            treatment.effect = VatTreatmentEffect.ZERO_EXPORT
+            treatment.active = False
+            await session.commit()
+        invoice = (await db_client.get(f"/api/v1/invoices/{invoice['id']}")).json()
+        unchanged = await _revision_preview(
+            db_client,
+            invoice,
+            {
+                "lines": [
+                    {
+                        "line_id": invoice["lines"][0]["id"],
+                        "name": "Service",
+                        "quantity": "2",
+                        "unit_price": "100",
+                        "vat_rate_id": rate_id,
+                    }
+                ]
+            },
+        )
+        assert unchanged.status_code == 200, unchanged.text
+        assert unchanged.json()["vat_treatment_snapshot"]["label"] == domestic["label"]
+        assert unchanged.json()["vat_treatment_snapshot"]["effect"] == "APPLY_RATE"
+        assert unchanged.json()["vat_total"] == "42.00"
+        deliberate = await _revision_preview(
+            db_client,
+            invoice,
+            {
+                "vat_treatment_id": exported["id"],
+                "lines": [
+                    {
+                        "line_id": invoice["lines"][0]["id"],
+                        "name": "Service",
+                        "quantity": "2",
+                        "unit_price": "100",
+                        "vat_rate_id": rate_id,
+                    }
+                ],
+            },
+        )
+        assert deliberate.status_code == 200, deliberate.text
+        assert deliberate.json()["vat_treatment_snapshot"]["code"] == "EXPORT_NON_EU"
+        assert deliberate.json()["vat_treatment_snapshot"]["label"] == exported["label"]
+        assert deliberate.json()["vat_total"] == "0.00"
+
+    async def test_document_rate_freeze_and_deliberate_active_selection(
+        self,
+        db_client: AsyncClient,
+        admin_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate_21 = seeds["rates"]["NL standard (21%)"]
+        rate_9 = seeds["rates"]["NL reduced (9%)"]
+        invoice = await _create_issued_invoice(
+            db_client,
+            customer_id,
+            rate_21["id"],
+            tax_mode="DOCUMENT",
+            document_vat_rate_id=rate_21["id"],
+        )
+        async with admin_session_maker() as session:
+            master = await session.get(VatRate, uuid.UUID(rate_21["id"]))
+            assert master is not None
+            master.label = "Renamed document rate"
+            master.percent = Decimal("88")
+            master.active = False
+            await session.commit()
+        invoice = (await db_client.get(f"/api/v1/invoices/{invoice['id']}")).json()
+        line = invoice["lines"][0]
+        frozen = await _revision_preview(
+            db_client,
+            invoice,
+            {
+                "lines": [
+                    {
+                        "line_id": line["id"],
+                        "name": line["name"],
+                        "quantity": "2",
+                        "unit_price": "100",
+                        "vat_rate_id": line["vat_rate_id"],
+                    }
+                ]
+            },
+        )
+        assert frozen.status_code == 200, frozen.text
+        assert frozen.json()["document_taxes"][0]["vat_rate_label"] == rate_21["label"]
+        assert frozen.json()["document_taxes"][0]["vat_rate_percent"] == "21.000"
+        assert frozen.json()["vat_total"] == "42.00"
+        changed = await _revision_preview(
+            db_client,
+            invoice,
+            {
+                "document_vat_rate_id": rate_9["id"],
+                "lines": [
+                    {
+                        "line_id": line["id"],
+                        "name": line["name"],
+                        "quantity": "2",
+                        "unit_price": "100",
+                        "vat_rate_id": line["vat_rate_id"],
+                    }
+                ],
+            },
+        )
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["document_taxes"][0]["vat_rate_label"] == rate_9["label"]
+        assert changed.json()["vat_total"] == "18.00"
+        async with admin_session_maker() as session:
+            inactive = await session.get(VatRate, uuid.UUID(rate_9["id"]))
+            assert inactive is not None
+            inactive.active = False
+            await session.commit()
+        invalid = await _revision_preview(
+            db_client,
+            invoice,
+            {"document_vat_rate_id": rate_9["id"]},
+        )
+        assert invalid.status_code == 422
+        unknown = await _revision_preview(
+            db_client,
+            invoice,
+            {"document_vat_rate_id": str(uuid.uuid4())},
+        )
+        assert unknown.status_code == 422
+
+    async def test_document_to_line_requires_active_rate_without_line_snapshot(
+        self,
+        db_client: AsyncClient,
+        admin_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _full_auth(db_client)
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rate = seeds["rates"]["NL standard (21%)"]
+        invoice = await _create_issued_invoice(
+            db_client,
+            customer_id,
+            rate["id"],
+            tax_mode="DOCUMENT",
+            document_vat_rate_id=rate["id"],
+        )
+        line_invoice = await _create_issued_invoice(
+            db_client, customer_id, rate["id"], tax_mode="LINE"
+        )
+        active_switch = await _revision_preview(
+            db_client, invoice, {"tax_mode": "LINE"}
+        )
+        assert active_switch.status_code == 200, active_switch.text
+        assert active_switch.json()["line_taxes"][0]["vat_rate_percent"] == "21.000"
+
+        async with admin_session_maker() as session:
+            master = await session.get(VatRate, uuid.UUID(rate["id"]))
+            assert master is not None
+            master.percent = Decimal("88")
+            master.label = "Changed and inactive"
+            master.active = False
+            await session.commit()
+        invoice = (await db_client.get(f"/api/v1/invoices/{invoice['id']}")).json()
+        inactive_switch = await _revision_preview(
+            db_client, invoice, {"tax_mode": "LINE"}
+        )
+        assert inactive_switch.status_code == 422
+
+        # A real frozen LINE snapshot remains reusable after the dictionary is retired.
+        frozen = await _revision_preview(
+            db_client,
+            line_invoice,
+            {
+                "lines": [
+                    {
+                        "line_id": line_invoice["lines"][0]["id"],
+                        "name": line_invoice["lines"][0]["name"],
+                        "quantity": "2",
+                        "unit_price": line_invoice["lines"][0]["unit_price"],
+                        "vat_rate_id": rate["id"],
+                    }
+                ]
+            },
+        )
+        assert frozen.status_code == 200, frozen.text
+        assert frozen.json()["line_taxes"][0]["vat_rate_percent"] == "21.000"
+
+    async def test_line_mode_validates_changed_document_rate_reference(
+        self,
+        db_client: AsyncClient,
+        admin_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _full_auth(db_client, email="revision-doc-rate-owner@example.com")
+        seeds = await _setup_company(db_client)
+        customer_id = await _create_customer(db_client)
+        rates = seeds["rates"]
+        invoice = await _create_issued_invoice(
+            db_client, customer_id, rates["NL standard (21%)"]["id"]
+        )
+        own_rate_id = rates["NL reduced (9%)"]["id"]
+        active_changed = await _revision_preview(
+            db_client,
+            invoice,
+            {"document_vat_rate_id": rates["NL standard (21%)"]["id"]},
+        )
+        assert active_changed.status_code == 200, active_changed.text
+        unknown_id = str(uuid.uuid4())
+
+        # Make a real rate belonging to another company.
+        company_a = (await db_client.get("/api/v1/company")).json()
+        async with admin_session_maker() as session:
+            owner = await session.scalar(
+                select(User).where(User.email == "revision-doc-rate-owner@example.com")
+            )
+            assert owner is not None
+            company_b = Company(name="Document rate boundary company", base_currency="EUR")
+            session.add(company_b)
+            await session.flush()
+            await seed_vat(session, company_b.id)
+            await seed_dictionaries(session, company_b.id)
+            await session.commit()
+            foreign_rate = await session.scalar(
+                select(VatRate).where(
+                    VatRate.company_id == company_b.id,
+                    VatRate.label == "NL standard (21%)",
+                )
+            )
+            assert foreign_rate is not None
+            foreign_rate_id = str(foreign_rate.id)
+            owner.company_id = uuid.UUID(company_a["id"])
+            inactive = await session.get(VatRate, uuid.UUID(own_rate_id))
+            assert inactive is not None
+            inactive.active = False
+            await session.commit()
+
+        for invalid_id in (unknown_id, foreign_rate_id, own_rate_id):
+            rejected = await _revision_preview(
+                db_client, invoice, {"document_vat_rate_id": invalid_id}
+            )
+            assert rejected.status_code == 422, rejected.text
+        cleared = await _revision_preview(
+            db_client, invoice, {"document_vat_rate_id": None}
+        )
+        assert cleared.status_code == 200, cleared.text
+
+        # An unchanged, previously selected document rate remains lawful in LINE mode.
+        async with admin_session_maker() as session:
+            line_row = await session.get(Invoice, uuid.UUID(invoice["id"]))
+            assert line_row is not None
+            line_row.document_vat_rate_id = uuid.UUID(rates["NL standard (21%)"]["id"])
+            await session.commit()
+        async with admin_session_maker() as session:
+            active_rate = await session.get(
+                VatRate, uuid.UUID(rates["NL standard (21%)"]["id"])
+            )
+            assert active_rate is not None
+            active_rate.active = False
+            await session.commit()
+        line_invoice = (await db_client.get(f"/api/v1/invoices/{invoice['id']}")).json()
+        retained = await _revision_preview(
+            db_client,
+            line_invoice,
+            {
+                "lines": [
+                    {
+                        "line_id": line_invoice["lines"][0]["id"],
+                        "name": line_invoice["lines"][0]["name"],
+                        "quantity": "2",
+                        "unit_price": line_invoice["lines"][0]["unit_price"],
+                        "vat_rate_id": rates["NL standard (21%)"]["id"],
+                    }
+                ]
+            },
+        )
+        assert retained.status_code == 200, retained.text

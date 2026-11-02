@@ -46,6 +46,11 @@ from jai.schemas.invoice import (
     InvoiceWrite,
     ProductInvoiceOptionListResponse,
 )
+from jai.schemas.invoice_revision import (
+    InvoiceRevisionCalculateRequest,
+    InvoiceRevisionCreate,
+    InvoiceRevisionListRead,
+)
 from jai.services.advance import (
     AdvanceConflictError,
     AdvanceStaleError,
@@ -79,6 +84,13 @@ from jai.services.invoice import (
     list_invoices,
     transition_status,
     update_invoice,
+)
+from jai.services.invoice_revision import (
+    InvoiceRevisionConflictError,
+    InvoiceRevisionStaleError,
+    calculate_invoice_revision,
+    list_invoice_revisions,
+    save_invoice_revision,
 )
 from jai.services.numbering import NumberSequenceExhaustedError
 from jai.services.pricing import calculate_invoice
@@ -451,6 +463,82 @@ async def get_invoice_endpoint(
     return inv
 
 
+@router.get("/invoices/{invoice_id}/revisions", response_model=InvoiceRevisionListRead)
+async def list_invoice_revisions_endpoint(
+    invoice_id: uuid.UUID,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoiceRevisionListRead:
+    _owner_only(user)
+    result = await list_invoice_revisions(
+        session,
+        invoice_id=invoice_id,
+        company_id=_require_company_id(user),
+        offset=offset,
+        limit=limit,
+    )
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
+    return result
+
+
+@router.post(
+    "/invoices/{invoice_id}/revisions/calculate", response_model=InvoiceCalculationRead
+)
+async def calculate_invoice_revision_endpoint(
+    invoice_id: uuid.UUID,
+    body: InvoiceRevisionCalculateRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoiceCalculationRead:
+    _owner_only(user)
+    try:
+        result = await calculate_invoice_revision(
+            session, invoice_id=invoice_id, company_id=_require_company_id(user), request=body
+        )
+    except InvoiceRevisionStaleError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail={"code": "STALE_VERSION"}
+        ) from exc
+    except InvoiceRevisionConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail={"code": exc.reason_code}
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
+    return result
+
+
+@router.post("/invoices/{invoice_id}/revisions", response_model=InvoiceRead)
+async def create_invoice_revision_endpoint(
+    invoice_id: uuid.UUID,
+    body: InvoiceRevisionCreate,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvoiceRead:
+    _owner_only(user)
+    try:
+        result = await save_invoice_revision(
+            session, invoice_id=invoice_id, company_id=_require_company_id(user),
+            actor_user_id=user.id, request=body,
+        )
+    except InvoiceRevisionStaleError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "STALE_VERSION"}) from exc
+    except InvoiceRevisionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": exc.reason_code}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
+    return result
+
+
 @router.get("/invoices/{invoice_id}/document-chain", response_model=DocumentChainRead)
 async def get_invoice_document_chain_endpoint(
     invoice_id: uuid.UUID,
@@ -764,10 +852,11 @@ async def send_invoice_email_endpoint(
         log = await send_document_email(
             session=session, related_type=EmailRelatedType.INVOICE, doc=email_doc,
             company=presentation_company, customer=presentation_customer,
-            to=str(body.to), cc=cc_list,
-            locale=resolved_locale, subject=body.subject, body=body.body,
-            pdf_bytes=artifact.pdf_bytes, filename=artifact.filename, creator_id=user.id,
-            artifact_id=artifact.id, document_kind=invoice.document_kind,
+            to=str(body.to), cc=cc_list, locale=resolved_locale,
+            subject=body.subject, body=body.body,
+            pdf_bytes=artifact.pdf_bytes, filename=artifact.filename,
+            creator_id=user.id, artifact_id=artifact.id,
+            document_kind=invoice.document_kind,
         )
         if log.status.value == "FAILED" and artifact_created:
             failed_values = failed_email_log_values(log)

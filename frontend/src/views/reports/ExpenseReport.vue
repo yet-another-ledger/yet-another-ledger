@@ -23,6 +23,7 @@ import {
   NSpace,
   NSpin,
   NStatistic,
+  NSelect,
   NText,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
@@ -43,6 +44,7 @@ const dateRange = ref<[number, number]>([
   new Date(currentYear, 0, 1).getTime(),
   today.getTime(),
 ])
+const plInclusion = ref<string>('all')
 
 // ─── Fetch ────────────────────────────────────────────────────────────────────
 
@@ -51,8 +53,15 @@ async function load() {
   const [fromTs, toTs] = dateRange.value
   const from = localDateStr(new Date(fromTs))
   const to = localDateStr(new Date(toTs))
-  await store.fetchExpenseReport(from, to)
+  const include = plInclusion.value === 'all' ? null : plInclusion.value === 'included'
+  await store.fetchExpenseReport(from, to, include)
 }
+
+const inclusionOptions = computed(() => [
+  { label: t('expenses.plInclusionAll'), value: 'all' },
+  { label: t('expenses.plInclusionIncluded'), value: 'included' },
+  { label: t('expenses.plInclusionExcluded'), value: 'excluded' },
+])
 
 onMounted(load)
 
@@ -173,6 +182,7 @@ const hasRows = computed(
 
           <!-- Filters -->
           <n-space align="center" :wrap="true" class="filters-row">
+            <n-select v-model:value="plInclusion" :options="inclusionOptions" style="width: 210px" @update:value="load" />
             <n-date-picker
               v-model:value="dateRange"
               type="daterange"

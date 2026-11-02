@@ -634,13 +634,11 @@ async def test_refund_delete_tombstones_cash_but_retains_artifact_and_email_audi
     historic = await db_client.get(f"/api/v1/payments/{refund['id']}/artifacts/{artifact['id']}")
     assert historic.status_code == 200 and historic.content == downloaded.content
     assert hashlib.sha256(historic.content).hexdigest() == artifact["sha256"]
-    async with db_session_maker() as session:
-        current_alembic_head = await session.scalar(
-            text("SELECT version_num FROM alembic_version")
-        )
-    assert current_alembic_head is not None
     # The formal API-created tombstone blocks downgrade before any 0040 DDL;
     # its historical owner/bytes and successful EmailLog relation stay intact.
+    async with db_session_maker() as session:
+        active_head = await session.scalar(text("SELECT version_num FROM alembic_version"))
+    assert active_head is not None
     downgrade = _run_alembic(
         "downgrade",
         "0039",
@@ -662,10 +660,10 @@ async def test_refund_delete_tombstones_cash_but_retains_artifact_and_email_audi
         assert retained is not None
         assert hashlib.sha256(retained.pdf_bytes).hexdigest() == artifact["sha256"]
         # The 0040 downgrade guard aborts before running its DDL, so a failed
-        # attempt must retain the Alembic head that was current beforehand.
+        # attempt must retain whichever head was active before the attempt.
         assert (
             await session.scalar(text("SELECT version_num FROM alembic_version"))
-        ) == current_alembic_head
+        ) == active_head
 
 
 @pytest.mark.parametrize("output_action", ["preview", "download", "send"])
@@ -779,9 +777,13 @@ async def test_refund_confirmation_output_and_mutation_use_canonical_lock_order(
         assert updated_refund.json()["note"] == "concurrent"
     async with db_session_maker() as session:
         await set_rls_company(session, uuid.UUID(seeds["company_id"]))
-        email_rows = list((await session.execute(select(EmailLog).where(
-            EmailLog.related_id == uuid.UUID(refund_id)
-        ))).scalars())
+        email_rows = list(
+            (
+                await session.execute(
+                    select(EmailLog).where(EmailLog.related_id == uuid.UUID(refund_id))
+                )
+            ).scalars()
+        )
     if mutation_action == "DELETE":
         assert output.status_code == 404, output.text
         assert await _refund_artifacts(db_client, refund_id) == []
@@ -1078,18 +1080,20 @@ async def test_artifact_byte_identity_is_owner_kind_and_sha_scoped(
         # lookup, rejects an equal-byte cross-locale duplicate.
         with pytest.raises(IntegrityError):
             async with session.begin_nested():
-                session.add(DocumentArtifact(
-                    company_id=company_id,
-                    invoice_id=invoice_id,
-                    artifact_kind=first.artifact_kind,
-                    pdf_bytes=pdf_bytes,
-                    sha256=hashlib.sha256(pdf_bytes).hexdigest(),
-                    render_fingerprint="f" * 64,
-                    locale="zh",
-                    filename="same-zh.pdf",
-                    creation_reason=DocumentArtifactReason.SEND,
-                    renderer_version="other-pipeline",
-                ))
+                session.add(
+                    DocumentArtifact(
+                        company_id=company_id,
+                        invoice_id=invoice_id,
+                        artifact_kind=first.artifact_kind,
+                        pdf_bytes=pdf_bytes,
+                        sha256=hashlib.sha256(pdf_bytes).hexdigest(),
+                        render_fingerprint="f" * 64,
+                        locale="zh",
+                        filename="same-zh.pdf",
+                        creation_reason=DocumentArtifactReason.SEND,
+                        renderer_version="other-pipeline",
+                    )
+                )
                 await session.flush()
         await session.commit()
 
@@ -1609,3 +1613,49 @@ async def test_concurrent_same_identity_refund_artifact_retention_reuses_one_row
 
     first, second = await asyncio.gather(_retain("en"), _retain("zh"))
     assert first == second
+
+
+async def test_si1_copy_failure_keeps_all_formal_artifacts_and_smtp_log(db_client):
+    """Real route transactions must retain PDFs after SMTP accepted + IMAP failed."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from jai.schemas.setting import SentCopySettings
+
+    documents, _ = await _all_formal_documents(db_client)
+    cfg = _smtp()
+    cfg.sent_copy = SentCopySettings(enabled=True, host="imap.example.test")
+    imap = MagicMock()
+    imap.login.return_value = ("OK", [])
+    imap.capability.return_value = ("OK", [b"IMAP4rev1"])
+    imap.list.return_value = ("OK", [b'(\\Sent) "/" Sent'])
+    imap.append.side_effect = TimeoutError("SECRET MIME")
+    for kind in ["STANDARD", "ADVANCE", "FINAL", "CREDIT_NOTE", "REFUND"]:
+        document = documents[kind]
+        path = (
+            f"/api/v1/payments/{document['id']}/send-refund-confirmation"
+            if kind == "REFUND"
+            else f"/api/v1/invoices/{document['id']}/send"
+        )
+        with (
+            patch("jai.services.email._get_smtp_config", return_value=cfg),
+            patch("aiosmtplib.send", new_callable=AsyncMock) as smtp,
+            patch("jai.services.sent_copy.imaplib.IMAP4_SSL", return_value=imap),
+        ):
+            response = await db_client.post(
+                path, json={"to": "test@example.com", "cc": "cc@example.com"}
+            )
+        assert response.status_code == 200, response.text
+        log = response.json()
+        assert log["status"] == "SENT" and log["sent_at"] is not None
+        assert log["artifact_id"] and log["sent_copy_status"] == "FAILED"
+        assert log["sent_copy_error_code"] == "IMAP_TIMEOUT" and log["error_message"] is None
+        smtp.assert_called_once()
+        artifacts = (
+            await _refund_artifacts(db_client, document["id"])
+            if kind == "REFUND"
+            else await _invoice_artifacts(db_client, document["id"])
+        )
+        assert any(item["id"] == log["artifact_id"] for item in artifacts)
+        raw = smtp.call_args.args[0]
+        assert imap.append.call_args.args[3] == raw
+        assert "SECRET" not in response.text

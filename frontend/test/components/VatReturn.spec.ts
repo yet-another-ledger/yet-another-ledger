@@ -35,10 +35,19 @@ const ui = vi.hoisted(() => ({
 }))
 
 vi.mock('../../src/stores/reports', () => ({ useReportsStore: () => store }))
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('naive-ui', () => ({
   NAlert: ui.alert,
   NButton: { template: '<button><slot /></button>' },
   NCard: { template: '<section><slot /></section>' },
+  NCollapse: {
+    props: ['defaultExpandedNames'],
+    template: '<div><slot /></div>',
+  },
+  NCollapseItem: {
+    props: ['title', 'name'],
+    template: '<section><h3>{{ title }}</h3><slot /></section>',
+  },
   NDataTable: { template: '<table />' },
   NGrid: { template: '<div><slot /></div>' },
   NGridItem: { template: '<div><slot /></div>' },

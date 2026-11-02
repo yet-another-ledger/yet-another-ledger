@@ -71,6 +71,7 @@ def _make_expense(
     exp.base_gross_amount = Decimal(base_gross_amount)
     exp.deductible = deductible
     exp.is_draft = is_draft
+    exp.include_in_pl = True
     exp.company_id = company_id or uuid.uuid4()
     return exp
 

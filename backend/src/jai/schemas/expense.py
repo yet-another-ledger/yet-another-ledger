@@ -22,7 +22,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator  # noqa: F401
 
-from jai.models._enums import ExpenseKind, PaidBy
+from jai.models._enums import ExpenseKind, PaidBy, PlCostBasis
 
 # ---------------------------------------------------------------------------
 # Input
@@ -68,6 +68,8 @@ class ExpenseInput(BaseModel):
         ge=1,
         description="Depreciation years; 1 = fully expensed this year.",
     )
+    include_in_pl: bool = True
+    pl_cost_basis: PlCostBasis = PlCostBasis.NET
 
     @field_validator("net_amount", "vat_amount")
     @classmethod
@@ -129,6 +131,8 @@ class ExpenseRead(BaseModel):
     paid_by: PaidBy
     business_percentage: Decimal
     depreciation_years: int
+    include_in_pl: bool
+    pl_cost_basis: PlCostBasis
 
     # Draft flag (D3)
     is_draft: bool
@@ -168,6 +172,8 @@ class ExpenseListItem(BaseModel):
     paid_by: PaidBy
     business_percentage: Decimal
     depreciation_years: int
+    include_in_pl: bool
+    pl_cost_basis: PlCostBasis
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +249,28 @@ class ExpenseCalculateResult(BaseModel):
     vat_amount: Decimal
     gross_amount: Decimal
     vat_rate_percent: Decimal
+
+
+class ExpenseCostPreviewRequest(BaseModel):
+    """Raw inputs needed for a backend-authoritative annual P/L preview."""
+
+    net_amount: Decimal = Field(ge=0)
+    vat_amount: Decimal = Field(ge=0)
+    vat_treatment_id: uuid.UUID
+    category_id: uuid.UUID | None = None
+    deductible: bool | None = None
+    pl_cost_basis: PlCostBasis = PlCostBasis.AUTO
+    include_in_pl: bool = True
+    business_percentage: Decimal = Field(ge=0, le=100)
+    depreciation_years: int = Field(ge=1)
+
+
+class ExpenseCostPreviewResult(BaseModel):
+    """Backend-calculated cost basis and annual recognized amount."""
+
+    cost_basis_amount: Decimal
+    annual_cost: Decimal
+    included_in_pl: bool
 
 
 # ---------------------------------------------------------------------------

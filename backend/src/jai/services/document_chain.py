@@ -170,6 +170,10 @@ class _CancellationCreditMetadata(_EventMetadata):
     source_invoice_id: uuid.UUID
 
 
+class _InvoiceRevisionMetadata(_EventMetadata):
+    revision_id: uuid.UUID
+
+
 _EVENT_METADATA_MODELS: dict[DocumentChainEventType, type[_EventMetadata]] = {
     DocumentChainEventType.MODE_LOCKED: _ModeLockedMetadata,
     DocumentChainEventType.INVOICE_CREATED: _InvoiceKindMetadata,
@@ -189,6 +193,7 @@ _EVENT_METADATA_MODELS: dict[DocumentChainEventType, type[_EventMetadata]] = {
     DocumentChainEventType.REPLACEMENT_CREATED: _CreditRelationMetadata,
     DocumentChainEventType.COMPENSATING_INVOICE_CREATED: _CreditRelationMetadata,
     DocumentChainEventType.PROJECT_CANCELLATION_CREDIT_CREATED: _CancellationCreditMetadata,
+    DocumentChainEventType.INVOICE_REVISED: _InvoiceRevisionMetadata,
 }
 
 

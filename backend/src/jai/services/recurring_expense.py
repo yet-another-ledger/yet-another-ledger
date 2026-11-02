@@ -31,11 +31,12 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jai.models._enums import PaidBy, RecurringFrequency
+from jai.models._enums import PaidBy, PlCostBasis, RecurringFrequency
 from jai.models.company import Company
 from jai.models.dictionary import ExpenseCategory
 from jai.models.expense import Expense
 from jai.models.recurring_expense import RecurringExpense
+from jai.schemas.expense import ExpenseCostPreviewResult
 from jai.schemas.recurring_expense import (
     RecurringExpenseInput,
     RecurringExpenseListResponse,
@@ -46,6 +47,7 @@ from jai.services.expense import (
     _load_vat_rate,
     _load_vat_treatment,
     compute_expense_amounts,
+    compute_stored_cost_preview,
     resolve_deductible,
 )
 
@@ -167,6 +169,16 @@ async def _load_recurring_expense(
     return rec
 
 
+async def get_recurring_expense_cost_preview(
+    session: AsyncSession,
+    recurring_id: uuid.UUID,
+    company_id: uuid.UUID,
+) -> ExpenseCostPreviewResult:
+    """Preview one generated Expense from the template's actual stored snapshots."""
+    rec = await _load_recurring_expense(session, recurring_id, company_id)
+    return compute_stored_cost_preview(rec)
+
+
 def _recurring_to_read(rec: RecurringExpense) -> RecurringExpenseRead:
     """Convert an ORM RecurringExpense to RecurringExpenseRead schema."""
     return RecurringExpenseRead(
@@ -190,6 +202,8 @@ def _recurring_to_read(rec: RecurringExpense) -> RecurringExpenseRead:
         paid_by=PaidBy(rec.paid_by),
         business_percentage=Decimal(str(rec.business_percentage)),
         depreciation_years=int(rec.depreciation_years),
+        include_in_pl=rec.include_in_pl,
+        pl_cost_basis=PlCostBasis(rec.pl_cost_basis),
         frequency=rec.frequency,
         start_date=rec.start_date,
         end_date=rec.end_date,
@@ -265,6 +279,10 @@ async def _apply_body(
     rec.paid_by = body.paid_by.value
     rec.business_percentage = body.business_percentage
     rec.depreciation_years = body.depreciation_years
+    if "include_in_pl" in body.model_fields_set or is_create:
+        rec.include_in_pl = body.include_in_pl
+    if "pl_cost_basis" in body.model_fields_set or is_create:
+        rec.pl_cost_basis = body.pl_cost_basis.value
 
     rec.frequency = body.frequency
     rec.start_date = body.start_date
@@ -457,6 +475,8 @@ def _clone_expense_from_template(
     exp.paid_by = rec.paid_by
     exp.business_percentage = rec.business_percentage
     exp.depreciation_years = rec.depreciation_years
+    exp.include_in_pl = rec.include_in_pl
+    exp.pl_cost_basis = rec.pl_cost_basis
     exp.is_draft = True
     exp.recurring_expense_id = rec.id
     exp.creator_id = creator_id

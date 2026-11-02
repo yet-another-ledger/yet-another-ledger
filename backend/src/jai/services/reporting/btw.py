@@ -59,6 +59,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from jai.db import set_rls_company
 from jai.models._enums import (
@@ -67,6 +68,7 @@ from jai.models._enums import (
     InvoiceStatus,
     VatTreatmentEffect,
 )
+from jai.models.battery import BatteryAnnualUse, BatteryAsset
 from jai.models.document import (
     FinalAdvanceApplication,
     FinalAdvanceApplicationTax,
@@ -75,16 +77,20 @@ from jai.models.document import (
     InvoiceCreditBasisLine,
 )
 from jai.models.expense import Expense
+from jai.models.external_sales import ExternalSale
 from jai.models.invoice import Invoice
 from jai.models.payment import Payment, PaymentTax
+from jai.schemas.battery import BatteryAnnualMissingInput, BatteryMissingCode
 from jai.schemas.report import (
     ReportDocumentReference,
+    ReportSourceType,
     ReportTaxEventKind,
     ReportTaxEventRow,
     ReportWarning,
     ReportWarningCode,
     VatBoxBaseOnly,
     VatBoxBaseVat,
+    VatBoxPrivateUse,
     VatBoxVatOnly,
     VatReturnBoxes,
     VatReturnReport,
@@ -145,6 +151,7 @@ def _event_row_sort_key(row: ReportTaxEventRow) -> tuple[object, ...]:
         row.vat_amount,
     )
 
+
 _DISCLAIMER = (
     "This output is for bookkeeping assistance only and does not constitute "
     "tax or accounting advice. Always verify with your accountant and/or the "
@@ -169,6 +176,7 @@ def _quarter_date_range(year: int, quarter: int) -> tuple[date, date]:
     end_month = start_month + 2
     # End day: last day of end_month.
     import calendar
+
     end_day = calendar.monthrange(year, end_month)[1]
     return date(year, start_month, 1), date(year, end_month, end_day)
 
@@ -180,12 +188,11 @@ def _quarter_date_range(year: int, quarter: int) -> tuple[date, date]:
 
 def _classify_rate(rate_percent: Decimal, tiers: VatRateTiers) -> str:
     """Return the tier label ('hoog', 'laag', 'zero', 'other') for a rate value."""
-    rate_int = int(rate_percent)  # tier thresholds are integers; rate must match exactly
-    if rate_int == tiers.hoog:
+    if rate_percent == tiers.hoog:
         return "hoog"
-    if rate_int == tiers.laag:
+    if rate_percent == tiers.laag:
         return "laag"
-    if rate_int == tiers.zero:
+    if rate_percent == tiers.zero:
         return "zero"
     return "other"
 
@@ -210,6 +217,9 @@ class _BoxAccumulator:
     b1c_vat: Decimal = field(default_factory=lambda: _ZERO)
     # 1d – privégebruik (only populated in Q4)
     b1d_vat: Decimal = field(default_factory=lambda: _ZERO)
+    b1d_base: Decimal | None = field(default_factory=lambda: _ZERO)
+    b1d_battery_base: Decimal = field(default_factory=lambda: _ZERO)
+    b1d_battery_vat: Decimal = field(default_factory=lambda: _ZERO)
     # 1e – 0% / not-taxed-at-you (base only)
     b1e_base: Decimal = field(default_factory=lambda: _ZERO)
     # 2a – domestic reverse-charge (recipient side); v1 always 0
@@ -393,9 +403,7 @@ def _compute_1d_vat(expenses: list[Expense]) -> Decimal:
         if biz_pct >= Decimal("100"):
             continue  # 100% business → zero private-use correction
         private_fraction = Decimal("1") - biz_pct / Decimal("100")
-        contribution = quantize_to_minor_unit(
-            Decimal(str(exp.base_vat_amount)) * private_fraction
-        )
+        contribution = quantize_to_minor_unit(Decimal(str(exp.base_vat_amount)) * private_fraction)
         total += contribution
     return total
 
@@ -479,6 +487,9 @@ async def compute_vat_return(
         source_document_kind: InvoiceDocumentKind | None = None,
         source_document_number: str | None = None,
         source_row_id: uuid.UUID | None = None,
+        external_sale_id: uuid.UUID | None = None,
+        external_source_name: str | None = None,
+        external_original_number: str | None = None,
     ) -> None:
         """Apply and expose one frozen invoice-side tax event exactly once."""
         if taxable == _ZERO and vat == _ZERO:
@@ -490,25 +501,38 @@ async def compute_vat_return(
         if document is not None and not isinstance(document_kind, InvoiceDocumentKind):
             document_kind = InvoiceDocumentKind.STANDARD
         _apply_invoice_line_nl(acc, effect, requires_icp, code, rate, taxable, vat, tiers)
-        event_rows.append((ReportTaxEventRow(
-            event_kind=event_kind,
-            document_id=str(document.id) if document is not None else None,
-            document_kind=document_kind,
-            document_number=document.invoice_number if document is not None else None,
-            event_date=event_date,
-            payment_id=str(payment_id) if payment_id is not None else None,
-            source_document_id=(
-                str(source_document_id) if source_document_id is not None else None
-            ),
-            source_document_kind=source_document_kind,
-            source_document_number=source_document_number,
-            taxable_amount=taxable,
-            vat_amount=vat,
-            vat_treatment_code=code,
-            vat_treatment_effect=VatTreatmentEffect(effect),
-            vat_rate_percent=rate,
-            requires_icp=requires_icp,
-        ), str(source_row_id) if source_row_id is not None else ""))
+        event_rows.append(
+            (
+                ReportTaxEventRow(
+                    event_kind=event_kind,
+                    document_id=str(document.id) if document is not None else None,
+                    document_kind=document_kind,
+                    document_number=document.invoice_number if document is not None else None,
+                    event_date=event_date,
+                    payment_id=str(payment_id) if payment_id is not None else None,
+                    source_document_id=(
+                        str(source_document_id) if source_document_id is not None else None
+                    ),
+                    source_document_kind=source_document_kind,
+                    source_document_number=source_document_number,
+                    source_type=(
+                        ReportSourceType.EXTERNAL_SALE
+                        if external_sale_id
+                        else ReportSourceType.INVOICE
+                    ),
+                    external_sale_id=str(external_sale_id) if external_sale_id else None,
+                    external_source_name=external_source_name,
+                    external_original_number=external_original_number,
+                    taxable_amount=taxable,
+                    vat_amount=vat,
+                    vat_treatment_code=code,
+                    vat_treatment_effect=VatTreatmentEffect(effect),
+                    vat_rate_percent=rate,
+                    requires_icp=requires_icp,
+                ),
+                str(source_row_id) if source_row_id is not None else "",
+            )
+        )
 
     # -----------------------------------------------------------------------
     # 1. Revenue: invoices with status SENT or COMPLETED in [date_from, date_to]
@@ -528,6 +552,46 @@ async def compute_vat_return(
     )
     result_inv = await session.execute(stmt_inv)
     invoices = result_inv.scalars().all()
+
+    # Posted external sales are a distinct source family. Their confirmed
+    # original VAT is authoritative and is routed using the frozen data-driven rate.
+    external_sales = list(
+        (
+            await session.scalars(
+                select(ExternalSale)
+                .options(selectinload(ExternalSale.tax_summaries))
+                .where(
+                    ExternalSale.status == "POSTED",
+                    ExternalSale.document_date >= date_from,
+                    ExternalSale.document_date <= date_to,
+                )
+            )
+        ).all()
+    )
+    for sale in external_sales:
+        if sale.document_date is None:
+            continue
+        for external_tax in sale.tax_summaries:
+            if (
+                external_tax.net_amount is None
+                or external_tax.vat_amount is None
+                or external_tax.rate_percent is None
+            ):
+                continue
+            apply_tax_event(
+                event_kind=ReportTaxEventKind.DOCUMENT_TAX,
+                event_date=sale.document_date,
+                taxable=quantize_to_minor_unit(Decimal(str(external_tax.net_amount))),
+                vat=quantize_to_minor_unit(Decimal(str(external_tax.vat_amount))),
+                code="NL_DOMESTIC",
+                effect="APPLY_RATE",
+                requires_icp=False,
+                rate=Decimal(str(external_tax.rate_percent)),
+                source_row_id=external_tax.id,
+                external_sale_id=sale.id,
+                external_source_name=sale.posted_source_name or "External source",
+                external_original_number=sale.original_number or "",
+            )
 
     # Quote-origin advances are recognised on their payment date, whether or
     # not the quote has already been converted. These are locked PaymentTax
@@ -680,9 +744,7 @@ async def compute_vat_return(
                 effect=payment_tax.vat_treatment_effect,
                 requires_icp=payment_tax.vat_treatment_requires_icp,
                 rate=Decimal(str(payment_tax.vat_rate_percent)),
-                taxable=-quantize_to_minor_unit(
-                    Decimal(str(payment_tax.base_taxable_amount))
-                ),
+                taxable=-quantize_to_minor_unit(Decimal(str(payment_tax.base_taxable_amount))),
                 vat=-quantize_to_minor_unit(Decimal(str(payment_tax.base_vat_amount))),
                 source_row_id=payment_tax.id,
             )
@@ -717,9 +779,12 @@ async def compute_vat_return(
         select(Invoice).where(
             and_(
                 Invoice.company_id == company_id,
-                Invoice.document_kind.in_([
-                    InvoiceDocumentKind.ADVANCE, InvoiceDocumentKind.FINAL,
-                ]),
+                Invoice.document_kind.in_(
+                    [
+                        InvoiceDocumentKind.ADVANCE,
+                        InvoiceDocumentKind.FINAL,
+                    ]
+                ),
                 Invoice.status.in_(revenue_statuses),
                 Invoice.invoice_date >= date_from,
                 Invoice.invoice_date <= date_to,
@@ -728,9 +793,7 @@ async def compute_vat_return(
     )
     formal_invoices = list(formal_result.scalars().all())
     final_ids = [
-        row.id
-        for row in formal_invoices
-        if row.document_kind == InvoiceDocumentKind.FINAL
+        row.id for row in formal_invoices if row.document_kind == InvoiceDocumentKind.FINAL
     ]
     applied: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, Decimal]] = {}
     if final_ids:
@@ -784,15 +847,28 @@ async def compute_vat_return(
 
     for invoice in formal_invoices:
         if invoice.tax_mode.value == "DOCUMENT":
-            rows = [(tax.vat_rate_id, Decimal(str(tax.vat_rate_percent)),
-                     quantize_to_minor_unit(Decimal(str(tax.taxable_amount))),
-                     quantize_to_minor_unit(Decimal(str(tax.tax_amount))), tax.id)
-                    for tax in invoice.taxes]
+            rows = [
+                (
+                    tax.vat_rate_id,
+                    Decimal(str(tax.vat_rate_percent)),
+                    quantize_to_minor_unit(Decimal(str(tax.taxable_amount))),
+                    quantize_to_minor_unit(Decimal(str(tax.tax_amount))),
+                    tax.id,
+                )
+                for tax in invoice.taxes
+            ]
         else:
-            rows = [(tax.vat_rate_id, Decimal(str(tax.vat_rate_percent)),
-                     quantize_to_minor_unit(Decimal(str(tax.taxable_amount))),
-                     quantize_to_minor_unit(Decimal(str(tax.tax_amount))), tax.id)
-                    for line in invoice.lines for tax in line.line_taxes]
+            rows = [
+                (
+                    tax.vat_rate_id,
+                    Decimal(str(tax.vat_rate_percent)),
+                    quantize_to_minor_unit(Decimal(str(tax.taxable_amount))),
+                    quantize_to_minor_unit(Decimal(str(tax.tax_amount))),
+                    tax.id,
+                )
+                for line in invoice.lines
+                for tax in line.line_taxes
+            ]
         for rate_id, rate, taxable, vat, tax_row_id in rows:
             if invoice.document_kind == InvoiceDocumentKind.FINAL:
                 app_net, app_vat = applied.get((invoice.id, rate_id), (_ZERO, _ZERO))
@@ -805,8 +881,12 @@ async def compute_vat_return(
     source_invoice = aliased(Invoice)
     credit_result = await session.execute(
         select(
-            Invoice, InvoiceCorrection, InvoiceCorrectionLine, InvoiceCreditBasisLine,
-            source_invoice.invoice_number, source_invoice.invoice_date,
+            Invoice,
+            InvoiceCorrection,
+            InvoiceCorrectionLine,
+            InvoiceCreditBasisLine,
+            source_invoice.invoice_number,
+            source_invoice.invoice_date,
             source_invoice.document_kind,
         )
         .join(InvoiceCorrection, InvoiceCorrection.credit_note_id == Invoice.id)
@@ -837,11 +917,15 @@ async def compute_vat_return(
         net = -quantize_to_minor_unit(Decimal(str(line.base_net_amount)))
         vat = -quantize_to_minor_unit(Decimal(str(line.base_vat_amount)))
         apply_formal_row(
-            credit, Decimal(str(basis.vat_rate_percent or _ZERO)), net, vat,
+            credit,
+            Decimal(str(basis.vat_rate_percent or _ZERO)),
+            net,
+            vat,
             source_id=correction.source_invoice_id,
             source_kind=source_kind,
             source_number=source_number,
-            treatment_code=basis.vat_treatment_code, treatment_effect=basis.vat_treatment_effect,
+            treatment_code=basis.vat_treatment_code,
+            treatment_effect=basis.vat_treatment_effect,
             requires_icp=basis.vat_treatment_requires_icp,
             source_row_id=line.id,
         )
@@ -851,24 +935,28 @@ async def compute_vat_return(
         ):
             warnings_by_credit[credit.id] = ReportWarning(
                 code=ReportWarningCode.CREDIT_CROSS_PERIOD,
-                message=("This Credit Note is dated in a different VAT period from its source. "
-                         "Review the applicable correction process with your accountant."),
+                message=(
+                    "This Credit Note is dated in a different VAT period from its source. "
+                    "Review the applicable correction process with your accountant."
+                ),
                 document=ReportDocumentReference(
-                    document_id=str(credit.id), document_kind=InvoiceDocumentKind.CREDIT_NOTE,
-                    document_number=credit.invoice_number, event_date=credit.invoice_date,
+                    document_id=str(credit.id),
+                    document_kind=InvoiceDocumentKind.CREDIT_NOTE,
+                    document_number=credit.invoice_number,
+                    event_date=credit.invoice_date,
                     source_document_id=str(correction.source_invoice_id),
                     source_document_kind=source_kind,
                     source_document_number=source_number,
                 ),
                 source=ReportDocumentReference(
-                    document_id=str(correction.source_invoice_id), document_kind=source_kind,
-                    document_number=source_number, event_date=source_date,
+                    document_id=str(correction.source_invoice_id),
+                    document_kind=source_kind,
+                    document_number=source_number,
+                    event_date=source_date,
                 ),
                 event_period=quarter_label(credit.invoice_date),
                 source_period=quarter_label(source_date),
-                amount=-quantize_to_minor_unit(
-                    Decimal(str(correction.issued_base_gross_amount))
-                ),
+                amount=-quantize_to_minor_unit(Decimal(str(correction.issued_base_gross_amount))),
             )
 
     correction_warnings.extend(warnings_by_credit.values())
@@ -923,6 +1011,9 @@ async def compute_vat_return(
                 Expense.company_id == company_id,
                 Expense.is_draft.is_(False),
                 Expense.deductible.is_(True),
+                ~Expense.id.in_(
+                    select(BatteryAsset.acquisition_expense_id)
+                ),
                 Expense.expense_date >= year_start,
                 Expense.expense_date <= year_end,
             )
@@ -931,6 +1022,81 @@ async def compute_vat_return(
         year_expenses = list(result_year_exp.scalars().all())
         acc.b1d_vat = _compute_1d_vat(year_expenses)
 
+        # Battery entries are independently confirmed annual snapshots. A GET
+        # only reads these rows; it never creates annual input records.
+        assets = list(
+            (
+                await session.scalars(
+                    select(BatteryAsset).where(
+                        BatteryAsset.in_service_date <= date(year, 12, 31),
+                        BatteryAsset.in_service_date >= date(year - 4, 1, 1),
+                    )
+                )
+            ).all()
+        )
+        missing_battery_inputs: list[BatteryAnnualMissingInput] = []
+        for asset in assets:
+            if year not in range(asset.in_service_date.year, asset.in_service_date.year + 5):
+                continue
+            annual = await session.scalar(
+                select(BatteryAnnualUse).where(
+                    BatteryAnnualUse.asset_id == asset.id,
+                    BatteryAnnualUse.year == year,
+                )
+            )
+            if annual is None:
+                missing_battery_inputs.append(
+                    BatteryAnnualMissingInput(
+                        asset_id=asset.id, year=year, code=BatteryMissingCode.MISSING
+                    )
+                )
+                continue
+            if annual.private_use_percentage is None:
+                missing_battery_inputs.append(
+                    BatteryAnnualMissingInput(
+                        asset_id=asset.id, year=year, code=BatteryMissingCode.PERCENTAGE_MISSING
+                    )
+                )
+                continue
+            if (
+                not annual.confirmed
+                or annual.calculation_base is None
+                or annual.calculation_vat is None
+            ):
+                missing_battery_inputs.append(
+                    BatteryAnnualMissingInput(
+                        asset_id=asset.id, year=year, code=BatteryMissingCode.UNCONFIRMED
+                    )
+                )
+                continue
+            if annual.asset_version_used != asset.version:
+                missing_battery_inputs.append(
+                    BatteryAnnualMissingInput(
+                        asset_id=asset.id,
+                        year=year,
+                        code=BatteryMissingCode.RECONFIRMATION_REQUIRED,
+                    )
+                )
+                continue
+            acc.b1d_battery_base += Decimal(str(annual.calculation_base))
+            acc.b1d_battery_vat += Decimal(str(annual.calculation_vat))
+        legacy_vat = acc.b1d_vat
+        acc.b1d_vat = legacy_vat + acc.b1d_battery_vat
+        acc.b1d_base = None if legacy_vat != _ZERO else acc.b1d_battery_base
+        if legacy_vat != _ZERO:
+            warnings.append(
+                "Box 1d includes legacy private-use VAT whose taxable base cannot be "
+                "determined reliably."
+            )
+        if missing_battery_inputs:
+            warnings.append(
+                "Battery annual private-use input is missing or unconfirmed for one or "
+                "more assets; "
+                "the displayed battery subtotal includes confirmed inputs only."
+            )
+    else:
+        missing_battery_inputs = []
+
     # -----------------------------------------------------------------------
     # 4. Build schema objects from accumulator
     # -----------------------------------------------------------------------
@@ -938,7 +1104,14 @@ async def compute_vat_return(
         box_1a=VatBoxBaseVat(base=acc.b1a_base, vat=acc.b1a_vat),
         box_1b=VatBoxBaseVat(base=acc.b1b_base, vat=acc.b1b_vat),
         box_1c=VatBoxBaseVat(base=acc.b1c_base, vat=acc.b1c_vat),
-        box_1d=VatBoxVatOnly(vat=acc.b1d_vat),
+        box_1d=VatBoxPrivateUse(
+            base=acc.b1d_base,
+            vat=acc.b1d_vat,
+            known_battery_base=acc.b1d_battery_base,
+            known_battery_vat=acc.b1d_battery_vat,
+            missing_inputs=missing_battery_inputs,
+            is_complete=not missing_battery_inputs and acc.b1d_base is not None,
+        ),
         box_1e=VatBoxBaseOnly(base=acc.b1e_base),
         box_2a=VatBoxBaseVat(base=acc.b2a_base, vat=acc.b2a_vat),
         box_3a=VatBoxBaseOnly(base=acc.b3a_base),

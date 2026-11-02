@@ -34,6 +34,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from jai.models._enums import ExpenseKind, PlCostBasis, VatTreatmentEffect
+from jai.services.expense import compute_annual_pl_cost, compute_pl_cost_basis
 from jai.services.reporting.pl import (
     _anniversary_date,
     _annual_slice,
@@ -112,8 +114,15 @@ class TestAnnualSlice:
     ) -> MagicMock:
         exp = MagicMock()
         exp.base_net_amount = Decimal(base_net)
+        exp.base_vat_amount = Decimal("0")
+        exp.base_gross_amount = Decimal(base_net)
         exp.business_percentage = Decimal(business_pct)
         exp.depreciation_years = dep_years
+        exp.kind = ExpenseKind.PURCHASE
+        exp.pl_cost_basis = PlCostBasis.NET
+        exp.vat_treatment_effect = VatTreatmentEffect.APPLY_RATE
+        exp.deductible = True
+        exp.include_in_pl = True
         return exp
 
     def test_full_business_single_year(self) -> None:
@@ -151,6 +160,50 @@ class TestAnnualSlice:
         # 1000 × 0.75 / 2 = 375
         assert result == Decimal("375.00")
 
+    def test_net_basis_keeps_persisted_precision_until_slice_rounding(self) -> None:
+        exp = self._make_expense("100.005", "50", 1)
+        assert _annual_slice(exp) == Decimal("50.00")
+
+    def test_gross_basis_uses_persisted_gross_snapshot(self) -> None:
+        exp = self._make_expense("100.005", "50", 1)
+        exp.pl_cost_basis = PlCostBasis.GROSS
+        exp.base_vat_amount = Decimal("21.005")
+        exp.base_gross_amount = Decimal("120.999")
+        assert _annual_slice(exp) == Decimal("60.50")
+
+
+class TestPlCostBasis:
+    def test_net_gross_and_auto_for_100_plus_21_deductible(self) -> None:
+        args = (Decimal("100"), Decimal("21"), VatTreatmentEffect.APPLY_RATE, True)
+        assert compute_pl_cost_basis(*args, PlCostBasis.NET) == Decimal("100.00")
+        assert compute_pl_cost_basis(*args, PlCostBasis.GROSS) == Decimal("121.00")
+        assert compute_pl_cost_basis(*args, PlCostBasis.AUTO) == Decimal("100.00")
+
+    def test_auto_adds_irrecoverable_charged_vat_only(self) -> None:
+        basis = compute_pl_cost_basis(
+            Decimal("100"), Decimal("21"), VatTreatmentEffect.APPLY_RATE,
+            False, PlCostBasis.AUTO,
+        )
+        assert basis == Decimal("121.00")
+        reverse = compute_pl_cost_basis(
+            Decimal("100"), Decimal("21"), VatTreatmentEffect.ZERO_REVERSE,
+            False, PlCostBasis.AUTO,
+        )
+        assert reverse == Decimal("100.00")
+        eu_consumer = compute_pl_cost_basis(
+            Decimal("100"), Decimal("21"), VatTreatmentEffect.APPLY_RATE,
+            True, PlCostBasis.AUTO, "EU_B2C_PURCH",
+        )
+        assert eu_consumer == Decimal("121.00")
+
+    def test_business_percentage_depreciation_and_exclusion(self) -> None:
+        assert compute_annual_pl_cost(
+            Decimal("121"), Decimal("50"), 2, True
+        ) == Decimal("30.25")
+        assert compute_annual_pl_cost(
+            Decimal("121"), Decimal("100"), 1, False
+        ) == Decimal("0.00")
+
 
 # ---------------------------------------------------------------------------
 # Integration: compute_profit_loss (mocked DB session)
@@ -178,14 +231,22 @@ def _make_expense_row(
     base_net_amount: str,
     business_percentage: str = "100",
     depreciation_years: int = 1,
+    kind: ExpenseKind = ExpenseKind.PURCHASE,
 ) -> MagicMock:
     exp = MagicMock()
     exp.company_id = company_id
     exp.is_draft = is_draft
     exp.expense_date = expense_date
     exp.base_net_amount = Decimal(base_net_amount)
+    exp.base_vat_amount = Decimal("0")
+    exp.base_gross_amount = Decimal(base_net_amount)
     exp.business_percentage = Decimal(business_percentage)
     exp.depreciation_years = depreciation_years
+    exp.kind = kind
+    exp.pl_cost_basis = PlCostBasis.NET
+    exp.vat_treatment_effect = VatTreatmentEffect.APPLY_RATE
+    exp.deductible = True
+    exp.include_in_pl = True
     return exp
 
 
@@ -193,7 +254,7 @@ def _make_session(invoices: list, expenses: list) -> AsyncMock:
     """Create a mock AsyncSession that returns given rows for execute()."""
     session = AsyncMock()
 
-    # execute() is called three times: positive revenue, Credit events, expenses.
+    # execute() is called for RLS context, invoices, Credits and expenses.
     # We use side_effect to return the correct result for each call.
     call_count = 0
 
@@ -206,17 +267,24 @@ def _make_session(invoices: list, expenses: list) -> AsyncMock:
     credit_result = MagicMock()
     credit_result.all.return_value = []
     expense_result = _scalars_for(expenses)
+    rls_result = MagicMock()
+    external_sales_result = MagicMock()
+    external_sales_result.all.return_value = []
 
-    async def _execute(stmt):  # type: ignore[no-untyped-def]
+    async def _execute(stmt, params=None):  # type: ignore[no-untyped-def]
+        del stmt, params
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            return invoice_result
+            return rls_result
         if call_count == 2:
+            return invoice_result
+        if call_count == 3:
             return credit_result
         return expense_result
 
     session.execute = _execute
+    session.scalars.return_value = external_sales_result
     return session
 
 
@@ -240,6 +308,10 @@ class TestComputeProfitLoss:
         )
         assert report.revenue_net == Decimal("1500.00")
         assert report.expense_actual == Decimal("200.00")
+        assert report.mileage_expense_actual == Decimal("0")
+        assert report.other_expense_actual == Decimal("200.00")
+        assert report.profit_before_mileage == Decimal("1300.00")
+        assert report.profit_after_mileage == report.profit
         assert report.profit == Decimal("1300.00")
         assert len(report.series) == 2
         jan = report.series[0]
@@ -265,6 +337,9 @@ class TestComputeProfitLoss:
         expenses = [
             _make_expense_row(cid, False, date(2025, 2, 1), "60.00"),  # Q1
             _make_expense_row(cid, False, date(2025, 5, 1), "90.00"),  # Q2
+            _make_expense_row(
+                cid, False, date(2025, 5, 5), "25.00", kind=ExpenseKind.MILEAGE
+            ),  # Q2
         ]
         session = _make_session(invoices, expenses)
         report = await compute_profit_loss(
@@ -278,11 +353,90 @@ class TestComputeProfitLoss:
         assert q1.expense_actual == Decimal("60.00")
         assert q2.period == "2025-04-01"  # Q2 start
         assert q2.revenue_net == Decimal("300.00")
-        assert q2.expense_actual == Decimal("90.00")
+        assert q2.expense_actual == Decimal("115.00")
+        assert q2.mileage_expense_actual == Decimal("25.00")
+        assert q2.other_expense_actual == Decimal("90.00")
+        assert q2.profit_before_mileage == Decimal("210.00")
+        assert q2.profit_after_mileage == q2.profit == Decimal("185.00")
         # Top-level = sum of buckets
         assert report.revenue_net == q1.revenue_net + q2.revenue_net
         assert report.expense_actual == q1.expense_actual + q2.expense_actual
+        assert report.expense_actual == (
+            report.mileage_expense_actual + report.other_expense_actual
+        )
+        assert (
+            report.profit_before_mileage - report.mileage_expense_actual
+            == report.profit_after_mileage
+            == report.profit
+        )
         assert report.profit == report.revenue_net - report.expense_actual
+
+    @pytest.mark.asyncio
+    async def test_mileage_and_other_costs_reconcile_in_period_and_total(self) -> None:
+        cid = uuid.uuid4()
+        invoices = [_make_invoice(cid, "SENT", date(2025, 1, 5), "500.00")]
+        expenses = [
+            _make_expense_row(cid, False, date(2025, 1, 7), "30.00", kind=ExpenseKind.MILEAGE),
+            _make_expense_row(cid, False, date(2025, 1, 8), "100.00"),
+            _make_expense_row(
+                cid, False, date(2025, 2, 7), "60.00", "50", 2,
+                kind=ExpenseKind.MILEAGE,
+            ),
+        ]
+        report = await compute_profit_loss(
+            _make_session(invoices, expenses),
+            cid,
+            date(2025, 1, 1),
+            date(2025, 2, 28),
+            "month",
+        )
+
+        # Annual depreciation slices use the same rounded values as total cost:
+        # Jan 130 total (30 mileage + 100 other); Feb 15 mileage.
+        assert report.expense_actual == Decimal("145.00")
+        assert report.mileage_expense_actual == Decimal("45.00")
+        assert report.other_expense_actual == Decimal("100.00")
+        assert report.profit_before_mileage == Decimal("400.00")
+        assert report.profit_after_mileage == report.profit == Decimal("355.00")
+        jan, feb = report.series
+        assert (jan.mileage_expense_actual, jan.other_expense_actual) == (
+            Decimal("30.00"), Decimal("100.00")
+        )
+        assert jan.profit_before_mileage == Decimal("400.00")
+        assert jan.profit_after_mileage == jan.profit == Decimal("370.00")
+        assert feb.mileage_expense_actual == Decimal("15.00")
+        assert feb.other_expense_actual == Decimal("0")
+        assert feb.profit_before_mileage == Decimal("0")
+        assert feb.profit_after_mileage == feb.profit == Decimal("-15.00")
+        for field in (
+            "revenue_net", "expense_actual", "mileage_expense_actual",
+            "other_expense_actual", "profit_before_mileage", "profit_after_mileage", "profit",
+        ):
+            assert getattr(report, field) == sum(getattr(item, field) for item in report.series)
+
+    @pytest.mark.asyncio
+    async def test_mileage_only_empty_and_partial_date_window(self) -> None:
+        cid = uuid.uuid4()
+        mileage = _make_expense_row(
+            cid, False, date(2025, 3, 15), "50.00", kind=ExpenseKind.MILEAGE
+        )
+        expenses = [mileage]
+        march = await compute_profit_loss(
+            _make_session([], expenses), cid,
+            date(2025, 3, 14), date(2025, 3, 15), "month",
+        )
+        assert march.mileage_expense_actual == Decimal("50.00")
+        assert march.other_expense_actual == Decimal("0")
+        assert march.profit_before_mileage == Decimal("0")
+        assert march.profit_after_mileage == march.profit == Decimal("-50.00")
+
+        outside = await compute_profit_loss(
+            _make_session([], expenses), cid,
+            date(2025, 3, 16), date(2025, 3, 31), "month",
+        )
+        assert outside.expense_actual == outside.mileage_expense_actual == Decimal("0")
+        assert outside.other_expense_actual == Decimal("0")
+        assert outside.profit_before_mileage == outside.profit_after_mileage == outside.profit
 
     @pytest.mark.asyncio
     async def test_draft_invoices_excluded(self) -> None:
@@ -378,6 +532,10 @@ class TestComputeProfitLoss:
         )
         assert report.revenue_net == Decimal("0")
         assert report.expense_actual == Decimal("0")
+        assert report.mileage_expense_actual == Decimal("0")
+        assert report.other_expense_actual == Decimal("0")
+        assert report.profit_before_mileage == Decimal("0")
+        assert report.profit_after_mileage == Decimal("0")
         assert report.profit == Decimal("0")
         assert len(report.series) == 1  # one month bucket still present
         assert report.series[0].period == "2025-07-01"
@@ -432,6 +590,16 @@ class TestComputeProfitLoss:
         sum_exp = sum(s.expense_actual for s in report.series)
         assert report.revenue_net == sum_rev
         assert report.expense_actual == sum_exp
+        assert report.mileage_expense_actual == sum(
+            s.mileage_expense_actual for s in report.series
+        )
+        assert report.other_expense_actual == sum(s.other_expense_actual for s in report.series)
+        assert report.profit_before_mileage == sum(
+            s.profit_before_mileage for s in report.series
+        )
+        assert report.profit_after_mileage == sum(
+            s.profit_after_mileage for s in report.series
+        )
         assert report.profit == report.revenue_net - report.expense_actual
 
     @pytest.mark.asyncio
@@ -451,20 +619,19 @@ class TestComputeProfitLoss:
             session, cid, date(2023, 1, 1), date(2025, 12, 31), "month"
         )
         cent = Decimal("0.01")
-        # Top-level expense_actual must be at 2 dp
-        assert report.expense_actual == report.expense_actual.quantize(cent), (
-            f"expense_actual {report.expense_actual!r} is not quantised to 2 dp"
+        fields = (
+            "expense_actual", "mileage_expense_actual", "other_expense_actual",
+            "profit_before_mileage", "profit_after_mileage", "profit",
         )
-        # Every bucket must also be at 2 dp
+        for field in fields:
+            value = getattr(report, field)
+            assert value == value.quantize(cent), f"{field} {value!r} is not quantised to 2 dp"
         for s in report.series:
-            assert s.expense_actual == s.expense_actual.quantize(cent), (
-                f"series bucket {s.period!r} expense_actual {s.expense_actual!r} "
-                "is not quantised to 2 dp"
-            )
-            assert s.profit == s.profit.quantize(cent), (
-                f"series bucket {s.period!r} profit {s.profit!r} "
-                "is not quantised to 2 dp"
-            )
+            for field in fields:
+                value = getattr(s, field)
+                assert value == value.quantize(cent), (
+                    f"series bucket {s.period!r} {field} {value!r} is not quantised to 2 dp"
+                )
         # The three June buckets each get 333.33
         for year in (2023, 2024, 2025):
             period = f"{year}-06-01"
@@ -501,28 +668,23 @@ class TestComputeProfitLoss:
         )
         cent = Decimal("0.01")
 
-        # Top-level: all three fields must be ≤ 2 dp
-        assert report.revenue_net == report.revenue_net.quantize(cent), (
-            f"revenue_net {report.revenue_net!r} is not quantised to 2 dp"
+        # All amounts remain to-the-cent after service aggregation.
+        money_fields = (
+            "revenue_net", "expense_actual", "mileage_expense_actual",
+            "other_expense_actual", "profit_before_mileage", "profit_after_mileage", "profit",
         )
-        assert report.expense_actual == report.expense_actual.quantize(cent), (
-            f"expense_actual {report.expense_actual!r} is not quantised to 2 dp"
-        )
-        assert report.profit == report.profit.quantize(cent), (
-            f"profit {report.profit!r} is not quantised to 2 dp"
-        )
+        for field in money_fields:
+            value = getattr(report, field)
+            assert value == value.quantize(cent), f"{field} {value!r} is not quantised to 2 dp"
 
-        # Each series bucket: all three fields must be ≤ 2 dp
+        # Each series bucket's amounts remain to-the-cent.
         for s in report.series:
-            assert s.revenue_net == s.revenue_net.quantize(cent), (
-                f"bucket {s.period!r} revenue_net {s.revenue_net!r} not 2 dp"
-            )
-            assert s.expense_actual == s.expense_actual.quantize(cent), (
-                f"bucket {s.period!r} expense_actual {s.expense_actual!r} not 2 dp"
-            )
-            assert s.profit == s.profit.quantize(cent), (
-                f"bucket {s.period!r} profit {s.profit!r} not 2 dp"
-            )
+            for field in money_fields:
+                value = getattr(s, field)
+                assert value == value.quantize(cent), (
+                    f"bucket {s.period!r} {field} {value!r} not 2 dp"
+                )
+            assert s.profit_after_mileage == s.profit
 
         # Jan bucket: revenue=1000.00, expense=333.33, profit=666.67
         jan = next(s for s in report.series if s.period == "2025-01-01")

@@ -22,7 +22,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from jai.models._enums import PaidBy
+from jai.models._enums import PaidBy, PlCostBasis
 from jai.schemas.expense import ExpenseInput
 from jai.schemas.recurring_expense import RecurringExpenseInput
 
@@ -62,6 +62,8 @@ class TestExpenseInputDefaults:
         assert inp.paid_by == PaidBy.BUSINESS
         assert inp.business_percentage == Decimal("100")
         assert inp.depreciation_years == 1
+        assert inp.include_in_pl is True
+        assert inp.pl_cost_basis == PlCostBasis.NET
 
     def test_explicit_private(self) -> None:
         """paid_by='PRIVATE' is accepted and returned as PaidBy.PRIVATE."""
@@ -92,6 +94,17 @@ class TestExpenseInputDefaults:
         """depreciation_years=1 is accepted (minimum)."""
         inp = ExpenseInput(**{**_MINIMAL_EXPENSE, "depreciation_years": 1})
         assert inp.depreciation_years == 1
+        assert inp.include_in_pl is True
+        assert inp.pl_cost_basis == PlCostBasis.NET
+
+    def test_explicit_cost_controls(self) -> None:
+        inp = ExpenseInput(**{
+            **_MINIMAL_EXPENSE,
+            "include_in_pl": False,
+            "pl_cost_basis": "GROSS",
+        })
+        assert inp.include_in_pl is False
+        assert inp.pl_cost_basis == PlCostBasis.GROSS
 
     def test_explicit_depreciation_years_5(self) -> None:
         """depreciation_years=5 is accepted."""
@@ -152,6 +165,8 @@ class TestRecurringExpenseInputDefaults:
         assert inp.paid_by == PaidBy.BUSINESS
         assert inp.business_percentage == Decimal("100")
         assert inp.depreciation_years == 1
+        assert inp.include_in_pl is True
+        assert inp.pl_cost_basis == PlCostBasis.NET
 
     def test_explicit_private(self) -> None:
         inp = RecurringExpenseInput(**{**_MINIMAL_RECURRING, "paid_by": "PRIVATE"})
@@ -211,3 +226,42 @@ class TestPaidByEnum:
     def test_unknown_raises(self) -> None:
         with pytest.raises(ValueError):
             PaidBy("CASH")
+
+
+def test_cost_basis_enum_rejects_unknown_value() -> None:
+    with pytest.raises(ValidationError):
+        ExpenseInput(**{**_MINIMAL_EXPENSE, "pl_cost_basis": "VAT"})
+
+
+@pytest.mark.parametrize("basis", list(PlCostBasis))
+@pytest.mark.parametrize("included", [True, False])
+def test_stored_cost_preview_retains_three_decimal_history(
+    basis: PlCostBasis, included: bool,
+) -> None:
+    """Historical amounts are allocated before rounding, matching the existing P/L slice."""
+    from jai.models.expense import Expense
+    from jai.models.recurring_expense import RecurringExpense
+    from jai.services.expense import compute_stored_cost_preview
+    from jai.services.reporting.pl import _annual_slice
+
+    common = {
+        "vat_treatment_code": "NL_DOMESTIC_PURCH", "vat_treatment_effect": "APPLY_RATE",
+        "deductible": False, "pl_cost_basis": basis.value, "include_in_pl": included,
+        "business_percentage": Decimal("50"), "depreciation_years": 1,
+    }
+    expense = Expense(
+        **common, kind="PURCHASE", base_net_amount=Decimal("100.005"),
+        base_vat_amount=Decimal("21.005"), base_gross_amount=Decimal("121.010"),
+    )
+    template = RecurringExpense(
+        **common, net_amount=Decimal("100.005"), vat_amount=Decimal("21.005"),
+        gross_amount=Decimal("121.010"),
+    )
+    expected = Decimal("50.00") if basis == PlCostBasis.NET else Decimal("60.51")
+    if not included:
+        expected = Decimal("0.00")
+    for snapshot in (expense, template):
+        result = compute_stored_cost_preview(snapshot)
+        assert result.annual_cost == expected
+        assert result.annual_cost == _annual_slice(expense)
+        assert result.included_in_pl is included

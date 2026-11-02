@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import pool
+from sqlalchemy import inspect, pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -63,6 +63,17 @@ def do_run_migrations(connection: Connection) -> None:
     )
 
     with context.begin_transaction():
+        # The paused, unreleased M15 branch used 0044/0045 before main assigned
+        # those IDs to SI1/SI2. Never interpret that older schema as main's.
+        if inspect(connection).has_table("agent_token"):
+            heads = set(connection.scalars(text("SELECT version_num FROM alembic_version")))
+            if heads & {"0044", "0045"}:
+                raise RuntimeError(
+                    "Legacy paused M15 migration history detected (0044/0045). "
+                    "Those IDs now belong to main's SI1/SI2; M15 uses 0053/0054. "
+                    "Do not stamp or upgrade this database blindly. Preserve a backup "
+                    "and reconcile its schema separately, or use a fresh isolated test database."
+                )
         context.run_migrations()
 
 

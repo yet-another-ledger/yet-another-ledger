@@ -24,6 +24,9 @@ const fromEmail = ref('')
 const fromName = ref('')
 const useTls = ref(true)
 const useSsl = ref(false)
+const sentCopy = ref<components['schemas']['SentCopySettings']>({
+  enabled: false, host: '', port: 993, security: 'SSL_TLS', folder: null,
+})
 
 // STARTTLS and SSL/TLS are mutually exclusive ways to establish TLS, so the UI
 // exposes a single 3-way choice (mapped back to the two backend booleans).
@@ -42,7 +45,7 @@ const saving = ref(false)
 const testing = ref(false)
 const clearPassword = ref(false)
 const message = ref('')
-const messageType = ref<'success' | 'error'>('success')
+const messageType = ref<'success' | 'error' | 'warning'>('success')
 
 onMounted(async () => {
   loading.value = true
@@ -56,8 +59,10 @@ onMounted(async () => {
     fromName.value = data.from_name ?? ''
     useTls.value = data.use_tls ?? true
     useSsl.value = data.use_ssl ?? false
+    if (data.sent_copy) sentCopy.value = data.sent_copy
   } catch {
-    // ignore – may be first load with no settings
+    message.value = t('settings.smtp.loadFailed')
+    messageType.value = 'error'
   } finally {
     loading.value = false
   }
@@ -86,6 +91,7 @@ async function handleSave() {
       from_name: fromName.value,
       use_tls: useTls.value,
       use_ssl: useSsl.value,
+      sent_copy: sentCopy.value,
     })
     passwordSet.value = data.password_set ?? false
     password.value = ''
@@ -105,9 +111,9 @@ async function handleTestEmail() {
   testing.value = true
   message.value = ''
   try {
-    await post<{ status: string }>('/api/v1/settings/smtp/test', {})
-    message.value = t('settings.smtp.testSuccess')
-    messageType.value = 'success'
+    const result = await post<components['schemas']['SmtpTestResult']>('/api/v1/settings/smtp/test', {})
+    message.value = t('settings.smtp.testSuccess') + ' ' + t(`sentCopy.${result.sent_copy_status ?? 'NOT_ATTEMPTED'}`)
+    messageType.value = result.sent_copy_status === 'FAILED' ? 'warning' : 'success'
   } catch (e: unknown) {
     const err = e as { message?: string }
     message.value = err.message || t('settings.smtp.testFailed')
@@ -166,15 +172,38 @@ async function handleTestEmail() {
         </n-radio-group>
       </n-form-item>
 
+      <n-form-item :label="t('sentCopy.enabled')">
+        <n-switch v-model:value="sentCopy.enabled" :disabled="loading || saving || testing" />
+      </n-form-item>
+      <n-alert type="info" style="margin-bottom: 16px">{{ t('sentCopy.help') }}
+      </n-alert>
+      <template v-if="sentCopy.enabled">
+        <n-form-item :label="t('sentCopy.host')">
+          <n-input v-model:value="sentCopy.host" :disabled="saving || testing" />
+        </n-form-item>
+        <n-form-item :label="t('sentCopy.port')">
+          <n-input-number v-model:value="sentCopy.port" :min="1" :max="65535" :disabled="saving || testing" />
+        </n-form-item>
+        <n-form-item :label="t('settings.smtp.security')">
+          <n-radio-group v-model:value="sentCopy.security" :disabled="saving || testing">
+            <n-radio value="SSL_TLS">SSL/TLS</n-radio>
+            <n-radio value="STARTTLS">STARTTLS</n-radio>
+          </n-radio-group>
+        </n-form-item>
+        <n-form-item :label="t('sentCopy.folder')">
+          <n-input v-model:value="sentCopy.folder" :placeholder="t('sentCopy.folderHelp')" :disabled="saving || testing" />
+        </n-form-item>
+      </template>
+
       <n-alert v-if="message" :type="messageType" style="margin-bottom: 16px">
         {{ message }}
       </n-alert>
 
       <n-space>
-        <n-button type="primary" :loading="saving" attr-type="submit">
+        <n-button type="primary" :loading="saving" :disabled="loading || testing" attr-type="submit">
           {{ t('settings.smtp.save') }}
         </n-button>
-        <n-button :loading="testing" @click="handleTestEmail">
+        <n-button :loading="testing" :disabled="loading || saving" @click="handleTestEmail">
           {{ t('settings.smtp.testEmail') }}
         </n-button>
       </n-space>

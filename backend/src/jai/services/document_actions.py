@@ -30,6 +30,34 @@ class ActionEligibility:
     reason_code: str | None = None
 
 
+def invoice_revision_eligibility(
+    *,
+    document_kind: InvoiceDocumentKind,
+    status: InvoiceStatus,
+    settlement_mode: QuoteSettlementMode | None,
+    has_effective_payment: bool,
+    has_successful_email: bool,
+    has_dependent_chain: bool,
+    has_receipt_only_provenance: bool,
+) -> ActionEligibility:
+    """Pure SI2 read/command predicate; callers supply actual persisted facts."""
+    if document_kind != InvoiceDocumentKind.STANDARD:
+        return ActionEligibility(False, "REVISION_KIND_UNSUPPORTED")
+    if status != InvoiceStatus.SENT:
+        return ActionEligibility(False, "REVISION_STATUS_UNSUPPORTED")
+    if has_receipt_only_provenance:
+        return ActionEligibility(False, "REVISION_RECEIPT_PROVENANCE")
+    if settlement_mode not in (None, QuoteSettlementMode.DIRECT_INVOICE):
+        return ActionEligibility(False, "REVISION_SETTLEMENT_UNSUPPORTED")
+    if has_effective_payment:
+        return ActionEligibility(False, "REVISION_HAS_PAYMENT")
+    if has_successful_email:
+        return ActionEligibility(False, "REVISION_ALREADY_DELIVERED")
+    if has_dependent_chain:
+        return ActionEligibility(False, "REVISION_HAS_DEPENDENCIES")
+    return ActionEligibility(True)
+
+
 def credit_note_eligibility(source: Invoice, *, final_draft_exists: bool) -> ActionEligibility:
     """The structural portion of the Credit calculate/create command guard."""
     kind = InvoiceDocumentKind(source.document_kind)

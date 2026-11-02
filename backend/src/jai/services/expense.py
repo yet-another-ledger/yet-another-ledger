@@ -7,7 +7,7 @@ Public API
 - ``get_expense``           – fetch by id + company_id (404 guard).
 - ``update_expense``        – recompute amounts/snapshots and write back.
 - ``delete_expense``        – delete the expense; service deletes attachment disk
-                              files before DB delete (D12); DB CASCADE removes rows.
+                              files after DB commit (D12); DB CASCADE removes rows.
 - ``add_attachment``        – validate + save receipt file to storage + persist metadata.
 - ``list_attachments``      – return all attachments for an expense (company-scoped).
 - ``get_attachment_content``– load attachment content from storage for inline serving.
@@ -30,22 +30,27 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jai.models._enums import ExpenseKind, PaidBy, VatTreatmentSide
+from jai.db import set_rls_company
+from jai.models._enums import ExpenseKind, PaidBy, PlCostBasis, VatTreatmentEffect, VatTreatmentSide
+from jai.models.battery import BatteryAsset
 from jai.models.company import Company
 from jai.models.dictionary import ExpenseCategory
 from jai.models.expense import Expense
 from jai.models.expense_attachment import ExpenseAttachment
+from jai.models.recurring_expense import RecurringExpense
 from jai.models.vat import VatRate, VatTreatment
 from jai.schemas.expense import (
     ExpenseAttachmentListResponse,
     ExpenseAttachmentRead,
     ExpenseCalculateRequest,
     ExpenseCalculateResult,
+    ExpenseCostPreviewRequest,
+    ExpenseCostPreviewResult,
     ExpenseInput,
     ExpenseListItem,
     ExpenseListResponse,
@@ -60,6 +65,13 @@ from jai.services.storage import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class ExpenseConflict(ValueError):
+    """A protected or stale Expense write conflicts with retained accounting state."""
+
+    code = "BATTERY_EXPENSE_PROTECTED"
+
 
 # ---------------------------------------------------------------------------
 # Pure computation helpers (independently unit-testable, no DB)
@@ -135,6 +147,48 @@ def compute_expense_vat_from_rate(
     vat_q = quantize_to_minor_unit(net_q * vat_rate_percent / Decimal("100"))
     gross_q = quantize_to_minor_unit(net_q + vat_q)
     return net_q, vat_q, gross_q
+
+
+def compute_pl_cost_basis(
+    net: Decimal,
+    vat: Decimal,
+    effect: VatTreatmentEffect,
+    deductible: bool,
+    basis: PlCostBasis,
+    treatment_code: str = "",
+    gross: Decimal | None = None,
+) -> Decimal:
+    """Select the expense basis without counting self-assessed VAT twice."""
+    if basis == PlCostBasis.NET:
+        return net
+    if basis == PlCostBasis.GROSS:
+        if gross is not None:
+            return gross
+        return compute_expense_amounts(net, vat)[2]
+    irrecoverable = treatment_code == "EU_B2C_PURCH" or (
+        effect == VatTreatmentEffect.APPLY_RATE and not deductible
+    )
+    if basis == PlCostBasis.AUTO and irrecoverable:
+        if gross is not None:
+            # Persisted net and VAT are the source snapshots; summing here
+            # avoids introducing another pre-allocation rounding boundary.
+            return net + vat
+        net_q, vat_q, _ = compute_expense_amounts(net, vat)
+        return net_q + vat_q
+    return net
+
+
+def compute_annual_pl_cost(
+    cost_basis: Decimal,
+    business_percentage: Decimal,
+    depreciation_years: int,
+    include_in_pl: bool,
+) -> Decimal:
+    """Apply the existing business-use/depreciation rules to one expense."""
+    if not include_in_pl:
+        return Decimal("0.00")
+    amount = cost_basis * business_percentage / Decimal("100") / Decimal(depreciation_years)
+    return quantize_to_minor_unit(amount)
 
 
 def resolve_deductible(
@@ -246,6 +300,8 @@ async def _load_expense(
     session: AsyncSession,
     expense_id: uuid.UUID,
     company_id: uuid.UUID,
+    *,
+    for_update: bool = False,
 ) -> Expense:
     """Load an expense scoped to the company (red-line 2).
 
@@ -256,11 +312,28 @@ async def _load_expense(
         Expense.id == expense_id,
         Expense.company_id == company_id,
     )
+    if for_update:
+        # Registration and generic writes serialize on the acquisition itself.
+        # Refresh any identity-map copy after waiting for a concurrent writer.
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
     result = await session.execute(stmt)
     exp = result.scalar_one_or_none()
     if exp is None:
         raise LookupError("Expense not found.")
     return exp
+
+
+async def _registered_battery_expense(
+    session: AsyncSession, expense: Expense, company_id: uuid.UUID
+) -> bool:
+    """Check the normalized asset association before a generic Expense write."""
+    await set_rls_company(session, company_id)
+    return (
+        await session.scalar(
+            select(BatteryAsset.id).where(BatteryAsset.acquisition_expense_id == expense.id)
+        )
+        is not None
+    )
 
 
 def _expense_to_read(exp: Expense, attachment_count: int = 0) -> ExpenseRead:
@@ -293,6 +366,8 @@ def _expense_to_read(exp: Expense, attachment_count: int = 0) -> ExpenseRead:
         paid_by=PaidBy(exp.paid_by),
         business_percentage=Decimal(str(exp.business_percentage)),
         depreciation_years=int(exp.depreciation_years),
+        include_in_pl=exp.include_in_pl,
+        pl_cost_basis=PlCostBasis(exp.pl_cost_basis),
         is_draft=exp.is_draft,
         recurring_expense_id=getattr(exp, "recurring_expense_id", None),
         attachment_count=attachment_count,
@@ -306,6 +381,8 @@ async def _apply_body(
     exp: Expense,
     body: ExpenseInput,
     company_id: uuid.UUID,
+    *,
+    preserve_tax_snapshot: bool = False,
 ) -> None:
     """Apply ExpenseInput fields to an Expense ORM object.
 
@@ -319,10 +396,17 @@ async def _apply_body(
     category = await _load_category(session, body.category_id, company_id)
 
     # -- Validate + snapshot VAT treatment (D7, PURCHASE guard) ---------------
-    treatment = await _load_vat_treatment(session, body.vat_treatment_id, company_id)
+    treatment = (
+        None
+        if preserve_tax_snapshot
+        else await _load_vat_treatment(session, body.vat_treatment_id, company_id)
+    )
 
     # -- Validate + snapshot VAT rate (D7) ------------------------------------
-    rate = await _load_vat_rate(session, body.vat_rate_id, company_id)
+    if preserve_tax_snapshot:
+        rate = None
+    else:
+        rate = await _load_vat_rate(session, body.vat_rate_id, company_id)
 
     # -- Compute amounts (D11: quantize_to_minor_unit) -------------------------
     net_q, vat_q, gross_q = compute_expense_amounts(body.net_amount, body.vat_amount)
@@ -339,14 +423,16 @@ async def _apply_body(
 
     exp.supplier_name = body.supplier_name
 
-    exp.vat_treatment_id = treatment.id
-    exp.vat_treatment_code = str(treatment.code)
-    exp.vat_treatment_label = str(treatment.label)
-    exp.vat_treatment_effect = str(treatment.effect)
+    if treatment is not None:
+        exp.vat_treatment_id = treatment.id
+        exp.vat_treatment_code = str(treatment.code)
+        exp.vat_treatment_label = str(treatment.label)
+        exp.vat_treatment_effect = str(treatment.effect)
 
-    exp.vat_rate_id = rate.id
-    exp.vat_rate_percent = rate.percent
-    exp.vat_rate_label = str(rate.label)
+    if rate is not None:
+        exp.vat_rate_id = rate.id
+        exp.vat_rate_percent = rate.percent
+        exp.vat_rate_label = str(rate.label)
 
     exp.net_amount = net_q
     exp.vat_amount = vat_q
@@ -367,6 +453,10 @@ async def _apply_body(
     exp.paid_by = body.paid_by.value
     exp.business_percentage = body.business_percentage
     exp.depreciation_years = body.depreciation_years
+    if "include_in_pl" in body.model_fields_set or exp.id is None:
+        exp.include_in_pl = body.include_in_pl
+    if "pl_cost_basis" in body.model_fields_set or exp.id is None:
+        exp.pl_cost_basis = body.pl_cost_basis.value
 
 
 # ---------------------------------------------------------------------------
@@ -458,7 +548,39 @@ async def update_expense(
     PUT (step-1 contract).  Already-confirmed expenses remain ``is_draft=False``.
     ``ExpenseInput`` never carries ``is_draft`` (red-line 1; it is derived here).
     """
-    exp = await _load_expense(session, expense_id, company_id)
+    exp = await _load_expense(session, expense_id, company_id, for_update=True)
+    battery_registered = await _registered_battery_expense(session, exp, company_id)
+    frozen_fields: dict[str, object] = {}
+    if battery_registered:
+        if (
+            body.expense_date != exp.expense_date
+            or body.net_amount != Decimal(str(exp.net_amount))
+            or body.vat_amount != Decimal(str(exp.vat_amount))
+            or body.vat_treatment_id != exp.vat_treatment_id
+            or body.vat_rate_id != exp.vat_rate_id
+            or (body.deductible is not None and body.deductible != exp.deductible)
+        ):
+            raise ExpenseConflict("Registered battery acquisition financial fields are protected.")
+        frozen_names = (
+            "expense_date",
+            "vat_treatment_id",
+            "vat_treatment_code",
+            "vat_treatment_label",
+            "vat_treatment_effect",
+            "vat_rate_id",
+            "vat_rate_percent",
+            "vat_rate_label",
+            "net_amount",
+            "vat_amount",
+            "gross_amount",
+            "deductible",
+            "currency",
+            "exchange_rate",
+            "base_net_amount",
+            "base_vat_amount",
+            "base_gross_amount",
+        )
+        frozen_fields = {name: getattr(exp, name) for name in frozen_names}
     if ExpenseKind(exp.kind) == ExpenseKind.MILEAGE:
         # Generated mileage projections are changed only through the trip endpoint,
         # which recomputes all money and snapshot fields atomically.
@@ -469,7 +591,13 @@ async def update_expense(
         )
     # PUT always confirms the draft (step-1 contract: PUT sets is_draft → False).
     exp.is_draft = False
-    await _apply_body(session, exp, body, company_id)
+    await _apply_body(
+        session, exp, body, company_id, preserve_tax_snapshot=battery_registered
+    )
+    if battery_registered:
+        for name, value in frozen_fields.items():
+            setattr(exp, name, value)
+        exp.include_in_pl = False
     await session.commit()
     await session.refresh(exp)
     count = await _count_attachments(session, expense_id)
@@ -484,22 +612,20 @@ async def delete_expense(
 ) -> None:
     """Delete an expense.
 
-    Before deleting the DB row the service fetches all attachment ``storage_key``
-    values for this expense and deletes the corresponding disk files via
-    ``storage.delete()`` (D12).  Disk deletion failures are logged but do NOT
-    abort the DB transaction – orphan files can be cleaned up later, but DB
-    consistency takes priority.
-
-    DB ON DELETE CASCADE then removes the ``expense_attachment`` metadata rows
-    (red-line 3).
+    Collect attachment keys while the acquisition row is locked, remove the DB
+    ownership through ORM/DB cascades, and commit before best-effort file cleanup.
+    A protected or rolled-back delete must retain the original bytes.
     """
     # Expense DELETE is also the supported root-delete path for Mileage. Take
     # the same company protocol before discovering the kind, so its DB cascade
     # cannot race a rate-recalculation transaction.
     await _lock_mileage_company(session, company_id)
-    exp = await _load_expense(session, expense_id, company_id)
+    exp = await _load_expense(session, expense_id, company_id, for_update=True)
+    if await _registered_battery_expense(session, exp, company_id):
+        raise ExpenseConflict("Registered battery acquisition cannot be deleted.")
 
-    # -- Collect attachment storage keys for disk cleanup (D12) ----------------
+    # Snapshot keys before the DB cascade removes attachment metadata.
+    keys: list[str] = []
     if storage is not None:
         att_stmt = select(ExpenseAttachment.storage_key).where(
             ExpenseAttachment.expense_id == expense_id,
@@ -507,19 +633,21 @@ async def delete_expense(
         )
         att_result = await session.execute(att_stmt)
         keys = list(att_result.scalars().all())
+
+    await session.delete(exp)
+    await session.commit()
+
+    if storage is not None:
         for key in keys:
             try:
                 storage.delete(key)
             except Exception:
                 logger.exception(
                     "delete_expense: failed to delete disk file for key %r "
-                    "(expense_id=%s); continuing with DB delete",
+                    "(expense_id=%s); DB delete already committed",
                     key,
                     expense_id,
                 )
-
-    await session.delete(exp)
-    await session.commit()
 
 
 async def list_expenses(
@@ -639,6 +767,8 @@ async def list_expenses(
             paid_by=PaidBy(exp.paid_by),
             business_percentage=Decimal(str(exp.business_percentage)),
             depreciation_years=int(exp.depreciation_years),
+            include_in_pl=exp.include_in_pl,
+            pl_cost_basis=PlCostBasis(exp.pl_cost_basis),
         )
         for exp in expenses
     ]
@@ -685,6 +815,92 @@ async def calculate_expense_preview(
         gross_amount=gross_q,
         vat_rate_percent=percent,
     )
+
+
+async def calculate_expense_cost_preview(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    request: ExpenseCostPreviewRequest,
+) -> ExpenseCostPreviewResult:
+    """Return the annual P/L cost implied by raw values, without persistence."""
+    treatment = await _load_vat_treatment(session, request.vat_treatment_id, company_id)
+    category = (
+        await _load_category(session, request.category_id, company_id)
+        if request.category_id is not None
+        else None
+    )
+    deductible = resolve_deductible(
+        request.deductible, category.default_deductible if category is not None else None
+    )
+    # This is a proposed write: normalize exactly where _apply_body does.
+    # Stored-history previews below deliberately do not add this rounding boundary.
+    net, vat, gross = compute_expense_amounts(request.net_amount, request.vat_amount)
+    basis = compute_pl_cost_basis(
+        net,
+        vat,
+        VatTreatmentEffect(treatment.effect),
+        deductible,
+        request.pl_cost_basis,
+        str(treatment.code),
+        gross,
+    )
+    annual = compute_annual_pl_cost(
+        basis,
+        # The proposed write also passes through NUMERIC(6,3) storage. Mirror
+        # that positive-value rounding here without touching stored history.
+        request.business_percentage.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP),
+        request.depreciation_years,
+        request.include_in_pl,
+    )
+    return ExpenseCostPreviewResult(
+        cost_basis_amount=basis,
+        annual_cost=annual,
+        included_in_pl=request.include_in_pl,
+    )
+
+
+def compute_stored_cost_preview(snapshot: Expense | RecurringExpense) -> ExpenseCostPreviewResult:
+    """Use persisted amounts/tax semantics, just as P/L and template generation do."""
+    if isinstance(snapshot, Expense):
+        net = Decimal(str(snapshot.base_net_amount))
+        vat = Decimal(str(snapshot.base_vat_amount))
+        gross = Decimal(str(snapshot.base_gross_amount))
+    else:
+        net = Decimal(str(snapshot.net_amount))
+        vat = Decimal(str(snapshot.vat_amount))
+        gross = Decimal(str(snapshot.gross_amount))
+    if isinstance(snapshot, Expense) and ExpenseKind(snapshot.kind) == ExpenseKind.MILEAGE:
+        basis = net
+    else:
+        basis = compute_pl_cost_basis(
+            net,
+            vat,
+            VatTreatmentEffect(snapshot.vat_treatment_effect),
+            snapshot.deductible,
+            PlCostBasis(snapshot.pl_cost_basis),
+            snapshot.vat_treatment_code,
+            gross,
+        )
+    return ExpenseCostPreviewResult(
+        cost_basis_amount=basis,
+        annual_cost=compute_annual_pl_cost(
+            basis,
+            Decimal(str(snapshot.business_percentage)),
+            snapshot.depreciation_years,
+            snapshot.include_in_pl,
+        ),
+        included_in_pl=snapshot.include_in_pl,
+    )
+
+
+async def get_expense_cost_preview(
+    session: AsyncSession,
+    expense_id: uuid.UUID,
+    company_id: uuid.UUID,
+) -> ExpenseCostPreviewResult:
+    """Read authoritative current cost without reinterpreting mutable dictionaries."""
+    expense = await _load_expense(session, expense_id, company_id)
+    return compute_stored_cost_preview(expense)
 
 
 # ---------------------------------------------------------------------------
@@ -838,8 +1054,6 @@ async def get_attachment_content(
     FileNotFoundError
         If the disk file is missing (storage inconsistency).
     """
-    from jai.db import set_rls_company
-
     await set_rls_company(session, company_id)
     att = await _load_attachment(session, attachment_id, company_id)
     content = storage.open(att.storage_key)
@@ -862,8 +1076,6 @@ async def delete_attachment(
     LookupError
         If the attachment does not exist or belongs to a different company.
     """
-    from jai.db import set_rls_company
-
     await set_rls_company(session, company_id)
     att = await _load_attachment(session, attachment_id, company_id)
     if isinstance(att.receipt_inbox_id, uuid.UUID):

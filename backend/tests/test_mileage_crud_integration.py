@@ -741,7 +741,9 @@ class TestMileageCrudProjection:
             ).scalar_one_or_none() is None
 
     async def test_reports_include_mileage_but_btw_input_vat_stays_zero(
-        self, db_client: AsyncClient
+        self,
+        db_client: AsyncClient,
+        db_session_maker: async_sessionmaker[AsyncSession],
     ) -> None:
         await _authenticate(db_client)
         await _setup_company(db_client)
@@ -750,14 +752,23 @@ class TestMileageCrudProjection:
         assert before_mileage.status_code == 200
         before_boxes = before_mileage.json()["boxes"]
         assert Decimal(before_boxes["box_5b"]["vat"]) == Decimal("21.00")
-        await _create_trip(db_client, one_way_distance_km="10.000")
+        trip = await _create_trip(db_client, one_way_distance_km="10.000")
+        # The expense's category snapshot is mutable display data. P/L must
+        # continue identifying this projection by Expense.kind.
+        async with db_session_maker() as session:
+            projection = await session.get(Expense, uuid.UUID(trip["expense_id"]))
+            assert projection is not None
+            projection.category_name = "Renamed travel category"
+            await session.commit()
 
         expense_report = await db_client.get(
             "/api/v1/reports/expenses?from=2026-01-01&to=2026-12-31"
         )
         assert expense_report.status_code == 200
         mileage_row = next(
-            row for row in expense_report.json()["by_category"] if row["category_name"] == "Mileage"
+            row
+            for row in expense_report.json()["by_category"]
+            if row["category_name"] == "Renamed travel category"
         )
         assert Decimal(mileage_row["net"]) == Decimal("5.00")
 
@@ -766,9 +777,15 @@ class TestMileageCrudProjection:
         )
         assert profit_loss.status_code == 200
         assert Decimal(profit_loss.json()["expense_actual"]) == Decimal("105.00")
+        assert Decimal(profit_loss.json()["mileage_expense_actual"]) == Decimal("5.00")
+        assert Decimal(profit_loss.json()["other_expense_actual"]) == Decimal("100.00")
+        assert Decimal(profit_loss.json()["profit_before_mileage"]) == Decimal("-100.00")
+        assert Decimal(profit_loss.json()["profit_after_mileage"]) == Decimal("-105.00")
+        assert profit_loss.json()["profit"] == profit_loss.json()["profit_after_mileage"]
         dashboard = await db_client.get("/api/v1/reports/dashboard?year=2026")
         assert dashboard.status_code == 200
         assert Decimal(dashboard.json()["kpi"]["ytd_expense"]) == Decimal("105.00")
+        assert Decimal(dashboard.json()["kpi"]["ytd_profit"]) == Decimal("-105.00")
         assert dashboard.json()["top_expense_categories"][0]["category_name"] == "Taxable baseline"
 
         btw = await db_client.get("/api/v1/reports/vat-return?year=2026&quarter=2")

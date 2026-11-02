@@ -210,8 +210,7 @@ def _extract_pdf_text(pdf_bytes: bytes) -> str:
     document = pypdfium2.PdfDocument(pdf_bytes)
     try:
         return "\n".join(
-            document[index].get_textpage().get_text_range()
-            for index in range(len(document))
+            document[index].get_textpage().get_text_range() for index in range(len(document))
         )
     finally:
         document.close()
@@ -362,9 +361,7 @@ class TestQuotePaymentCrud:
         first_id = first["items"][0]["id"]
         second_id = second["items"][1]["id"]
         third_id = third["items"][2]["id"]
-        pre_edit_ids = await _payment_tax_ids(
-            db_session_maker, [first_id, second_id, third_id]
-        )
+        pre_edit_ids = await _payment_tax_ids(db_session_maker, [first_id, second_id, third_id])
 
         edited = await db_client.put(
             f"/api/v1/payments/{first_id}",
@@ -400,9 +397,7 @@ class TestQuotePaymentCrud:
         for item in items:
             taxable, vat, gross = _tax_amounts(item)
             assert taxable + vat == gross == Decimal(item["amount"])
-        post_edit_ids = await _payment_tax_ids(
-            db_session_maker, [first_id, second_id, third_id]
-        )
+        post_edit_ids = await _payment_tax_ids(db_session_maker, [first_id, second_id, third_id])
         for payment_id in (first_id, second_id, third_id):
             assert post_edit_ids[payment_id]
             assert post_edit_ids[payment_id].isdisjoint(pre_edit_ids[payment_id])
@@ -611,9 +606,7 @@ class TestQuotePaymentCrud:
             ):
                 request = getattr(db_client, method)
                 response = (
-                    await request(url, json=payload)
-                    if payload is not None
-                    else await request(url)
+                    await request(url, json=payload) if payload is not None else await request(url)
                 )
                 assert response.status_code == 404, response.text
             listed = await db_client.get("/api/v1/payments")
@@ -648,9 +641,7 @@ class TestQuotePaymentCrud:
             ):
                 request = getattr(db_client, method)
                 response = (
-                    await request(url, json=payload)
-                    if payload is not None
-                    else await request(url)
+                    await request(url, json=payload) if payload is not None else await request(url)
                 )
                 assert response.status_code == 403, response.text
         finally:
@@ -740,9 +731,7 @@ class TestQuotePaymentCrud:
             await session.commit()
 
         tied_ids = sorted([tie_quote_payment_id, invoice_payment_id], reverse=True)
-        expected_by_payment_date = (
-            [transferred_payment_id] + tied_ids + [quote_payment_id]
-        )
+        expected_by_payment_date = [transferred_payment_id] + tied_ids + [quote_payment_id]
         expected_by_created_at = [quote_payment_id] + tied_ids + [transferred_payment_id]
         page_one = await db_client.get("/api/v1/payments?limit=2&offset=0")
         assert page_one.status_code == 200, page_one.text
@@ -752,9 +741,9 @@ class TestQuotePaymentCrud:
         assert page_two.status_code == 200, page_two.text
         assert page_two.json()["total"] == 4
         assert [item["id"] for item in page_two.json()["items"]] == expected_by_payment_date[2:]
-        assert {
-            item["id"] for item in page_one.json()["items"] + page_two.json()["items"]
-        } == set(expected_by_payment_date)
+        assert {item["id"] for item in page_one.json()["items"] + page_two.json()["items"]} == set(
+            expected_by_payment_date
+        )
         created = await db_client.get("/api/v1/payments?sort_by=created_at")
         assert created.status_code == 200, created.text
         assert [item["id"] for item in created.json()["items"]] == expected_by_created_at
@@ -820,6 +809,7 @@ class TestQuotePaymentReporting:
         self, db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Two deposits plus the balance keep BTW facts while their audit notices settle."""
+
         class _FrozenQ1Date(date):
             @classmethod
             def today(cls) -> date:
@@ -1028,8 +1018,7 @@ class TestQuotePaymentReporting:
         ) == Decimal("9.00")
         assert sum(
             (
-                Decimal(report["box_1a"]["vat"])
-                + Decimal(report["box_1b"]["vat"])
+                Decimal(report["box_1a"]["vat"]) + Decimal(report["box_1b"]["vat"])
                 for report in reports
             ),
             Decimal("0"),
@@ -1116,9 +1105,7 @@ class TestPaymentReferentialIntegrity:
 
         async with db_session_maker() as session:
             payment_tax = (
-                await session.execute(
-                    select(PaymentTax).where(PaymentTax.payment_id == payment_id)
-                )
+                await session.execute(select(PaymentTax).where(PaymentTax.payment_id == payment_id))
             ).scalar_one()
             payment_tax.vat_rate_id = transient_rate_id
             payment_tax_id = payment_tax.id
@@ -1315,15 +1302,9 @@ class TestQuotePaymentConversion:
         quote = await _create_quote(db_client, customer_id, rate_21)
         await _accept_quote(db_client, quote["id"])
 
-        await _record(
-            db_client, quote["id"], "10.00", "2026-02-02", reference="DATE-LATER"
-        )
-        await _record(
-            db_client, quote["id"], "10.00", "2026-02-01", reference="TIE-ONE"
-        )
-        await _record(
-            db_client, quote["id"], "10.00", "2026-02-01", reference="TIE-TWO"
-        )
+        await _record(db_client, quote["id"], "10.00", "2026-02-02", reference="DATE-LATER")
+        await _record(db_client, quote["id"], "10.00", "2026-02-01", reference="TIE-ONE")
+        await _record(db_client, quote["id"], "10.00", "2026-02-01", reference="TIE-TWO")
         converted = await db_client.post(f"/api/v1/quotes/{quote['id']}/convert")
         assert converted.status_code == 201, converted.text
 
@@ -1351,9 +1332,7 @@ class TestQuotePaymentConversion:
         assert ordered_references[0] != ordered_references[1]
         assert ordered_references[2] == "DATE-LATER"
 
-        response = await db_client.get(
-            f"/api/v1/invoices/{invoice_id}/pdf?locale=en"
-        )
+        response = await db_client.get(f"/api/v1/invoices/{invoice_id}/pdf?locale=en")
         assert response.status_code == 200, response.text
         text = _extract_pdf_text(response.content)
         positions = [text.index(reference) for reference in ordered_references]
@@ -1728,9 +1707,7 @@ class TestPaymentReceiptEmail:
         """The send endpoint attaches the real renderer output, not a stub."""
         await _full_auth(db_client)
         seeds = await _setup_company(db_client)
-        customer_id = await _create_customer(
-            db_client, email="zh@example.com", locale="zh"
-        )
+        customer_id = await _create_customer(db_client, email="zh@example.com", locale="zh")
         quote = await _create_quote(
             db_client, customer_id, seeds["rates"]["NL standard (21%)"]["id"]
         )
@@ -2093,3 +2070,56 @@ class TestPaymentReceiptEmail:
                 deleted = await asyncio.wait_for(delete_task, timeout=2)
 
         assert deleted.deleted is True
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("source", ["quote", "invoice"])
+async def test_si1_receipt_actual_transport_copy_failure_keeps_delivery(db_client, source):
+    from unittest.mock import MagicMock, patch
+
+    from jai.schemas.setting import SentCopySettings
+
+    await _full_auth(db_client)
+    seeds = await _setup_company(db_client)
+    customer_id = await _create_customer(db_client)
+    quote = await _create_quote(db_client, customer_id, seeds["rates"]["NL standard (21%)"]["id"])
+    await _accept_quote(db_client, quote["id"])
+    payment = await _record(db_client, quote["id"], "60.00", "2026-02-01")
+    payment_id = payment["items"][0]["id"]
+    if source == "invoice":
+        # A new invoice-origin payment keeps the source association distinct.
+        converted = await db_client.post(f"/api/v1/quotes/{quote['id']}/convert")
+        assert converted.status_code == 201, converted.text
+        invoice_id = converted.json()["id"]
+        issued = await db_client.post(
+            f"/api/v1/invoices/{invoice_id}/status", json={"status": "SENT"}
+        )
+        assert issued.status_code == 200, issued.text
+        paid = await db_client.post(
+            f"/api/v1/invoices/{invoice_id}/payments",
+            json={"payment_date": "2026-02-02", "amount": "10.00"},
+        )
+        assert paid.status_code == 201, paid.text
+        payment_id = paid.json()["items"][-1]["id"]
+    cfg = _smtp()
+    cfg.sent_copy = SentCopySettings(enabled=True, host="imap.example.test")
+    imap = MagicMock()
+    imap.login.return_value = ("OK", [])
+    imap.capability.return_value = ("OK", [b"IMAP4rev1"])
+    imap.list.return_value = ("OK", [b'(\\Sent) "/" Sent'])
+    imap.append.side_effect = TimeoutError("SECRET")
+    with (
+        patch("jai.services.email._get_smtp_config", return_value=cfg),
+        patch("aiosmtplib.send", new_callable=AsyncMock) as smtp,
+        patch("jai.services.sent_copy.imaplib.IMAP4_SSL", return_value=imap),
+    ):
+        response = await db_client.post(
+            f"/api/v1/payments/{payment_id}/send-receipt",
+            json={"to": "to@example.com", "cc": "cc@example.com"},
+        )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "SENT"
+    assert response.json()["sent_copy_status"] == "FAILED"
+    assert response.json()["sent_copy_error_code"] == "IMAP_TIMEOUT"
+    smtp.assert_called_once()
+    assert smtp.call_args.args[0] == imap.append.call_args.args[3]

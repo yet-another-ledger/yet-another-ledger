@@ -15,7 +15,7 @@
  *   production vite build does not silently drop @click (see memory: vue-loading-prop-vif-prod-bug).
  */
 
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   useMessage, useDialog,
@@ -41,6 +41,7 @@ type PaymentMethodListResponse = components['schemas']['PaymentMethodListRespons
 const props = defineProps<{
   invoiceId: string
   invoiceStatus: string
+  invoiceVersion?: string
   customerEmail?: string | null
   customerLocale?: 'en' | 'zh' | null
 }>()
@@ -58,6 +59,7 @@ const store = usePaymentsStore()
 // ---- state ----
 const aggregate = ref<InvoicePaymentsResponse | null>(null)
 const panelLoading = ref(false)
+const aggregateError = ref(false)
 const paymentMethods = ref<PaymentMethodRead[]>([])
 
 // Form fields – only raw inputs per M7 design
@@ -194,16 +196,27 @@ async function loadPaymentMethods() {
   paymentMethods.value = res.items
 }
 
+let aggregateGeneration = 0
 async function loadAggregate() {
+  const generation = ++aggregateGeneration
   panelLoading.value = true
   try {
-    aggregate.value = await store.listInvoicePayments(props.invoiceId)
-  } catch (e: unknown) {
-    message.error(e instanceof Error ? e.message : String(e))
+    const result = await store.listInvoicePayments(props.invoiceId)
+    if (generation === aggregateGeneration) {
+      aggregate.value = result
+      aggregateError.value = false
+    }
+  } catch {
+    if (generation === aggregateGeneration) aggregateError.value = true
   } finally {
-    panelLoading.value = false
+    if (generation === aggregateGeneration) panelLoading.value = false
   }
 }
+
+watch(() => [props.invoiceId, props.invoiceVersion] as const, ([id], previous) => {
+  if (previous && id !== previous[0]) aggregate.value = null
+  void loadAggregate()
+})
 
 onMounted(async () => {
   await Promise.all([loadAggregate(), loadPaymentMethods()])
@@ -322,6 +335,10 @@ function handleDelete(payment: PaymentRead) {
 
 <template>
   <n-card :title="t('payments.panelTitle')" style="margin-bottom: 16px">
+    <n-alert v-if="aggregateError" type="warning" style="margin-bottom: 12px">
+      {{ t('payments.aggregateRefreshFailed') }}
+      <n-button text type="primary" :loading="panelLoading" :disabled="panelLoading" @click="loadAggregate">{{ t('chain.retry') }}</n-button>
+    </n-alert>
     <!-- Panel header: aggregate badges -->
     <template #header-extra>
       <n-space v-if="aggregate" align="center" size="small">

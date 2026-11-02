@@ -19,6 +19,8 @@ import {
   NDataTable,
   NGrid,
   NGridItem,
+  NList,
+  NListItem,
   NSelect,
   NSpin,
   NStatistic,
@@ -26,6 +28,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { useReportsStore } from '../../stores/reports'
+import ReportSourcePanel from '../../components/reports/ReportSourcePanel.vue'
 
 const { t } = useI18n()
 const store = useReportsStore()
@@ -103,7 +106,7 @@ const boxRows = computed<BoxRow[]>(() => {
     {
       key: '1d',
       label: t('reports.vat.box1d'),
-      base: null,
+      base: b.box_1d.base === null ? t('reports.vat.baseUnknown') : fmtMoney(b.box_1d.base),
       vat: fmtMoney(b.box_1d.vat),
     },
     {
@@ -202,6 +205,27 @@ const periodLabel = computed<string>(() => {
   const r = store.vatReport
   if (!r) return ''
   return `${r.year} Q${r.quarter} (${r.from} – ${r.to})`
+})
+
+// Several tax events can belong to one external sale. Keep the first event's
+// frozen source label for display, while leaving every event row intact.
+const externalSaleSources = computed(() => {
+  const seen = new Set<string>()
+  const sources: { id: string; label: string }[] = []
+  for (const event of store.vatReport?.event_rows ?? []) {
+    if (event.source_type !== 'EXTERNAL_SALE') continue
+    const id = event.external_sale_id
+    if (typeof id !== 'string' || !id.trim() || seen.has(id)) continue
+    seen.add(id)
+    const label = [
+      t('reports.vat.externalSale'),
+      event.external_source_name,
+      event.external_original_number,
+      event.event_date,
+    ].filter((part): part is string => typeof part === 'string' && part.trim().length > 0).join(' · ')
+    sources.push({ id, label })
+  }
+  return sources
 })
 </script>
 
@@ -306,6 +330,19 @@ const periodLabel = computed<string>(() => {
           />
         </n-card>
 
+        <n-alert v-if="store.vatReport.is_last_period_of_year" :type="store.vatReport.boxes.box_1d.is_complete ? 'info' : 'warning'" style="margin-bottom: 16px">
+          <div>{{ t('reports.vat.batterySubtotal', { base: fmtMoney(store.vatReport.boxes.box_1d.known_battery_base), vat: fmtMoney(store.vatReport.boxes.box_1d.known_battery_vat) }) }}</div>
+          <n-list v-if="(store.vatReport.boxes.box_1d.missing_inputs ?? []).length" bordered class="battery-missing-list">
+            <n-list-item v-for="missing in (store.vatReport.boxes.box_1d.missing_inputs ?? [])" :key="`${missing.asset_id}-${missing.year}`">
+              <router-link :to="`/battery-assets/${missing.asset_id}?year=${missing.year}`" custom v-slot="{ href, navigate }">
+                <n-button class="battery-missing-button" tag="a" type="primary" :href="href" @click="navigate">
+                  {{ t('reports.vat.batteryMissing', { year: missing.year, code: t(`reports.vat.missingCodes.${missing.code}`) }) }}
+                </n-button>
+              </router-link>
+            </n-list-item>
+          </n-list>
+        </n-alert>
+
         <!-- Totals -->
         <n-card :title="t('reports.vat.totals')" style="margin-bottom: 16px">
           <n-grid :cols="2" :x-gap="24" :y-gap="16">
@@ -324,6 +361,13 @@ const periodLabel = computed<string>(() => {
           </n-grid>
         </n-card>
 
+        <ReportSourcePanel
+          :title="t('reports.vat.eventSources')"
+          :action-label="t('reports.sourceAction')"
+          :empty-label="t('reports.noSources')"
+          :items="externalSaleSources"
+        />
+
         <!-- Disclaimer (D-DISCLAIMER) -->
         <n-alert type="default" :show-icon="false" style="margin-bottom: 16px">
           <div style="font-weight: 600; margin-bottom: 4px">{{ t('reports.vat.disclaimer') }}</div>
@@ -334,6 +378,19 @@ const periodLabel = computed<string>(() => {
       </template>
   </div>
 </template>
+
+<style scoped>
+.battery-missing-list { margin-top: 12px; }
+.battery-missing-button {
+  box-sizing: border-box;
+  height: auto;
+  min-height: var(--n-height);
+  padding-block: calc((var(--n-height) - var(--n-font-size)) / 2);
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+</style>
 
 <style scoped>
 .page-content {

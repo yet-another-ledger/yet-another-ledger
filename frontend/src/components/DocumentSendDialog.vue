@@ -195,9 +195,17 @@ async function handleSend() {
         ? `/api/v1/payments/${frozen.context.docId}/send-refund-confirmation`
       : `${isFormalInvoiceSendType(frozen.context.docType) ? '/api/v1/invoices' : '/api/v1/quotes'}/${frozen.context.docId}/send`
     const log = await post<EmailLogRead>(endpoint, body)
+    if (log.status === 'FAILED') {
+      sendError.value = t('sendDialog.sendFailed')
+      return
+    }
     emit('sent', log)
     closeCurrentContext = true
-    message.success(t('sendDialog.sendSuccess'))
+    if (log.sent_copy_status === 'FAILED') {
+      message.warning(t('sentCopy.FAILED'))
+    } else {
+      message.success(t('sendDialog.sendSuccess'))
+    }
   } catch (e: unknown) {
     sendError.value = e instanceof Error ? e.message : String(e)
   } finally {

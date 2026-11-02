@@ -1,7 +1,7 @@
 """Add atomic Agent operation idempotency and trace records.
 
-Revision ID: 0045
-Revises: 0044
+Revision ID: 0054
+Revises: 0053
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from sqlalchemy.dialects.postgresql import dialect
 from alembic import op
 from jai.config import get_settings
 
-revision: str = "0045"
-down_revision: str | None = "0044"
+revision: str = "0054"
+down_revision: str | None = "0053"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

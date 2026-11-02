@@ -7,7 +7,7 @@ import {
   NButton, NSpace, NInput, NDataTable, NAlert, NSpin,
   NPagination, NSelect, NTag, NDropdown,
 } from 'naive-ui'
-import { AddOutline, SearchOutline, CreateOutline, TrashOutline, DownloadOutline, MailOutline, EyeOutline } from '@vicons/ionicons5'
+import { AddOutline, SearchOutline, CreateOutline, CopyOutline, TrashOutline, DownloadOutline, MailOutline, EyeOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
 import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
@@ -24,6 +24,7 @@ const { t } = useI18n()
 const message = useMessage()
 const dialog = useDialog()
 const store = useQuotesStore()
+const duplicatingId = ref<string | null>(null)
 
 // Send dialog state
 const sendDialogShow = ref(false)
@@ -158,6 +159,20 @@ function handleEdit(id: string) {
   router.push(`/quotes/${id}/edit`)
 }
 
+async function handleDuplicate(id: string) {
+  if (duplicatingId.value) return
+  duplicatingId.value = id
+  try {
+    const duplicate = await store.duplicateQuote(id)
+    message.success(t('quotes.duplicateSuccess'))
+    await router.push(`/quotes/${duplicate.id}/edit`)
+  } catch (e: unknown) {
+    message.error(e instanceof Error ? e.message : t('quotes.duplicateFailed'))
+  } finally {
+    duplicatingId.value = null
+  }
+}
+
 function handleDelete(quoteNumber: string, id: string) {
   dialog.warning({
     title: t('quotes.delete'),
@@ -260,11 +275,11 @@ const columns = computed(() => [
   {
     title: t('quotes.actions'),
     key: 'actions',
-    width: 188,
-    align: 'center' as const,
+    width: 270,
+    align: 'left' as const,
     render(row: QuoteListItem) {
       const canDelete = row.status !== 'ACCEPTED'
-      return h(NSpace, { size: 4, justify: 'center', wrapItem: false }, () => [
+      return h(NSpace, { size: 4, justify: 'start', wrap: false, wrapItem: false }, () => [
         h(
           NButton,
           {
@@ -276,6 +291,15 @@ const columns = computed(() => [
           },
           () => h(NIcon, null, { default: () => h(CreateOutline) }),
         ),
+        h(NButton, {
+          size: 'small', loading: duplicatingId.value === row.id,
+          quaternary: true,
+          circle: true,
+          title: t('quotes.duplicate'),
+          'aria-label': t('quotes.duplicate'),
+          disabled: duplicatingId.value !== null,
+          onClick: () => handleDuplicate(row.id),
+        }, { icon: () => h(NIcon, { size: 14 }, { default: () => h(CopyOutline) }) }),
         // PDF preview dropdown
         h(
           NDropdown,
@@ -328,7 +352,7 @@ const columns = computed(() => [
           },
           () => h(NIcon, null, { default: () => h(MailOutline) }),
         ),
-        ...(canDelete ? [h(
+        h(
           NButton,
           {
             size: 'small',
@@ -336,10 +360,12 @@ const columns = computed(() => [
             circle: true,
             type: 'error',
             title: t('quotes.delete'),
-            onClick: () => handleDelete(row.quote_number, row.id),
+            'aria-label': t('quotes.delete'),
+            disabled: !canDelete,
+            onClick: () => { if (canDelete) handleDelete(row.quote_number, row.id) },
           },
           () => h(NIcon, null, { default: () => h(TrashOutline) }),
-        )] : []),
+        ),
       ])
     },
   },

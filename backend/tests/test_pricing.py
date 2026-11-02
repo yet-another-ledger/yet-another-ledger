@@ -1060,3 +1060,22 @@ class TestMinorUnitInvariants:
             for val in [line.taxable_amount, line.vat_total, line.total_incl_vat,
                         line.line_discount_amount, line.document_discount_share]:
                 assert val == quantize_to_minor_unit(val), f"Line amount {val} not at 2dp"
+
+    def test_revision_frozen_rate_overrides_allow_same_id_with_distinct_snapshots(self) -> None:
+        lines = [
+            _make_line(unit_price=Decimal("100"), vat_rate_id=_RATE_ID_21),
+            _make_line(unit_price=Decimal("100"), vat_rate_id=_RATE_ID_21),
+        ]
+        result = compute_pricing(
+            lines,
+            tax_mode=InvoiceTaxMode.LINE,
+            amounts_include_vat=False,
+            discount=DiscountInput(),
+            treatment_effect=VatTreatmentEffect.APPLY_RATE,
+            vat_rates={_RATE_ID_21: ("Current", Decimal("99"))},
+            document_vat_rate=None,
+            line_rate_overrides=[("Frozen A", Decimal("21")), ("Frozen B", Decimal("9"))],
+        )
+        assert [tax.vat_rate_label for tax in result.line_taxes] == ["Frozen A", "Frozen B"]
+        assert [tax.vat_rate_percent for tax in result.line_taxes] == [Decimal("21"), Decimal("9")]
+        assert result.vat_total == Decimal("30.00")

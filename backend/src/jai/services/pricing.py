@@ -212,6 +212,7 @@ def compute_pricing(
     treatment_effect: VatTreatmentEffect,
     vat_rates: _VatRateMap,
     document_vat_rate: tuple[str, Decimal] | None,
+    line_rate_overrides: list[tuple[str, Decimal] | None] | None = None,
 ) -> InvoiceCalculationRead:
     """Pure calculation core – no DB access, no persistence.
 
@@ -251,6 +252,7 @@ def compute_pricing(
             discount=discount,
             treatment_effect=treatment_effect,
             vat_rates=vat_rates,
+            line_rate_overrides=line_rate_overrides,
         )
     return _compute_document_mode(
         lines,
@@ -279,6 +281,7 @@ def _compute_line_mode(
     discount: DiscountInput,
     treatment_effect: VatTreatmentEffect,
     vat_rates: _VatRateMap,
+    line_rate_overrides: list[tuple[str, Decimal] | None] | None = None,
 ) -> InvoiceCalculationRead:
     """LINE mode: each line has its own VAT rate; tax is per-line."""
     # --- Phase 1: line subtotals + line discounts ---
@@ -309,7 +312,13 @@ def _compute_line_mode(
         # Resolve VAT rate
         if line.vat_rate_id is None:
             raise ValueError(f"Line {i + 1}: vat_rate_id is required in LINE tax mode.")
-        rate_info = vat_rates.get(line.vat_rate_id)
+        rate_info = (
+            line_rate_overrides[i]
+            if line_rate_overrides is not None
+            and i < len(line_rate_overrides)
+            and line_rate_overrides[i] is not None
+            else vat_rates.get(line.vat_rate_id)
+        )
         if rate_info is None:
             raise ValueError(f"Line {i + 1}: VAT rate {line.vat_rate_id} not found.")
         rate_label, rate_percent = rate_info

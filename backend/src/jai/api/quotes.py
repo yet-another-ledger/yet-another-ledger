@@ -59,6 +59,7 @@ from jai.services.quote import (
     convert_to_invoice,
     create_quote,
     delete_quote,
+    duplicate_quote,
     get_quote,
     list_quotes,
     reactivate,
@@ -191,6 +192,31 @@ async def create_quote_endpoint(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+
+
+@router.post(
+    "/quotes/{quote_id}/duplicate",
+    response_model=QuoteRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def duplicate_quote_endpoint(
+    quote_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> QuoteRead:
+    """Copy saved content into a fresh draft using today's defaults and current VAT."""
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    company_currency = await _get_company_currency(session, company_id)
+    try:
+        result = await duplicate_quote(
+            session, quote_id, company_id, company_currency, creator_id=user.id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Quote not found.")
+    return result
 
 
 @router.get("/quotes/{quote_id}", response_model=QuoteRead)

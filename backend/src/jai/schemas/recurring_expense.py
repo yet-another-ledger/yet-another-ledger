@@ -17,7 +17,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator
 
-from jai.models._enums import PaidBy
+from jai.models._enums import PaidBy, PlCostBasis
 
 # ---------------------------------------------------------------------------
 # Input
@@ -62,6 +62,8 @@ class RecurringExpenseInput(BaseModel):
         ge=1,
         description="Depreciation years; 1 = fully expensed this year.",
     )
+    include_in_pl: bool = True
+    pl_cost_basis: PlCostBasis = PlCostBasis.NET
 
     # -- Schedule --------------------------------------------------------------
     frequency: str = Field(
@@ -129,6 +131,8 @@ class RecurringExpenseRead(BaseModel):
     paid_by: PaidBy
     business_percentage: Decimal
     depreciation_years: int
+    include_in_pl: bool
+    pl_cost_basis: PlCostBasis
 
     # Schedule
     frequency: str

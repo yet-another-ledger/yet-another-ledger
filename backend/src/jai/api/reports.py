@@ -254,6 +254,7 @@ async def get_icp_report(
 async def get_expense_report(
     date_from: Annotated[date, Query(alias="from", description="Inclusive start date.")],
     date_to: Annotated[date, Query(alias="to", description="Inclusive end date.")],
+    include_in_pl: bool | None = Query(default=None),
     user: User = Depends(current_mfa_user),
     session: AsyncSession = Depends(get_session),
 ) -> ExpenseReport:
@@ -285,6 +286,7 @@ async def get_expense_report(
         company_id=company_id,
         date_from=date_from,
         date_to=date_to,
+        include_in_pl=include_in_pl,
     )
 
 

@@ -121,6 +121,8 @@ export const useExpensesStore = defineStore('expenses', () => {
         paid_by: expense.paid_by,
         business_percentage: expense.business_percentage,
         depreciation_years: expense.depreciation_years,
+        include_in_pl: expense.include_in_pl,
+        pl_cost_basis: expense.pl_cost_basis,
       }
       return await put<ExpenseRead>(`/api/v1/expenses/${id}`, body)
     } catch (e: unknown) {

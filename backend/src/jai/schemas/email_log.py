@@ -48,8 +48,7 @@ class DocumentSendRequest(BaseModel):
     cc: str | None = Field(
         default=None,
         description=(
-            "Optional CC addresses, comma-separated "
-            "(e.g. 'a@b.com' or 'a@b.com, c@d.com')."
+            "Optional CC addresses, comma-separated (e.g. 'a@b.com' or 'a@b.com, c@d.com')."
         ),
     )
     locale: Literal["en", "zh"] | None = Field(
@@ -78,7 +77,20 @@ class DocumentSendRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class EmailLogRead(BaseModel):
+SentCopyStatus = Literal["NOT_ATTEMPTED", "SAVED", "FAILED"]
+
+
+class SentCopyResult(BaseModel):
+    sent_copy_status: SentCopyStatus = "NOT_ATTEMPTED"
+    sent_copy_error_code: str | None = None
+    sent_copy_saved_at: datetime | None = None
+
+
+class SmtpTestResult(SentCopyResult):
+    status: Literal["sent"] = "sent"
+
+
+class EmailLogRead(SentCopyResult):
     """Single email_log row as returned by the API.
 
     Deliberately excludes ``company_id`` and any SMTP credential fields.

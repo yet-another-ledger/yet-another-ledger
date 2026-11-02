@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jai.auth.deps import current_mfa_user
 from jai.db import get_session
 from jai.models.user import User
+from jai.schemas.expense import ExpenseCostPreviewResult
 from jai.schemas.recurring_expense import (
     RecurringExpenseInput,
     RecurringExpenseListResponse,
@@ -34,6 +35,7 @@ from jai.services.recurring_expense import (
     delete_recurring_expense,
     generate_due_for_template,
     get_recurring_expense,
+    get_recurring_expense_cost_preview,
     list_recurring_expenses,
     update_recurring_expense,
 )
@@ -119,6 +121,23 @@ async def list_recurring_expenses_endpoint(
 # ---------------------------------------------------------------------------
 # Get single
 # ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/recurring-expenses/{recurring_id}/cost-preview", response_model=ExpenseCostPreviewResult
+)
+async def get_recurring_expense_cost_endpoint(
+    recurring_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> ExpenseCostPreviewResult:
+    """Read the annual cost of one future Expense using the stored template snapshots."""
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    try:
+        return await get_recurring_expense_cost_preview(session, recurring_id, company_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get("/recurring-expenses/{recurring_id}", response_model=RecurringExpenseRead)

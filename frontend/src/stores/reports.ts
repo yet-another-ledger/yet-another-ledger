@@ -135,11 +135,12 @@ export const useReportsStore = defineStore('reports', () => {
    * @param from  ISO date string (YYYY-MM-DD), inclusive start.
    * @param to    ISO date string (YYYY-MM-DD), inclusive end.
    */
-  async function fetchExpenseReport(from: string, to: string): Promise<void> {
+  async function fetchExpenseReport(from: string, to: string, includeInPl: boolean | null = null): Promise<void> {
     expenseLoading.value = true
     expenseError.value = null
     try {
       const params = new URLSearchParams({ from, to })
+      if (includeInPl !== null) params.set('include_in_pl', String(includeInPl))
       expenseReport.value = await get<ExpenseReport>(
         `/api/v1/reports/expenses?${params.toString()}`,
       )

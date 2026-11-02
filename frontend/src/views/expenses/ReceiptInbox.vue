@@ -12,6 +12,7 @@ import type { components } from '../../api/schema'
 
 type ExpenseInput = components['schemas']['ExpenseInput']
 type Calc = components['schemas']['ExpenseCalculateResult']
+type PlCostBasis = components['schemas']['PlCostBasis']
 const route = useRoute(), router = useRouter(), { t, locale } = useI18n()
 const inbox = useReceiptInboxStore()
 const dict = usePurchaseExpenseDictionaries()
@@ -27,6 +28,7 @@ const selectedFiles = ref<File[]>([])
 const expenseDate = ref(localDateStr(new Date())), categoryId = ref<string | null>(null), supplier = ref('')
 const treatmentId = ref<string | null>(null), rateId = ref<string | null>(null), net = ref<number | null>(null), vat = ref<number | null>(null)
 const deductible = ref<boolean | null>(true), paidBy = ref<'BUSINESS' | 'PRIVATE'>('BUSINESS'), businessPct = ref<number>(100), years = ref<number>(1), reference = ref(''), note = ref('')
+const includeInPl = ref(true), plCostBasis = ref<PlCostBasis>('AUTO')
 const previewGross = ref<string | null>(null)
 const edited = ref(new Set<string>())
 const id = computed(() => String(route.params.id ?? ''))
@@ -65,6 +67,7 @@ function resetDraft() {
   expenseDate.value = localDateStr(new Date()); categoryId.value = null; supplier.value = ''
   treatmentId.value = null; rateId.value = null; net.value = null; vat.value = null
   deductible.value = true; paidBy.value = 'BUSINESS'; businessPct.value = 100; years.value = 1
+  includeInPl.value = true; plCostBasis.value = 'AUTO'
   reference.value = ''; note.value = ''; previewGross.value = null
   edited.value = new Set()
   selectedFiles.value = []; uploadKey.value++; previewVersion++
@@ -159,7 +162,7 @@ async function confirmExpense() {
   const targetId = id.value
   const version = routeVersion
   action.value = 'confirm'; error.value = ''; success.value = ''
-  const body: ExpenseInput = toExpenseInput({ expense_date: expenseDate.value, category_id: categoryId.value, supplier_name: supplier.value || null, vat_treatment_id: treatmentId.value, vat_rate_id: rateId.value, net_amount: net.value, vat_amount: vat.value, deductible: deductible.value, reference: reference.value || null, note: note.value || null, paid_by: paidBy.value, business_percentage: businessPct.value, depreciation_years: years.value })
+  const body: ExpenseInput = toExpenseInput({ expense_date: expenseDate.value, category_id: categoryId.value, supplier_name: supplier.value || null, vat_treatment_id: treatmentId.value, vat_rate_id: rateId.value, net_amount: net.value, vat_amount: vat.value, deductible: deductible.value, reference: reference.value || null, note: note.value || null, paid_by: paidBy.value, business_percentage: businessPct.value, depreciation_years: years.value, include_in_pl: includeInPl.value, pl_cost_basis: plCostBasis.value })
   try {
     const result = await inbox.confirm(targetId, body)
     if (version !== routeVersion) return
@@ -238,6 +241,8 @@ function formatBytes(n: number) { return n < 1024 ? `${n} B` : `${(n / 1024).toF
             <n-form-item :label="t('expenses.paidBy')"><n-select v-model:value="paidBy" :options="[{label:t('expenses.paidByBusiness'),value:'BUSINESS'},{label:t('expenses.paidByPrivate'),value:'PRIVATE'}]" /></n-form-item>
             <n-form-item :label="t('expenses.businessPercentage')"><n-input-number v-model:value="businessPct" :min="0" :max="100" :precision="1" /></n-form-item>
             <n-form-item :label="t('expenses.depreciationYears')"><n-input-number v-model:value="years" :min="1" :precision="0" /></n-form-item>
+            <n-form-item :label="t('expenses.includeInPl')"><n-checkbox v-model:checked="includeInPl">{{ t('expenses.includeInPl') }}</n-checkbox></n-form-item>
+            <n-form-item :label="t('expenses.plCostBasis')"><n-select v-model:value="plCostBasis" :options="[{label:t('expenses.costBasisAuto'),value:'AUTO'},{label:t('expenses.costBasisNet'),value:'NET'},{label:t('expenses.costBasisGross'),value:'GROSS'}]" /></n-form-item>
             <n-form-item :label="t('expenses.reference')"><n-input v-model:value="reference" /></n-form-item>
             <n-form-item :label="t('expenses.note')"><n-input v-model:value="note" type="textarea" @update:value="markEdited('note')" /></n-form-item>
             <n-button v-if="action==='confirm'" type="primary" loading>{{ t('receiptInbox.confirming') }}</n-button><n-button v-else type="primary" attr-type="submit">{{ t('receiptInbox.confirm') }}</n-button>

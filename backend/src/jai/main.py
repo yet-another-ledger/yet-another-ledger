@@ -24,12 +24,14 @@ from jai.api.agent_tokens import router as agent_tokens_router
 from jai.api.attachments import router as attachments_router
 from jai.api.auth import router as auth_router
 from jai.api.auth import users_router
+from jai.api.battery import router as battery_router
 from jai.api.company import router as company_router
 from jai.api.content import router as content_router
 from jai.api.customers import router as customers_router
 from jai.api.dictionary import router as dictionary_router
 from jai.api.estimates import router as estimates_router
 from jai.api.expenses import router as expenses_router
+from jai.api.external_sales import router as external_sales_router
 from jai.api.health import router as health_router
 from jai.api.invoices import router as invoices_router
 from jai.api.mcp import AGENT_RECEIPT_UPLOAD_PATH, ClosedMCPBoundary
@@ -302,6 +304,8 @@ def create_app() -> FastAPI:
     app.include_router(pdf_router)
     app.include_router(quotes_router)
     app.include_router(estimates_router)
+    app.include_router(external_sales_router)
+    app.include_router(battery_router)
     app.include_router(payments_router)
     app.include_router(expenses_router)
     app.include_router(mileage_router)

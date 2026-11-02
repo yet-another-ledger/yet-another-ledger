@@ -152,6 +152,36 @@ class TestClassifyRate:
     def test_other(self) -> None:
         assert _classify_rate(Decimal("13"), DEFAULT_TIERS) == "other"
 
+    @pytest.mark.parametrize("rate", ["0.001", "0.5", "9.5", "21.5"])
+    def test_fractional_rate_does_not_match_integer_tier(self, rate: str) -> None:
+        assert _classify_rate(Decimal(rate), DEFAULT_TIERS) == "other"
+
+    @pytest.mark.parametrize(
+        ("rate", "box"),
+        [("0.5", "other"), ("0.000", "zero"), ("21.000", "hoog"), ("9.000", "laag")],
+    )
+    def test_decimal_equality_preserves_native_box_amounts(self, rate: str, box: str) -> None:
+        acc = _BoxAccumulator()
+        _apply_invoice_line_nl(
+            acc,
+            "APPLY_RATE",
+            False,
+            "NL_DOMESTIC",
+            Decimal(rate),
+            Decimal("100.00"),
+            Decimal("0.50") if box == "other" else Decimal("0.00"),
+            DEFAULT_TIERS,
+        )
+        if box == "other":
+            assert acc.b1c_base == Decimal("100.00")
+            assert acc.b1c_vat == Decimal("0.50")
+            assert acc.b1e_base == 0
+        elif box == "zero":
+            assert acc.b1e_base == Decimal("100.00")
+            assert acc.b1c_vat == 0
+        else:
+            assert (acc.b1a_base if box == "hoog" else acc.b1b_base) == Decimal("100.00")
+
     def test_custom_tiers_hoog(self) -> None:
         assert _classify_rate(Decimal("25"), CUSTOM_TIERS) == "hoog"
 
@@ -701,6 +731,9 @@ def _build_session(
         invoke_results.append(year_exp_result)
 
     session.execute.side_effect = invoke_results
+    external_sales_result = MagicMock()
+    external_sales_result.all.return_value = []
+    session.scalars.return_value = external_sales_result
     return session
 
 

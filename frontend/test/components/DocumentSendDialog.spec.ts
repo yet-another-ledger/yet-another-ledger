@@ -131,3 +131,63 @@ describe('DocumentSendDialog Refund flow', () => {
     expect(http.post).not.toHaveBeenCalled()
   })
 })
+
+it('closes after SMTP success and warns separately when saving the Sent copy fails', async () => {
+  vi.clearAllMocks()
+  http.get.mockImplementation((url: string) => Promise.resolve(url.includes('email-templates') ? templates : { locale: 'en' }))
+  http.post.mockResolvedValue({ id: 'log-copy-failed', status: 'SENT', sent_copy_status: 'FAILED', sent_copy_error_code: 'IMAP_TIMEOUT' })
+  const wrapper = mount(DocumentSendDialog, { props: {
+    show: true, docType: 'quote', docId: 'quote-1', customerEmail: 'to@example.test', customerLocale: 'en',
+  } })
+  await flushPromises()
+  await wrapper.findAll('button').find(item => item.text() === 'sendDialog.send')!.trigger('click')
+  await flushPromises()
+  expect(http.post).toHaveBeenCalledTimes(1)
+  expect(messages.warning).toHaveBeenCalledWith('sentCopy.FAILED')
+  expect(messages.success).not.toHaveBeenCalled()
+  expect(wrapper.emitted('sent')?.[0]?.[0]).toMatchObject({ status: 'SENT', sent_copy_status: 'FAILED' })
+  expect(wrapper.emitted('update:show')?.at(-1)).toEqual([false])
+  wrapper.unmount()
+})
+
+it.each(['FAILED', 'SENT'])('keeps locking and replacement context protection for a late %s result', async (status) => {
+  vi.clearAllMocks()
+  http.get.mockImplementation((url: string) => Promise.resolve(url.includes('email-templates') ? templates : { locale: 'en' }))
+  let complete!: (value: unknown) => void
+  http.post.mockReturnValue(new Promise(resolve => { complete = resolve }))
+  const wrapper = mount(DocumentSendDialog, { props: {
+    show: true, docType: 'quote', docId: 'quote-old', customerEmail: 'to@example.test', customerLocale: 'en',
+  } })
+  await flushPromises()
+  const send = wrapper.findAll('button').find(item => item.text() === 'sendDialog.send')!
+  await send.trigger('click')
+  await send.trigger('click')
+  expect(http.post).toHaveBeenCalledTimes(1)
+  await wrapper.setProps({ docId: 'quote-new', customerEmail: 'new@example.test' })
+  complete({ status, error_message: status === 'FAILED' ? 'SMTP_SEND_FAILED' : null, sent_copy_status: 'NOT_ATTEMPTED' })
+  await flushPromises()
+  expect(wrapper.emitted('update:show')).toBeUndefined()
+  expect((wrapper.find('input').element as HTMLInputElement).value).toBe('new@example.test')
+  expect(wrapper.text()).not.toContain('sendDialog.sendFailed')
+  expect(wrapper.emitted('update:sending')?.at(-1)).toEqual([false])
+  wrapper.unmount()
+})
+
+it('shows SMTP failure from HTTP 200 without emitting sent or closing', async () => {
+  vi.clearAllMocks()
+  http.get.mockImplementation((url: string) => Promise.resolve(url.includes('email-templates') ? templates : { locale: 'en' }))
+  http.post.mockResolvedValue({ status: 'FAILED', error_message: 'SMTP_SEND_FAILED', sent_copy_status: 'NOT_ATTEMPTED' })
+  const wrapper = mount(DocumentSendDialog, { props: {
+    show: true, docType: 'quote', docId: 'quote-1', customerEmail: 'to@example.test', customerLocale: 'en',
+  } })
+  await flushPromises()
+  await wrapper.findAll('button').find(item => item.text() === 'sendDialog.send')!.trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('sendDialog.sendFailed')
+  expect(messages.success).not.toHaveBeenCalled()
+  expect(messages.warning).not.toHaveBeenCalled()
+  expect(wrapper.emitted('sent')).toBeUndefined()
+  expect(wrapper.emitted('update:show')).toBeUndefined()
+  expect(wrapper.emitted('update:sending')?.at(-1)).toEqual([false])
+  wrapper.unmount()
+})

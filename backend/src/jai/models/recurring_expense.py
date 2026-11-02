@@ -153,6 +153,12 @@ class RecurringExpense(Base):
             "Expense on generation (D8). Amortisation deferred to M10."
         ),
     )
+    include_in_pl: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    pl_cost_basis: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'NET'")
+    )
 
     # -- Notes (text, red-line 10) --------------------------------------------
     note: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -14,8 +14,10 @@ import type { RecurringExpenseRead, RecurringExpenseInput } from '../../stores/r
 import { get, ApiError } from '../../api/http'
 import type { components } from '../../api/schema'
 import { formatDate } from '../../utils/date'
+import { useExpenseCostPreview } from '../../composables/useExpenseCostPreview'
 
 type PaidBy = components['schemas']['PaidBy']
+type PlCostBasis = components['schemas']['PlCostBasis']
 
 type ExpenseCategoryRead = components['schemas']['ExpenseCategoryRead']
 type ExpenseCategoryListResponse = components['schemas']['ExpenseCategoryListResponse']
@@ -90,6 +92,26 @@ const formActive = ref(true)
 const formPaidBy = ref<PaidBy>('BUSINESS')
 const formBusinessPercentage = ref<number>(100)
 const formDepreciationYears = ref<number>(1)
+const formIncludeInPl = ref(true)
+const formPlCostBasis = ref<PlCostBasis>('AUTO')
+
+const {
+  costPreview, originalCostPreview, costPreviewLoading, costPreviewError,
+  previewPlCost, resetCostPreview,
+} = useExpenseCostPreview(
+  () => showModal.value && formVatTreatmentId.value ? {
+    net_amount: formNetAmount.value ?? 0,
+    vat_amount: formVatAmount.value ?? 0,
+    vat_treatment_id: formVatTreatmentId.value,
+    category_id: formCategoryId.value,
+    deductible: formDeductible.value,
+    pl_cost_basis: formPlCostBasis.value,
+    include_in_pl: formIncludeInPl.value,
+    business_percentage: formBusinessPercentage.value,
+    depreciation_years: formDepreciationYears.value,
+  } : null,
+  () => showModal.value && editingId.value ? `/api/v1/recurring-expenses/${editingId.value}/cost-preview` : null,
+)
 
 const formStartDateTs = computed({
   get: () => formStartDate.value ? new Date(formStartDate.value).getTime() : null,
@@ -119,6 +141,8 @@ function resetForm() {
   formPaidBy.value = 'BUSINESS'
   formBusinessPercentage.value = 100
   formDepreciationYears.value = 1
+  formIncludeInPl.value = true
+  formPlCostBasis.value = 'AUTO'
   modalError.value = null
 }
 
@@ -148,6 +172,8 @@ function openEdit(row: RecurringExpenseRead) {
   formPaidBy.value = row.paid_by
   formBusinessPercentage.value = Number(row.business_percentage)
   formDepreciationYears.value = row.depreciation_years
+  formIncludeInPl.value = row.include_in_pl
+  formPlCostBasis.value = row.pl_cost_basis
   modalError.value = null
   showModal.value = true
 }
@@ -157,6 +183,7 @@ async function handleSaveModal() {
     modalError.value = t('recurring.validationError')
     return
   }
+  resetCostPreview()
   modalSaving.value = true
   modalError.value = null
   try {
@@ -179,6 +206,8 @@ async function handleSaveModal() {
       paid_by: formPaidBy.value,
       business_percentage: formBusinessPercentage.value,
       depreciation_years: formDepreciationYears.value,
+      include_in_pl: formIncludeInPl.value,
+      pl_cost_basis: formPlCostBasis.value,
     }
     if (editingId.value) {
       await store.updateRecurringExpense(editingId.value, body)
@@ -509,6 +538,30 @@ const columns = computed(() => [
             style="width: 160px"
             @update:value="(v: number | null) => { formDepreciationYears = v ?? 1 }"
           />
+        </n-form-item>
+        <n-form-item :label="t('expenses.includeInPl')">
+          <n-checkbox v-model:checked="formIncludeInPl">{{ t('expenses.includeInPl') }}</n-checkbox>
+        </n-form-item>
+        <n-form-item :label="t('expenses.plCostBasis')">
+          <n-select v-model:value="formPlCostBasis" :options="[
+            { label: t('expenses.costBasisAuto'), value: 'AUTO' },
+            { label: t('expenses.costBasisNet'), value: 'NET' },
+            { label: t('expenses.costBasisGross'), value: 'GROSS' },
+          ]" />
+        </n-form-item>
+
+        <n-form-item :label="t('expenses.costPreview')">
+          <n-space vertical>
+            <n-text depth="3">{{ t('recurring.costPreviewHint') }}</n-text>
+            <n-button secondary :loading="costPreviewLoading" @click="previewPlCost">
+              {{ t('expenses.previewCost') }}
+            </n-button>
+            <n-text v-if="costPreviewError" type="error">{{ t('expenses.costPreviewError') }}</n-text>
+            <n-text v-if="costPreview">
+              <template v-if="originalCostPreview">{{ t('expenses.costPreviewBefore') }}: {{ originalCostPreview.annual_cost }} · </template>
+              {{ t('expenses.costPreviewAfter') }}: {{ costPreview.annual_cost }}
+            </n-text>
+          </n-space>
         </n-form-item>
 
         <n-form-item :label="t('recurring.active')">

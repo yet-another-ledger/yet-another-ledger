@@ -70,11 +70,20 @@ from typing import Literal
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jai.models._enums import InvoiceDocumentKind, InvoiceStatus
+from jai.db import set_rls_company
+from jai.models._enums import (
+    ExpenseKind,
+    InvoiceDocumentKind,
+    InvoiceStatus,
+    PlCostBasis,
+    VatTreatmentEffect,
+)
 from jai.models.document import InvoiceCorrection
 from jai.models.expense import Expense
+from jai.models.external_sales import ExternalSale
 from jai.models.invoice import Invoice
-from jai.schemas.report import ProfitLossReport, ProfitLossSeriesItem
+from jai.schemas.report import ExternalSaleReportReference, ProfitLossReport, ProfitLossSeriesItem
+from jai.services.expense import compute_annual_pl_cost, compute_pl_cost_basis
 from jai.services.money import quantize_to_minor_unit
 
 # ---------------------------------------------------------------------------
@@ -137,12 +146,22 @@ def _annual_slice(expense: Expense) -> Decimal:
     ROUND_HALF_UP) so that every per-expense slice entering the accumulation
     buckets is already at "to-the-cent" precision (M7.5 / D6).
     """
-    net = Decimal(str(expense.base_net_amount))
+    if ExpenseKind(expense.kind) == ExpenseKind.MILEAGE:
+        net = Decimal(str(expense.base_net_amount))
+    else:
+        net = compute_pl_cost_basis(
+            Decimal(str(expense.base_net_amount)),
+            Decimal(str(expense.base_vat_amount)),
+            VatTreatmentEffect(expense.vat_treatment_effect),
+            expense.deductible,
+            PlCostBasis(expense.pl_cost_basis),
+            expense.vat_treatment_code,
+            Decimal(str(expense.base_gross_amount)),
+        )
     biz_pct = Decimal(str(expense.business_percentage))
-    dep_years = Decimal(str(expense.depreciation_years))
-
-    raw = net * biz_pct / Decimal("100") / dep_years
-    return quantize_to_minor_unit(raw)
+    return compute_annual_pl_cost(
+        net, biz_pct, int(expense.depreciation_years), expense.include_in_pl
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +185,12 @@ def _build_empty_buckets(
     while (year, month) <= (end_year, end_month):
         key = _bucket_key(date(year, month, 1), granularity)
         if key not in buckets:
-            buckets[key] = {"revenue_net": _ZERO, "expense_actual": _ZERO}
+            buckets[key] = {
+                "revenue_net": _ZERO,
+                "expense_actual": _ZERO,
+                "mileage_expense_actual": _ZERO,
+                "other_expense_actual": _ZERO,
+            }
         # Advance month
         if month == 12:
             year += 1
@@ -201,6 +225,7 @@ async def compute_profit_loss(
     ProfitLossReport
         Aggregated report with series and top-level totals.
     """
+    await set_rls_company(session, company_id)
     buckets = _build_empty_buckets(date_from, date_to, granularity)
 
     # -------------------------------------------------------------------
@@ -259,6 +284,33 @@ async def compute_profit_loss(
                 Decimal(str(correction.issued_base_net_amount))
             )
 
+    external_sales: list[ExternalSaleReportReference] = []
+    external_result = await session.scalars(
+        select(ExternalSale)
+        .where(
+            ExternalSale.status == "POSTED",
+            ExternalSale.include_in_pl.is_(True),
+            ExternalSale.document_date >= date_from,
+            ExternalSale.document_date <= date_to,
+        )
+        .order_by(ExternalSale.document_date, ExternalSale.id)
+    )
+    for sale in external_result.all():
+        if sale.document_date is None or sale.original_net_total is None:
+            continue
+        amount = quantize_to_minor_unit(Decimal(str(sale.original_net_total)))
+        key = _bucket_key(sale.document_date, granularity)
+        if key in buckets:
+            buckets[key]["revenue_net"] += amount
+            external_sales.append(
+                ExternalSaleReportReference(
+                    external_sale_id=str(sale.id),
+                    source_name=sale.posted_source_name or "External source",
+                    original_number=sale.original_number or "",
+                    event_date=sale.document_date,
+                )
+            )
+
     # -------------------------------------------------------------------
     # 2. Expenses: confirmed expenses with depreciation/business% (D3, D-DEP, D-PCT)
     # -------------------------------------------------------------------
@@ -272,6 +324,7 @@ async def compute_profit_loss(
         and_(
             Expense.company_id == company_id,
             Expense.is_draft.is_(False),
+            Expense.include_in_pl.is_(True),
         )
     )
     result_exp = await session.execute(stmt_exp)
@@ -293,6 +346,12 @@ async def compute_profit_loss(
                 buckets[key]["expense_actual"] = (
                     buckets[key]["expense_actual"] + slice_amount
                 )
+                cost_key = (
+                    "mileage_expense_actual"
+                    if ExpenseKind(exp.kind) == ExpenseKind.MILEAGE
+                    else "other_expense_actual"
+                )
+                buckets[key][cost_key] += slice_amount
 
     # -------------------------------------------------------------------
     # 3. Build series (sorted by period) and compute top-level totals
@@ -304,19 +363,33 @@ async def compute_profit_loss(
     for key in sorted(buckets.keys()):
         rev = buckets[key]["revenue_net"]
         exp_actual = buckets[key]["expense_actual"]
-        profit = rev - exp_actual
+        mileage_expense = buckets[key]["mileage_expense_actual"]
+        other_expense = buckets[key]["other_expense_actual"]
+        profit_before_mileage = rev - other_expense
+        profit_after_mileage = rev - exp_actual
         series.append(
             ProfitLossSeriesItem(
                 period=_bucket_label(key, granularity),
                 revenue_net=rev,
                 expense_actual=exp_actual,
-                profit=profit,
+                mileage_expense_actual=mileage_expense,
+                other_expense_actual=other_expense,
+                profit_before_mileage=profit_before_mileage,
+                profit_after_mileage=profit_after_mileage,
+                profit=profit_after_mileage,
             )
         )
         total_revenue = total_revenue + rev
         total_expense = total_expense + exp_actual
 
     total_profit = total_revenue - total_expense
+    total_mileage_expense = sum(
+        (bucket["mileage_expense_actual"] for bucket in buckets.values()), _ZERO
+    )
+    total_other_expense = sum(
+        (bucket["other_expense_actual"] for bucket in buckets.values()), _ZERO
+    )
+    total_profit_before_mileage = total_revenue - total_other_expense
 
     return ProfitLossReport(
         date_from=date_from,
@@ -324,7 +397,12 @@ async def compute_profit_loss(
         granularity=granularity,
         revenue_net=total_revenue,
         expense_actual=total_expense,
+        mileage_expense_actual=total_mileage_expense,
+        other_expense_actual=total_other_expense,
+        profit_before_mileage=total_profit_before_mileage,
+        profit_after_mileage=total_profit,
         profit=total_profit,
         series=series,
         by_category=None,
+        external_sales=external_sales,
     )

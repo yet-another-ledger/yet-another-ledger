@@ -98,6 +98,16 @@ function fmtDate(dt: string): string {
           <n-text v-if="item.cc" depth="3" style="font-size: 12px; display: block">
             {{ t('emailLog.cc') }}: {{ item.cc }}
           </n-text>
+          <n-tag v-if="item.sent_copy_status && item.sent_copy_status !== 'NOT_ATTEMPTED'"
+            :type="item.sent_copy_status === 'SAVED' ? 'success' : 'warning'" size="small">
+            {{ t(`sentCopy.${item.sent_copy_status}`) }}
+          </n-tag>
+          <n-text v-if="item.sent_copy_saved_at" depth="3" style="font-size: 12px">
+            {{ fmtDate(item.sent_copy_saved_at) }}
+          </n-text>
+          <n-text v-if="item.sent_copy_error_code" depth="3" style="font-size: 12px">
+            {{ item.sent_copy_error_code }}
+          </n-text>
           <n-text
             v-if="item.error_message"
             type="error"

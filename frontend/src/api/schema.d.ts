@@ -1242,6 +1242,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/invoices/{invoice_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Invoice Revisions Endpoint */
+        get: operations["list_invoice_revisions_endpoint_api_v1_invoices__invoice_id__revisions_get"];
+        put?: never;
+        /** Create Invoice Revision Endpoint */
+        post: operations["create_invoice_revision_endpoint_api_v1_invoices__invoice_id__revisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}/revisions/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Calculate Invoice Revision Endpoint */
+        post: operations["calculate_invoice_revision_endpoint_api_v1_invoices__invoice_id__revisions_calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices/{invoice_id}/document-chain": {
         parameters: {
             query?: never;
@@ -1528,6 +1563,26 @@ export interface paths {
          * @description Create a new quote, allocate a quote number, and return the full record.
          */
         post: operations["create_quote_endpoint_api_v1_quotes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{quote_id}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Duplicate Quote Endpoint
+         * @description Copy saved content into a fresh draft using today's defaults and current VAT.
+         */
+        post: operations["duplicate_quote_endpoint_api_v1_quotes__quote_id__duplicate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1844,6 +1899,424 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/external-sales-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get External Sales Sources */
+        get: operations["get_external_sales_sources_api_v1_external_sales_sources_get"];
+        put?: never;
+        /** Post External Sales Source */
+        post: operations["post_external_sales_source_api_v1_external_sales_sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-sales-sources/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put External Sales Source */
+        put: operations["put_external_sales_source_api_v1_external_sales_sources__source_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-sales": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get External Sales */
+        get: operations["get_external_sales_api_v1_external_sales_get"];
+        put?: never;
+        /** Post External Sale */
+        post: operations["post_external_sale_api_v1_external_sales_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-sales/{sale_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get External Sale */
+        get: operations["get_external_sale_api_v1_external_sales__sale_id__get"];
+        /** Put External Sale */
+        put: operations["put_external_sale_api_v1_external_sales__sale_id__put"];
+        post?: never;
+        /** Delete External Sale */
+        delete: operations["delete_external_sale_api_v1_external_sales__sale_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-sales/{sale_id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post External Sale Files */
+        post: operations["post_external_sale_files_api_v1_external_sales__sale_id__files_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-sales/{sale_id}/extract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post External Sale Extract */
+        post: operations["post_external_sale_extract_api_v1_external_sales__sale_id__extract_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-sales/{sale_id}/files/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get External Sale File */
+        get: operations["get_external_sale_file_api_v1_external_sales__sale_id__files__file_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete External Sale File */
+        delete: operations["delete_external_sale_file_api_v1_external_sales__sale_id__files__file_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-sales/{sale_id}/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post External Sale Calculation */
+        post: operations["post_external_sale_calculation_api_v1_external_sales__sale_id__calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-sales/{sale_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post External Sale Confirmation */
+        post: operations["post_external_sale_confirmation_api_v1_external_sales__sale_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-sales/{sale_id}/revisions/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post External Sale Revision Preview */
+        post: operations["post_external_sale_revision_preview_api_v1_external_sales__sale_id__revisions_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-sales/{sale_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get External Sale Revisions */
+        get: operations["get_external_sale_revisions_api_v1_external_sales__sale_id__revisions_get"];
+        put?: never;
+        /** Post External Sale Revision */
+        post: operations["post_external_sale_revision_api_v1_external_sales__sale_id__revisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/external-sales/{sale_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post External Sale Void */
+        post: operations["post_external_sale_void_api_v1_external_sales__sale_id__void_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Asset */
+        post: operations["preview_asset_api_v1_battery_assets_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Assets */
+        get: operations["get_assets_api_v1_battery_assets_get"];
+        put?: never;
+        /** Create Asset */
+        post: operations["create_asset_api_v1_battery_assets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/{asset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Asset */
+        get: operations["get_asset_api_v1_battery_assets__asset_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/{asset_id}/revisions/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Asset Revision */
+        post: operations["preview_asset_revision_api_v1_battery_assets__asset_id__revisions_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/{asset_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Asset Revisions */
+        get: operations["get_asset_revisions_api_v1_battery_assets__asset_id__revisions_get"];
+        put?: never;
+        /** Revise Asset */
+        post: operations["revise_asset_api_v1_battery_assets__asset_id__revisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/{asset_id}/annual-use/{year}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Annual Use */
+        get: operations["get_annual_use_api_v1_battery_assets__asset_id__annual_use__year__get"];
+        /** Put Annual Use */
+        put: operations["put_annual_use_api_v1_battery_assets__asset_id__annual_use__year__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/{asset_id}/annual-use/{year}/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Calculate Annual Use */
+        post: operations["calculate_annual_use_api_v1_battery_assets__asset_id__annual_use__year__calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/{asset_id}/annual-use/{year}/revisions/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Annual Revision */
+        post: operations["preview_annual_revision_api_v1_battery_assets__asset_id__annual_use__year__revisions_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/{asset_id}/annual-use/{year}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Annual Revisions */
+        get: operations["get_annual_revisions_api_v1_battery_assets__asset_id__annual_use__year__revisions_get"];
+        put?: never;
+        /** Revise Annual Use */
+        post: operations["revise_annual_use_api_v1_battery_assets__asset_id__annual_use__year__revisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/{asset_id}/annual-use/{year}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Annual Use */
+        post: operations["confirm_annual_use_api_v1_battery_assets__asset_id__annual_use__year__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/{asset_id}/annual-use/{year}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Annual Evidence */
+        post: operations["upload_annual_evidence_api_v1_battery_assets__asset_id__annual_use__year__evidence_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/battery-assets/{asset_id}/annual-use/{year}/evidence/{evidence_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Annual Evidence Content */
+        get: operations["get_annual_evidence_content_api_v1_battery_assets__asset_id__annual_use__year__evidence__evidence_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices/{invoice_id}/payments": {
         parameters: {
             query?: never;
@@ -2135,6 +2608,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/expenses/cost-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Calculate Expense Cost Endpoint
+         * @description Preview the annual cost basis selected for P/L, without persistence.
+         */
+        post: operations["calculate_expense_cost_endpoint_api_v1_expenses_cost_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expenses/{expense_id}/cost-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Expense Cost Endpoint
+         * @description Read current P/L cost from the stored amounts and VAT snapshots.
+         */
+        get: operations["get_expense_cost_endpoint_api_v1_expenses__expense_id__cost_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses/ai-extract": {
         parameters: {
             query?: never;
@@ -2412,6 +2925,26 @@ export interface paths {
          * @description Create a new recurring expense template.
          */
         post: operations["create_recurring_expense_endpoint_api_v1_recurring_expenses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recurring-expenses/{recurring_id}/cost-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Recurring Expense Cost Endpoint
+         * @description Read the annual cost of one future Expense using the stored template snapshots.
+         */
+        get: operations["get_recurring_expense_cost_endpoint_api_v1_recurring_expenses__recurring_id__cost_preview_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3379,6 +3912,508 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /** BatteryAnnualCalculateRequest */
+        BatteryAnnualCalculateRequest: {
+            /** Expected Version */
+            expected_version: number;
+            /** Expected Asset Version */
+            expected_asset_version: number;
+        };
+        /** BatteryAnnualCalculation */
+        BatteryAnnualCalculation: {
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Year */
+            year: number;
+            /** Expected Version */
+            expected_version: number;
+            /** Expected Asset Version */
+            expected_asset_version: number;
+            /** Private Use Percentage */
+            private_use_percentage: string;
+            /** Calculation Base */
+            calculation_base: string;
+            /** Calculation Vat */
+            calculation_vat: string;
+            /** Report Quarter */
+            report_quarter: number;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * BatteryAnnualConfirmRequest
+         * @description Confirm using server-recomputed values for the expected input version.
+         */
+        BatteryAnnualConfirmRequest: {
+            /** Expected Version */
+            expected_version: number;
+            /** Expected Asset Version */
+            expected_asset_version: number;
+        };
+        /** BatteryAnnualMissingInput */
+        BatteryAnnualMissingInput: {
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Year */
+            year: number;
+            code: components["schemas"]["BatteryMissingCode"];
+        };
+        /** BatteryAnnualRevisionInput */
+        BatteryAnnualRevisionInput: {
+            /** Expected Version */
+            expected_version: number;
+            /** Private Use Percentage */
+            private_use_percentage?: number | string | null;
+            /** Basis Note */
+            basis_note: string;
+            /** Expected Asset Version */
+            expected_asset_version: number;
+            /** Reason */
+            reason: string;
+            /** Acknowledge Affected Periods */
+            acknowledge_affected_periods?: string[];
+        };
+        /** BatteryAnnualRevisionListRead */
+        BatteryAnnualRevisionListRead: {
+            /** Items */
+            items: components["schemas"]["BatteryAnnualRevisionRead"][];
+            /** Total */
+            total: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset?: number;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit?: number;
+        };
+        /** BatteryAnnualRevisionPreview */
+        BatteryAnnualRevisionPreview: {
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Year */
+            year: number;
+            /** Expected Version */
+            expected_version: number;
+            /** Expected Asset Version */
+            expected_asset_version: number;
+            /** Current Private Use Percentage */
+            current_private_use_percentage: string | null;
+            /** Current Calculation Base */
+            current_calculation_base: string | null;
+            /** Current Calculation Vat */
+            current_calculation_vat: string | null;
+            /** Proposed Private Use Percentage */
+            proposed_private_use_percentage: string | null;
+            /** Proposed Calculation Base */
+            proposed_calculation_base: string | null;
+            /** Proposed Calculation Vat */
+            proposed_calculation_vat: string | null;
+            /** Affected Periods */
+            affected_periods: string[];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** BatteryAnnualRevisionPreviewItem */
+        BatteryAnnualRevisionPreviewItem: {
+            /** Year */
+            year: number;
+            /** Current Version */
+            current_version: number | null;
+            /** Current Confirmed */
+            current_confirmed: boolean;
+            /** Current Private Use Percentage */
+            current_private_use_percentage: string | null;
+            /** Current Calculation Base */
+            current_calculation_base: string | null;
+            /** Current Calculation Vat */
+            current_calculation_vat: string | null;
+            /** Proposed Calculation Base */
+            proposed_calculation_base: string | null;
+            /** Proposed Calculation Vat */
+            proposed_calculation_vat: string | null;
+            /** Requires Reconfirmation */
+            requires_reconfirmation: boolean;
+        };
+        /** BatteryAnnualRevisionRead */
+        BatteryAnnualRevisionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version: number;
+            /** Reason */
+            reason: string;
+            /** Actor Id */
+            actor_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Before Snapshot */
+            before_snapshot: {
+                [key: string]: unknown;
+            };
+            /** After Snapshot */
+            after_snapshot: {
+                [key: string]: unknown;
+            };
+        };
+        /** BatteryAnnualUseInput */
+        BatteryAnnualUseInput: {
+            /** Expected Version */
+            expected_version?: number | null;
+            /** Private Use Percentage */
+            private_use_percentage?: number | string | null;
+            /** Basis Note */
+            basis_note: string;
+        };
+        /** BatteryAnnualUseRead */
+        BatteryAnnualUseRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Year */
+            year: number;
+            /** Version */
+            version: number;
+            /** Private Use Percentage */
+            private_use_percentage: string | null;
+            /** Basis Note */
+            basis_note: string | null;
+            /** Confirmed */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Calculation Base */
+            calculation_base: string | null;
+            /** Calculation Vat */
+            calculation_vat: string | null;
+            /** Asset Version Used */
+            asset_version_used: number | null;
+            /** Evidence */
+            evidence?: components["schemas"]["BatteryEvidenceRead"][];
+        };
+        /** BatteryAssetCreateRequest */
+        BatteryAssetCreateRequest: {
+            /**
+             * Acquisition Expense Id
+             * Format: uuid
+             */
+            acquisition_expense_id: string;
+            /**
+             * In Service Date
+             * Format: date
+             */
+            in_service_date: string;
+            /** Owner Confirms Ordinary Vat Full Deduction */
+            owner_confirms_ordinary_vat_full_deduction: boolean;
+            /**
+             * Acknowledge Affected Periods
+             * @default false
+             */
+            acknowledge_affected_periods?: boolean;
+        };
+        /** BatteryAssetListRead */
+        BatteryAssetListRead: {
+            /** Items */
+            items: components["schemas"]["BatteryAssetRead"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** BatteryAssetPreview */
+        BatteryAssetPreview: {
+            /**
+             * Acquisition Expense Id
+             * Format: uuid
+             */
+            acquisition_expense_id: string;
+            /** Eligible */
+            eligible: boolean;
+            conflict_code?: components["schemas"]["BatteryConflictCode"] | null;
+            /**
+             * In Service Date
+             * Format: date
+             */
+            in_service_date: string;
+            /** Applicable Years */
+            applicable_years?: number[];
+            /** Affected Historical Periods */
+            affected_historical_periods?: string[];
+            /** Net Basis */
+            net_basis?: string | null;
+            /** Purchase Vat */
+            purchase_vat?: string | null;
+            /** Purchase Vat Rate Percent */
+            purchase_vat_rate_percent?: string | null;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** BatteryAssetPreviewRequest */
+        BatteryAssetPreviewRequest: {
+            /**
+             * Acquisition Expense Id
+             * Format: uuid
+             */
+            acquisition_expense_id: string;
+            /**
+             * In Service Date
+             * Format: date
+             */
+            in_service_date: string;
+            /** Owner Confirms Ordinary Vat Full Deduction */
+            owner_confirms_ordinary_vat_full_deduction: boolean;
+        };
+        /** BatteryAssetRead */
+        BatteryAssetRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Acquisition Expense Id
+             * Format: uuid
+             */
+            acquisition_expense_id: string;
+            /**
+             * Acquisition Expense Date
+             * Format: date
+             */
+            acquisition_expense_date: string;
+            /**
+             * In Service Date
+             * Format: date
+             */
+            in_service_date: string;
+            /** Applicable Years */
+            applicable_years: number[];
+            /** Net Basis */
+            net_basis: string;
+            /** Purchase Vat */
+            purchase_vat: string;
+            /** Purchase Vat Rate Percent */
+            purchase_vat_rate_percent: string;
+            /** Currency */
+            currency: string;
+            /** Rule Version */
+            rule_version: number;
+            /** Version */
+            version: number;
+            /** Ordinary Vat Full Deduction Confirmed */
+            ordinary_vat_full_deduction_confirmed: boolean;
+            /**
+             * Owner Confirmed At
+             * Format: date-time
+             */
+            owner_confirmed_at: string;
+            /** Registered By */
+            registered_by: string | null;
+            /** Historical Acknowledged Periods */
+            historical_acknowledged_periods: string[];
+            /** Historical Acknowledged At */
+            historical_acknowledged_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** BatteryAssetRevisionInput */
+        BatteryAssetRevisionInput: {
+            /** Expected Version */
+            expected_version: number;
+            /** Reason */
+            reason: string;
+            /** Acquisition Expense Date */
+            acquisition_expense_date?: string | null;
+            /** In Service Date */
+            in_service_date?: string | null;
+            /** Net Basis */
+            net_basis?: number | string | null;
+            /** Purchase Vat */
+            purchase_vat?: number | string | null;
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+            /** Expected Rate Snapshot */
+            expected_rate_snapshot?: string | null;
+            /** Expected Annual Versions */
+            expected_annual_versions?: {
+                [key: string]: number;
+            };
+            /** Acknowledge Affected Periods */
+            acknowledge_affected_periods?: string[];
+        };
+        /** BatteryAssetRevisionListRead */
+        BatteryAssetRevisionListRead: {
+            /** Items */
+            items: components["schemas"]["BatteryAssetRevisionRead"][];
+            /** Total */
+            total: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset?: number;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit?: number;
+        };
+        /** BatteryAssetRevisionPreview */
+        BatteryAssetRevisionPreview: {
+            /** Rate Snapshot */
+            rate_snapshot?: string | null;
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Expected Version */
+            expected_version: number;
+            before: components["schemas"]["BatteryAssetRead"];
+            after: components["schemas"]["BatteryAssetRead"];
+            expense_before: components["schemas"]["BatteryExpenseFinancialSnapshot"];
+            expense_after: components["schemas"]["BatteryExpenseFinancialSnapshot"];
+            /** Affected Periods */
+            affected_periods: string[];
+            /** Annual Previews */
+            annual_previews: components["schemas"]["BatteryAnnualRevisionPreviewItem"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** BatteryAssetRevisionRead */
+        BatteryAssetRevisionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version: number;
+            /** Reason */
+            reason: string;
+            /** Actor Id */
+            actor_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Affected Periods */
+            affected_periods: string[];
+            /** Before Snapshot */
+            before_snapshot: {
+                [key: string]: unknown;
+            };
+            /** After Snapshot */
+            after_snapshot: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * BatteryConflictCode
+         * @enum {string}
+         */
+        BatteryConflictCode: "BATTERY_ACQUISITION_ALREADY_REGISTERED" | "BATTERY_EXPENSE_INELIGIBLE" | "BATTERY_OWNER_CONFIRMATION_REQUIRED" | "BATTERY_HISTORICAL_ACK_REQUIRED" | "BATTERY_VERSION_CONFLICT" | "BATTERY_YEAR_NOT_APPLICABLE" | "BATTERY_ANNUAL_INPUT_MISSING" | "BATTERY_ANNUAL_CONFIRMED" | "BATTERY_ANNUAL_ALREADY_CONFIRMED" | "BATTERY_REVISION_REQUIRED" | "BATTERY_REVISION_NO_CHANGES" | "BATTERY_REVISION_PERIOD_ACK_REQUIRED" | "BATTERY_PREVIEW_STALE" | "BATTERY_EXPENSE_PROTECTED" | "BATTERY_EVIDENCE_INVALID";
+        /** BatteryConflictDetail */
+        BatteryConflictDetail: {
+            code: components["schemas"]["BatteryConflictCode"];
+            /** Detail */
+            detail: string;
+            /** Current Version */
+            current_version?: number | null;
+        };
+        /** BatteryConflictResponse */
+        BatteryConflictResponse: {
+            detail: components["schemas"]["BatteryConflictDetail"];
+        };
+        /** BatteryEvidenceRead */
+        BatteryEvidenceRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Filename */
+            filename: string | null;
+            /** Media Type */
+            media_type: string;
+            /** Byte Size */
+            byte_size: number;
+            /** Sha256 */
+            sha256: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * BatteryExpenseFinancialSnapshot
+         * @description Expense values affected by a controlled asset correction.
+         */
+        BatteryExpenseFinancialSnapshot: {
+            /**
+             * Expense Date
+             * Format: date
+             */
+            expense_date: string;
+            /** Currency */
+            currency: string;
+            /** Exchange Rate */
+            exchange_rate: string;
+            /** Net Amount */
+            net_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Base Net Amount */
+            base_net_amount: string;
+            /** Base Vat Amount */
+            base_vat_amount: string;
+            /** Base Gross Amount */
+            base_gross_amount: string;
+            /** Vat Rate Id */
+            vat_rate_id: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+        };
+        /**
+         * BatteryMissingCode
+         * @enum {string}
+         */
+        BatteryMissingCode: "MISSING" | "PERCENTAGE_MISSING" | "UNCONFIRMED" | "RECONFIRMATION_REQUIRED";
         /** Body_append_receipt_inbox_files_api_v1_receipt_inbox__inbox_id__files_post */
         Body_append_receipt_inbox_files_api_v1_receipt_inbox__inbox_id__files_post: {
             /** Files */
@@ -3388,6 +4423,16 @@ export interface components {
         Body_create_receipt_inbox_api_v1_receipt_inbox_post: {
             /** Files */
             files: string[];
+        };
+        /** Body_post_external_sale_files_api_v1_external_sales__sale_id__files_post */
+        Body_post_external_sale_files_api_v1_external_sales__sale_id__files_post: {
+            /** Files */
+            files: string[];
+        };
+        /** Body_upload_annual_evidence_api_v1_battery_assets__asset_id__annual_use__year__evidence_post */
+        Body_upload_annual_evidence_api_v1_battery_assets__asset_id__annual_use__year__evidence_post: {
+            /** File */
+            file: string;
         };
         /** Body_upload_attachment_endpoint_api_v1_expenses__expense_id__attachments_post */
         Body_upload_attachment_endpoint_api_v1_expenses__expense_id__attachments_post: {
@@ -3995,6 +5040,8 @@ export interface components {
             quarter: number;
             /** @description Key performance indicators. */
             kpi: components["schemas"]["DashboardKpi"];
+            /** @description Completeness and traceable missing inputs for the VAT KPI. */
+            current_quarter_vat_status: components["schemas"]["DashboardVatStatus"];
             /**
              * Monthly
              * @description 12-month series (Jan–Dec) for the selected year.
@@ -4029,6 +5076,22 @@ export interface components {
              * @description Total net expense amount in this category for the year (EUR).
              */
             net: string;
+        };
+        /**
+         * DashboardVatStatus
+         * @description Completeness of the VAT projection used by the dashboard KPI.
+         */
+        DashboardVatStatus: {
+            /**
+             * Is Complete
+             * @description False when the VAT KPI is a known subtotal; copied from VAT box 1d.
+             */
+            is_complete: boolean;
+            /**
+             * Missing Inputs
+             * @description Applicable annual battery inputs needing completion or confirmation.
+             */
+            missing_inputs: components["schemas"]["BatteryAnnualMissingInput"][];
         };
         /**
          * DiscountInput
@@ -4304,7 +5367,7 @@ export interface components {
          * @description Append-only, safe-to-display lifecycle facts for a document chain.
          * @enum {string}
          */
-        DocumentChainEventType: "MODE_LOCKED" | "INVOICE_CREATED" | "QUOTE_PAYMENT_CREATED" | "QUOTE_PAYMENT_UPDATED" | "QUOTE_PAYMENT_DELETED" | "INVOICE_DELETED" | "INVOICE_UPDATED" | "INVOICE_ISSUED" | "INVOICE_STATUS_CHANGED" | "INVOICE_PAYMENT_CREATED" | "INVOICE_PAYMENT_UPDATED" | "INVOICE_PAYMENT_DELETED" | "REFUND_CREATED" | "REFUND_UPDATED" | "REFUND_DELETED" | "REPLACEMENT_CREATED" | "COMPENSATING_INVOICE_CREATED" | "PROJECT_CANCELLATION_CREDIT_CREATED";
+        DocumentChainEventType: "MODE_LOCKED" | "INVOICE_CREATED" | "QUOTE_PAYMENT_CREATED" | "QUOTE_PAYMENT_UPDATED" | "QUOTE_PAYMENT_DELETED" | "INVOICE_DELETED" | "INVOICE_UPDATED" | "INVOICE_ISSUED" | "INVOICE_STATUS_CHANGED" | "INVOICE_PAYMENT_CREATED" | "INVOICE_PAYMENT_UPDATED" | "INVOICE_PAYMENT_DELETED" | "REFUND_CREATED" | "REFUND_UPDATED" | "REFUND_DELETED" | "REPLACEMENT_CREATED" | "COMPENSATING_INVOICE_CREATED" | "PROJECT_CANCELLATION_CREDIT_CREATED" | "INVOICE_REVISED";
         /**
          * DocumentChainNodeRead
          * @description A Quote, formal document or cash row in stable chain order.
@@ -4735,6 +5798,16 @@ export interface components {
          *     user-supplied content (never raw credentials).
          */
         EmailLogRead: {
+            /**
+             * Sent Copy Status
+             * @default NOT_ATTEMPTED
+             * @enum {string}
+             */
+            sent_copy_status?: "NOT_ATTEMPTED" | "SAVED" | "FAILED";
+            /** Sent Copy Error Code */
+            sent_copy_error_code?: string | null;
+            /** Sent Copy Saved At */
+            sent_copy_saved_at?: string | null;
             /**
              * Id
              * Format: uuid
@@ -5367,6 +6440,48 @@ export interface components {
             active?: boolean;
         };
         /**
+         * ExpenseCostPreviewRequest
+         * @description Raw inputs needed for a backend-authoritative annual P/L preview.
+         */
+        ExpenseCostPreviewRequest: {
+            /** Net Amount */
+            net_amount: number | string;
+            /** Vat Amount */
+            vat_amount: number | string;
+            /**
+             * Vat Treatment Id
+             * Format: uuid
+             */
+            vat_treatment_id: string;
+            /** Category Id */
+            category_id?: string | null;
+            /** Deductible */
+            deductible?: boolean | null;
+            /** @default AUTO */
+            pl_cost_basis?: components["schemas"]["PlCostBasis"];
+            /**
+             * Include In Pl
+             * @default true
+             */
+            include_in_pl?: boolean;
+            /** Business Percentage */
+            business_percentage: number | string;
+            /** Depreciation Years */
+            depreciation_years: number;
+        };
+        /**
+         * ExpenseCostPreviewResult
+         * @description Backend-calculated cost basis and annual recognized amount.
+         */
+        ExpenseCostPreviewResult: {
+            /** Cost Basis Amount */
+            cost_basis_amount: string;
+            /** Annual Cost */
+            annual_cost: string;
+            /** Included In Pl */
+            included_in_pl: boolean;
+        };
+        /**
          * ExpenseInput
          * @description Request body for POST/PUT /api/v1/expenses.
          *
@@ -5431,6 +6546,13 @@ export interface components {
              * @default 1
              */
             depreciation_years?: number;
+            /**
+             * Include In Pl
+             * @default true
+             */
+            include_in_pl?: boolean;
+            /** @default NET */
+            pl_cost_basis?: components["schemas"]["PlCostBasis"];
         };
         /**
          * ExpenseKind
@@ -5478,6 +6600,9 @@ export interface components {
             business_percentage: string;
             /** Depreciation Years */
             depreciation_years: number;
+            /** Include In Pl */
+            include_in_pl: boolean;
+            pl_cost_basis: components["schemas"]["PlCostBasis"];
         };
         /**
          * ExpenseListResponse
@@ -5552,6 +6677,9 @@ export interface components {
             business_percentage: string;
             /** Depreciation Years */
             depreciation_years: number;
+            /** Include In Pl */
+            include_in_pl: boolean;
+            pl_cost_basis: components["schemas"]["PlCostBasis"];
             /** Is Draft */
             is_draft: boolean;
             /** Recurring Expense Id */
@@ -5624,6 +6752,495 @@ export interface components {
              * @description Sum of non_deductible_net across all categories (EUR). total_deductible_net + total_non_deductible_net == total_net.
              */
             total_non_deductible_net: string;
+        };
+        /** ExternalSaleReportReference */
+        ExternalSaleReportReference: {
+            /** @default EXTERNAL_SALE */
+            source_type?: components["schemas"]["ReportSourceType"];
+            /** External Sale Id */
+            external_sale_id: string;
+            /** Source Name */
+            source_name: string;
+            /** Original Number */
+            original_number: string;
+            /**
+             * Event Date
+             * Format: date
+             */
+            event_date: string;
+        };
+        /**
+         * ExternalSalesAIErrorCode
+         * @enum {string}
+         */
+        ExternalSalesAIErrorCode: "AI_DISABLED" | "AI_NOT_CONFIGURED" | "AI_TIMEOUT" | "AI_PROVIDER_ERROR" | "AI_INVALID_RESPONSE";
+        /**
+         * ExternalSalesAIState
+         * @enum {string}
+         */
+        ExternalSalesAIState: "NOT_RUN" | "RUNNING" | "READY" | "UNAVAILABLE" | "FAILED";
+        /**
+         * ExternalSalesAISuggestion
+         * @description Untrusted observed values; contains no tax/P&L decision fields.
+         */
+        ExternalSalesAISuggestion: {
+            /** Document Date */
+            document_date?: string | null;
+            /** Original Number */
+            original_number?: string | null;
+            /** Counterparty */
+            counterparty?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Observed Net Total */
+            observed_net_total?: string | null;
+            /** Observed Vat Total */
+            observed_vat_total?: string | null;
+            /** Explicit Electricity Sale Component */
+            explicit_electricity_sale_component?: boolean | null;
+            /** Tax Summaries */
+            tax_summaries?: components["schemas"]["ExternalSalesObservedTaxSummary"][];
+            /** Confidence */
+            confidence?: string | null;
+            /** Review Notes */
+            review_notes?: string[];
+        };
+        /** ExternalSalesCalculateRequest */
+        ExternalSalesCalculateRequest: {
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** ExternalSalesCalculation */
+        ExternalSalesCalculation: {
+            /**
+             * Sale Id
+             * Format: uuid
+             */
+            sale_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Original Net Total */
+            original_net_total: string;
+            /** Original Vat Total */
+            original_vat_total: string;
+            /** Derived Vat Total */
+            derived_vat_total: string;
+            /** Mismatch */
+            mismatch: boolean;
+            /** Mismatch Row Indices */
+            mismatch_row_indices: number[];
+            /** Warnings */
+            warnings: string[];
+        };
+        /** ExternalSalesConfirmRequest */
+        ExternalSalesConfirmRequest: {
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Acknowledge Vat Mismatch
+             * @default false
+             */
+            acknowledge_vat_mismatch?: boolean;
+            /** Mismatch Ack Reason */
+            mismatch_ack_reason?: string | null;
+        };
+        /** ExternalSalesConflict */
+        ExternalSalesConflict: {
+            detail: components["schemas"]["ExternalSalesConflictDetail"];
+        };
+        /** ExternalSalesConflictDetail */
+        ExternalSalesConflictDetail: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** External Sale Id */
+            external_sale_id?: string | null;
+            /** Current Version */
+            current_version?: number | null;
+        };
+        /**
+         * ExternalSalesDocumentKind
+         * @enum {string}
+         */
+        ExternalSalesDocumentKind: "SALE" | "CREDIT" | "SETTLEMENT_ADJUSTMENT";
+        /** ExternalSalesFileRead */
+        ExternalSalesFileRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Filename */
+            filename: string | null;
+            /** Mime Type */
+            mime_type: string;
+            /** Byte Size */
+            byte_size: number;
+            /** Sha256 */
+            sha256: string;
+            /** Duplicate Warning */
+            duplicate_warning: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ExternalSalesInput */
+        ExternalSalesInput: {
+            /** Source Id */
+            source_id?: string | null;
+            /** Original Number */
+            original_number?: string | null;
+            /** @default SALE */
+            document_kind?: components["schemas"]["ExternalSalesDocumentKind"];
+            /** Related External Sale Id */
+            related_external_sale_id?: string | null;
+            /** Historical Original Number */
+            historical_original_number?: string | null;
+            /** Historical Original Explanation */
+            historical_original_explanation?: string | null;
+            /** Document Date */
+            document_date?: string | null;
+            /** Covered From */
+            covered_from?: string | null;
+            /** Covered To */
+            covered_to?: string | null;
+            /** Counterparty */
+            counterparty?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Include In Pl */
+            include_in_pl?: boolean | null;
+            /** Tax Summaries */
+            tax_summaries?: components["schemas"]["ExternalSalesTaxInput"][];
+        };
+        /** ExternalSalesListRead */
+        ExternalSalesListRead: {
+            /** Items */
+            items: components["schemas"]["ExternalSalesRead"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** ExternalSalesObservedTaxSummary */
+        ExternalSalesObservedTaxSummary: {
+            /** Rate Percent */
+            rate_percent?: string | null;
+            /** Net Amount */
+            net_amount?: string | null;
+            /** Vat Amount */
+            vat_amount?: string | null;
+        };
+        /** ExternalSalesPostingRead */
+        ExternalSalesPostingRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version: number;
+            /** Actor Id */
+            actor_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Snapshot */
+            snapshot: {
+                [key: string]: unknown;
+            };
+        };
+        /** ExternalSalesRead */
+        ExternalSalesRead: {
+            /** Source Id */
+            source_id: string | null;
+            /** Original Number */
+            original_number: string | null;
+            document_kind: components["schemas"]["ExternalSalesDocumentKind"];
+            /** Related External Sale Id */
+            related_external_sale_id: string | null;
+            /** Historical Original Number */
+            historical_original_number: string | null;
+            /** Historical Original Explanation */
+            historical_original_explanation: string | null;
+            /** Document Date */
+            document_date: string | null;
+            /** Covered From */
+            covered_from: string | null;
+            /** Covered To */
+            covered_to: string | null;
+            /** Counterparty */
+            counterparty: string | null;
+            /** Description */
+            description: string | null;
+            /** Include In Pl */
+            include_in_pl: boolean | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["ExternalSalesStatus"];
+            /** Source Name */
+            source_name: string | null;
+            /** Tax Summaries */
+            tax_summaries: components["schemas"]["ExternalSalesTaxRead"][];
+            /** Files */
+            files: components["schemas"]["ExternalSalesFileRead"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+            /** Posted At */
+            posted_at: string | null;
+            /** Posted By */
+            posted_by: string | null;
+            /** Posted Source Name */
+            posted_source_name: string | null;
+            /** Original Net Total */
+            original_net_total: string | null;
+            /** Original Vat Total */
+            original_vat_total: string | null;
+            /** Mismatch Ack Reason */
+            mismatch_ack_reason: string | null;
+            /** Postings */
+            postings: components["schemas"]["ExternalSalesPostingRead"][];
+            ai_suggestion?: components["schemas"]["ExternalSalesAISuggestion"] | null;
+            ai_state: components["schemas"]["ExternalSalesAIState"];
+            ai_error_code: components["schemas"]["ExternalSalesAIErrorCode"] | null;
+        };
+        /** ExternalSalesRevisionInput */
+        ExternalSalesRevisionInput: {
+            /** Expected Version */
+            expected_version: number;
+            /** Reason */
+            reason: string;
+            /** Document Date */
+            document_date?: string | null;
+            /** Covered From */
+            covered_from?: string | null;
+            /** Covered To */
+            covered_to?: string | null;
+            /** Counterparty */
+            counterparty?: string | null;
+            /** Description */
+            description?: string | null;
+            /**
+             * Include In Pl
+             * @default false
+             */
+            include_in_pl?: boolean;
+            /** Tax Summaries */
+            tax_summaries?: components["schemas"]["ExternalSalesRevisionTaxInput"][] | null;
+            /**
+             * Acknowledge Vat Mismatch
+             * @default false
+             */
+            acknowledge_vat_mismatch?: boolean;
+            /** Mismatch Ack Reason */
+            mismatch_ack_reason?: string | null;
+        };
+        /** ExternalSalesRevisionListRead */
+        ExternalSalesRevisionListRead: {
+            /** Items */
+            items: components["schemas"]["ExternalSalesRevisionRead"][];
+            /** Total */
+            total: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset?: number;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit?: number;
+        };
+        /** ExternalSalesRevisionPreview */
+        ExternalSalesRevisionPreview: {
+            /**
+             * Sale Id
+             * Format: uuid
+             */
+            sale_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Old Period */
+            old_period: string;
+            /** New Period */
+            new_period: string;
+            /** Old Net Total */
+            old_net_total: string;
+            /** New Net Total */
+            new_net_total: string;
+            /** Old Vat Total */
+            old_vat_total: string;
+            /** New Vat Total */
+            new_vat_total: string;
+            /** Warnings */
+            warnings: string[];
+        };
+        /** ExternalSalesRevisionRead */
+        ExternalSalesRevisionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version: number;
+            /** Action */
+            action: string;
+            /** Reason */
+            reason: string;
+            /** Actor Id */
+            actor_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Before Snapshot */
+            before_snapshot: {
+                [key: string]: unknown;
+            };
+            /** After Snapshot */
+            after_snapshot: {
+                [key: string]: unknown;
+            };
+        };
+        /** ExternalSalesRevisionTaxInput */
+        ExternalSalesRevisionTaxInput: {
+            /** Treatment Id */
+            treatment_id?: string | null;
+            /** Rate Id */
+            rate_id?: string | null;
+            /** Net Amount */
+            net_amount?: number | string | null;
+            /** Vat Amount */
+            vat_amount?: number | string | null;
+            /** Tax Summary Id */
+            tax_summary_id?: string | null;
+        };
+        /** ExternalSalesSourceInput */
+        ExternalSalesSourceInput: {
+            /** Name */
+            name: string;
+            kind: components["schemas"]["ExternalSalesSourceKind"];
+            /** Default Include In Pl */
+            default_include_in_pl?: boolean | null;
+            /**
+             * Active
+             * @default true
+             */
+            active?: boolean;
+        };
+        /**
+         * ExternalSalesSourceKind
+         * @enum {string}
+         */
+        ExternalSalesSourceKind: "PLATFORM" | "ENERGY" | "OTHER";
+        /** ExternalSalesSourceListRead */
+        ExternalSalesSourceListRead: {
+            /** Items */
+            items: components["schemas"]["ExternalSalesSourceRead"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** ExternalSalesSourceRead */
+        ExternalSalesSourceRead: {
+            /** Name */
+            name: string;
+            kind: components["schemas"]["ExternalSalesSourceKind"];
+            /** Default Include In Pl */
+            default_include_in_pl?: boolean | null;
+            /**
+             * Active
+             * @default true
+             */
+            active?: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * ExternalSalesStatus
+         * @enum {string}
+         */
+        ExternalSalesStatus: "PENDING" | "POSTED" | "VOID";
+        /** ExternalSalesTaxInput */
+        ExternalSalesTaxInput: {
+            /** Treatment Id */
+            treatment_id?: string | null;
+            /** Rate Id */
+            rate_id?: string | null;
+            /** Net Amount */
+            net_amount?: number | string | null;
+            /** Vat Amount */
+            vat_amount?: number | string | null;
+        };
+        /** ExternalSalesTaxRead */
+        ExternalSalesTaxRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Treatment Id */
+            treatment_id: string | null;
+            /** Treatment Code */
+            treatment_code: string | null;
+            /** Treatment Label */
+            treatment_label: string | null;
+            /** Rate Id */
+            rate_id: string | null;
+            /** Rate Label */
+            rate_label: string | null;
+            /** Rate Percent */
+            rate_percent: string | null;
+            /** Net Amount */
+            net_amount: string | null;
+            /** Vat Amount */
+            vat_amount: string | null;
+        };
+        /** ExternalSalesVoidInput */
+        ExternalSalesVoidInput: {
+            /** Expected Version */
+            expected_version: number;
+            /** Reason */
+            reason: string;
         };
         /** FinalAdvanceApplicationRead */
         FinalAdvanceApplicationRead: {
@@ -5846,6 +7463,21 @@ export interface components {
             correction_warnings?: components["schemas"]["ReportWarning"][];
         };
         /**
+         * InvoiceBusinessSnapshot
+         * @description Complete snapshot version 1; no ORM, request envelope, or free-form context.
+         */
+        InvoiceBusinessSnapshot: {
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version?: 1;
+            invoice: components["schemas"]["InvoiceRevisionDocumentSnapshot"];
+            /** Credit Basis */
+            credit_basis: components["schemas"]["InvoiceCreditBasisSnapshot"][];
+        };
+        /**
          * InvoiceCalculationRead
          * @description Response body for ``POST /api/v1/invoices/calculate``.
          */
@@ -5920,6 +7552,55 @@ export interface components {
              * @description At least 1 line required.
              */
             lines: components["schemas"]["InvoiceLineInput"][];
+        };
+        /** InvoiceCreditBasisSnapshot */
+        InvoiceCreditBasisSnapshot: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Invoice Line Id
+             * Format: uuid
+             */
+            invoice_line_id: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+            /** Unit Name */
+            unit_name: string | null;
+            /** Quantity */
+            quantity: string;
+            /** Vat Rate Id */
+            vat_rate_id: string | null;
+            /** Vat Rate Label */
+            vat_rate_label: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent: string | null;
+            /** Effective Vat Percent */
+            effective_vat_percent: string | null;
+            /** Vat Treatment Code */
+            vat_treatment_code: string;
+            /** Vat Treatment Effect */
+            vat_treatment_effect: string;
+            /** Vat Treatment Requires Icp */
+            vat_treatment_requires_icp: boolean;
+            /** Net Amount */
+            net_amount: string;
+            /** Vat Amount */
+            vat_amount: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /** Base Net Amount */
+            base_net_amount: string;
+            /** Base Vat Amount */
+            base_vat_amount: string;
+            /** Base Gross Amount */
+            base_gross_amount: string;
         };
         /**
          * InvoiceCreditStatus
@@ -6498,6 +8179,438 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            revision_eligibility?: components["schemas"]["InvoiceRevisionEligibilityRead"] | null;
+        };
+        /** InvoiceRevisionAddressSnapshot */
+        InvoiceRevisionAddressSnapshot: {
+            /** Street */
+            street: string | null;
+            /** House Number */
+            house_number: string | null;
+            /** House Number Addition */
+            house_number_addition: string | null;
+            /** Postal Code */
+            postal_code: string | null;
+            /** City */
+            city: string | null;
+            /** Province */
+            province: string | null;
+            /** Country Code */
+            country_code: string | null;
+        };
+        /** InvoiceRevisionCalculateRequest */
+        InvoiceRevisionCalculateRequest: {
+            /**
+             * Expected Updated At
+             * Format: date-time
+             */
+            expected_updated_at: string;
+            changes: components["schemas"]["InvoiceRevisionChanges"];
+        };
+        /**
+         * InvoiceRevisionChanges
+         * @description Closed patch; model_fields_set distinguishes omission from explicit null.
+         */
+        InvoiceRevisionChanges: {
+            /** Invoice Date */
+            invoice_date?: string | null;
+            /** Due Date */
+            due_date?: string | null;
+            /** Supply Or Advance Date */
+            supply_or_advance_date?: string | null;
+            /** Reference Number */
+            reference_number?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Warranty Text */
+            warranty_text?: string | null;
+            /** Terms Text */
+            terms_text?: string | null;
+            /** Bank Text */
+            bank_text?: string | null;
+            /** Payment Terms Text */
+            payment_terms_text?: string | null;
+            tax_mode?: components["schemas"]["InvoiceTaxMode"] | null;
+            /** Amounts Include Vat */
+            amounts_include_vat?: boolean | null;
+            /** Vat Treatment Id */
+            vat_treatment_id?: string | null;
+            /** Document Vat Rate Id */
+            document_vat_rate_id?: string | null;
+            discount?: components["schemas"]["InvoiceRevisionDiscountInput"] | null;
+            /** Lines */
+            lines?: components["schemas"]["InvoiceRevisionLineInput"][] | null;
+        };
+        /** InvoiceRevisionCreate */
+        InvoiceRevisionCreate: {
+            /**
+             * Expected Updated At
+             * Format: date-time
+             */
+            expected_updated_at: string;
+            changes: components["schemas"]["InvoiceRevisionChanges"];
+            /** Reason */
+            reason: string;
+            /** Confirm Not Delivered */
+            confirm_not_delivered: boolean;
+        };
+        /** InvoiceRevisionDiscountInput */
+        InvoiceRevisionDiscountInput: {
+            /** @default NONE */
+            type?: components["schemas"]["DiscountType"];
+            /**
+             * Value
+             * @description Discount value. Ignored when type=NONE.
+             * @default 0
+             */
+            value?: number | string;
+        };
+        /**
+         * InvoiceRevisionDocumentSnapshot
+         * @description Frozen business fields, independent from the evolving API read model.
+         */
+        InvoiceRevisionDocumentSnapshot: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Company Id
+             * Format: uuid
+             */
+            company_id: string;
+            /**
+             * Customer Id
+             * Format: uuid
+             */
+            customer_id: string;
+            /** Invoice Number */
+            invoice_number: string | null;
+            /** Sequence Number */
+            sequence_number: number | null;
+            /** Customer Sequence Number */
+            customer_sequence_number: number | null;
+            /** Reference Number */
+            reference_number: string | null;
+            /** Invoice Date */
+            invoice_date: string;
+            /** Due Date */
+            due_date: string | null;
+            /** Supply Or Advance Date */
+            supply_or_advance_date: string | null;
+            status: components["schemas"]["InvoiceStatus"];
+            paid_status: components["schemas"]["InvoicePaidStatus"];
+            document_kind: components["schemas"]["InvoiceDocumentKind"];
+            /** Quote Id */
+            quote_id: string | null;
+            /** Issued At */
+            issued_at: string | null;
+            /** Issued By User Id */
+            issued_by_user_id: string | null;
+            /** Currency */
+            currency: string;
+            /** Exchange Rate */
+            exchange_rate: string;
+            tax_mode: components["schemas"]["InvoiceTaxMode"];
+            /** Amounts Include Vat */
+            amounts_include_vat: boolean;
+            /**
+             * Vat Treatment Id
+             * Format: uuid
+             */
+            vat_treatment_id: string;
+            /** Document Vat Rate Id */
+            document_vat_rate_id: string | null;
+            /** Vat Treatment Code */
+            vat_treatment_code: string;
+            /** Vat Treatment Label */
+            vat_treatment_label: string;
+            /** Vat Treatment Effect */
+            vat_treatment_effect: string;
+            /** Vat Treatment Requires Icp */
+            vat_treatment_requires_icp: boolean;
+            discount_type: components["schemas"]["DiscountType"];
+            /** Discount Value */
+            discount_value: string;
+            /** Document Discount Amount */
+            document_discount_amount: string;
+            /** Subtotal Excl Vat */
+            subtotal_excl_vat: string;
+            /** Line Discount Total */
+            line_discount_total: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Total */
+            vat_total: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            /** Due Amount */
+            due_amount: string;
+            /** Payable Before Payments */
+            payable_before_payments: string;
+            /** Incoming Payment Total */
+            incoming_payment_total: string;
+            /** Credited Total */
+            credited_total: string;
+            /** Refunded Total */
+            refunded_total: string;
+            /** Notes */
+            notes: string | null;
+            /** Warranty Text */
+            warranty_text: string | null;
+            /** Terms Text */
+            terms_text: string | null;
+            /** Bank Text */
+            bank_text: string | null;
+            /** Payment Terms Text */
+            payment_terms_text: string | null;
+            /** Creator Id */
+            creator_id: string | null;
+            /** Refund Due Amount */
+            refund_due_amount: string;
+            settlement_status: components["schemas"]["InvoiceSettlementStatus"];
+            credit_status: components["schemas"]["InvoiceCreditStatus"];
+            /** Base Subtotal Excl Vat */
+            base_subtotal_excl_vat: string;
+            /** Base Line Discount Total */
+            base_line_discount_total: string;
+            /** Base Taxable Amount */
+            base_taxable_amount: string;
+            /** Base Vat Total */
+            base_vat_total: string;
+            /** Base Total Incl Vat */
+            base_total_incl_vat: string;
+            /** Base Due Amount */
+            base_due_amount: string;
+            /** Base Payable Before Payments */
+            base_payable_before_payments: string;
+            /** Base Incoming Payment Total */
+            base_incoming_payment_total: string;
+            /** Base Credited Total */
+            base_credited_total: string;
+            /** Base Refunded Total */
+            base_refunded_total: string;
+            /** Base Refund Due Amount */
+            base_refund_due_amount: string;
+            party_snapshot: components["schemas"]["InvoiceRevisionPartySnapshot"] | null;
+            /** Lines */
+            lines: components["schemas"]["InvoiceRevisionLineSnapshot"][];
+            /** Taxes */
+            taxes: components["schemas"]["InvoiceRevisionTaxSnapshot"][];
+        };
+        /** InvoiceRevisionEligibilityRead */
+        InvoiceRevisionEligibilityRead: {
+            /** Available */
+            available: boolean;
+            /** Reason Code */
+            reason_code?: string | null;
+        };
+        /**
+         * InvoiceRevisionLineInput
+         * @description Raw line input with identity for a retained original row.
+         */
+        InvoiceRevisionLineInput: {
+            /** Product Id */
+            product_id?: string | null;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Quantity
+             * @description Must be > 0.
+             */
+            quantity: number | string;
+            /** Unit Id */
+            unit_id?: string | null;
+            /** Unit Name */
+            unit_name?: string | null;
+            /**
+             * Unit Price
+             * @description Per-unit price (excl or incl VAT depending on flag).
+             */
+            unit_price: number | string;
+            discount?: components["schemas"]["InvoiceRevisionDiscountInput"];
+            /** Vat Rate Id */
+            vat_rate_id?: string | null;
+            /** Line Id */
+            line_id?: string | null;
+        };
+        /** InvoiceRevisionLineSnapshot */
+        InvoiceRevisionLineSnapshot: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Product Id */
+            product_id: string | null;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+            /** Quantity */
+            quantity: string;
+            /** Unit Id */
+            unit_id: string | null;
+            /** Unit Name */
+            unit_name: string | null;
+            /** Unit Price */
+            unit_price: string;
+            discount_type: components["schemas"]["DiscountType"];
+            /** Discount Value */
+            discount_value: string;
+            /** Vat Rate Id */
+            vat_rate_id: string | null;
+            /** Vat Rate Label */
+            vat_rate_label: string | null;
+            /** Vat Rate Percent */
+            vat_rate_percent: string | null;
+            /** Subtotal Excl Vat */
+            subtotal_excl_vat: string;
+            /** Subtotal Incl Vat */
+            subtotal_incl_vat: string;
+            /** Line Discount Amount */
+            line_discount_amount: string;
+            /** Document Discount Share */
+            document_discount_share: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Vat Total */
+            vat_total: string;
+            /** Total Incl Vat */
+            total_incl_vat: string;
+            /** Line Taxes */
+            line_taxes: components["schemas"]["InvoiceRevisionLineTaxSnapshot"][];
+        };
+        /** InvoiceRevisionLineTaxSnapshot */
+        InvoiceRevisionLineTaxSnapshot: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Effective Vat Percent */
+            effective_vat_percent: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Tax Amount */
+            tax_amount: string;
+        };
+        /** InvoiceRevisionListRead */
+        InvoiceRevisionListRead: {
+            /** Items */
+            items: components["schemas"]["InvoiceRevisionRead"][];
+            /** Total */
+            total: number;
+            /**
+             * Offset
+             * @default 0
+             */
+            offset?: number;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit?: number;
+        };
+        /** InvoiceRevisionPartySnapshot */
+        InvoiceRevisionPartySnapshot: {
+            /** Provenance */
+            provenance: string;
+            /** Seller Name */
+            seller_name: string;
+            /** Seller Legal Name */
+            seller_legal_name: string | null;
+            /** Seller Vat Id */
+            seller_vat_id: string | null;
+            /** Seller Coc Number */
+            seller_coc_number: string | null;
+            /** Seller Email */
+            seller_email: string | null;
+            /** Seller Phone */
+            seller_phone: string | null;
+            seller_address: components["schemas"]["InvoiceRevisionAddressSnapshot"];
+            /** Buyer Name */
+            buyer_name: string;
+            /** Buyer Company Name */
+            buyer_company_name: string | null;
+            /** Buyer Contact Name */
+            buyer_contact_name: string | null;
+            /** Buyer Vat Id */
+            buyer_vat_id: string | null;
+            /** Buyer Email */
+            buyer_email: string | null;
+            /** Buyer Phone */
+            buyer_phone: string | null;
+            buyer_address: components["schemas"]["InvoiceRevisionAddressSnapshot"];
+            /** Locale */
+            locale: string;
+            /** Logo Id */
+            logo_id: string | null;
+        };
+        /** InvoiceRevisionRead */
+        InvoiceRevisionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Invoice Id
+             * Format: uuid
+             */
+            invoice_id: string;
+            /** Revision Order */
+            revision_order: number;
+            /** Actor User Id */
+            actor_user_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Reason */
+            reason: string;
+            /** Undelivered Confirmed */
+            undelivered_confirmed: boolean;
+            before_snapshot: components["schemas"]["InvoiceBusinessSnapshot"];
+            after_snapshot: components["schemas"]["InvoiceBusinessSnapshot"];
+        };
+        /** InvoiceRevisionTaxSnapshot */
+        InvoiceRevisionTaxSnapshot: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /** Vat Rate Label */
+            vat_rate_label: string;
+            /** Vat Rate Percent */
+            vat_rate_percent: string;
+            /** Effective Vat Percent */
+            effective_vat_percent: string;
+            /** Taxable Amount */
+            taxable_amount: string;
+            /** Tax Amount */
+            tax_amount: string;
         };
         /**
          * InvoiceSettlementStatus
@@ -7406,6 +9519,12 @@ export interface components {
             base_gross_amount: string;
         };
         /**
+         * PlCostBasis
+         * @description Source amount used to recognize an Expense in profit and loss.
+         * @enum {string}
+         */
+        PlCostBasis: "NET" | "GROSS" | "AUTO";
+        /**
          * ProductCategoryListResponse
          * @description List envelope for GET /api/v1/product-categories.
          */
@@ -7672,8 +9791,28 @@ export interface components {
              */
             expense_actual: string;
             /**
+             * Mileage Expense Actual
+             * @description Total depreciation-adjusted, business%-prorated mileage expense cost (EUR).
+             */
+            mileage_expense_actual: string;
+            /**
+             * Other Expense Actual
+             * @description Total depreciation-adjusted, business%-prorated non-mileage expense cost (EUR).
+             */
+            other_expense_actual: string;
+            /**
+             * Profit Before Mileage
+             * @description Total revenue net minus non-mileage expense cost (EUR).
+             */
+            profit_before_mileage: string;
+            /**
+             * Profit After Mileage
+             * @description Total revenue net minus all expense cost, including mileage (EUR).
+             */
+            profit_after_mileage: string;
+            /**
              * Profit
-             * @description revenue_net − expense_actual across the full range.
+             * @description Compatibility alias for profit_after_mileage across the full range.
              */
             profit: string;
             /**
@@ -7686,6 +9825,8 @@ export interface components {
              * @description Reserved for future per-category breakdown (step 1: always null).
              */
             by_category?: null;
+            /** External Sales */
+            external_sales?: components["schemas"]["ExternalSaleReportReference"][];
         };
         /**
          * ProfitLossSeriesItem
@@ -7712,8 +9853,28 @@ export interface components {
              */
             expense_actual: string;
             /**
+             * Mileage Expense Actual
+             * @description Depreciation-adjusted, business%-prorated mileage expense cost in this period (EUR).
+             */
+            mileage_expense_actual: string;
+            /**
+             * Other Expense Actual
+             * @description Depreciation-adjusted, business%-prorated non-mileage expense cost in this period (EUR).
+             */
+            other_expense_actual: string;
+            /**
+             * Profit Before Mileage
+             * @description Revenue net minus non-mileage expense cost for this period (EUR).
+             */
+            profit_before_mileage: string;
+            /**
+             * Profit After Mileage
+             * @description Revenue net minus all expense cost, including mileage, for this period (EUR).
+             */
+            profit_after_mileage: string;
+            /**
              * Profit
-             * @description revenue_net − expense_actual for this period.
+             * @description Compatibility alias for profit_after_mileage in this period.
              */
             profit: string;
         };
@@ -8560,6 +10721,13 @@ export interface components {
              */
             depreciation_years?: number;
             /**
+             * Include In Pl
+             * @default true
+             */
+            include_in_pl?: boolean;
+            /** @default NET */
+            pl_cost_basis?: components["schemas"]["PlCostBasis"];
+            /**
              * Frequency
              * @description One of: MONTHLY, QUARTERLY, YEARLY.
              */
@@ -8641,6 +10809,9 @@ export interface components {
             business_percentage: string;
             /** Depreciation Years */
             depreciation_years: number;
+            /** Include In Pl */
+            include_in_pl: boolean;
+            pl_cost_basis: components["schemas"]["PlCostBasis"];
             /** Frequency */
             frequency: string;
             /**
@@ -8754,6 +10925,11 @@ export interface components {
             source_document_number?: string | null;
         };
         /**
+         * ReportSourceType
+         * @enum {string}
+         */
+        ReportSourceType: "INVOICE" | "EXTERNAL_SALE";
+        /**
          * ReportTaxEventKind
          * @description The immutable source family of one signed BTW event row.
          * @enum {string}
@@ -8791,6 +10967,14 @@ export interface components {
             source_document_kind?: components["schemas"]["InvoiceDocumentKind"] | null;
             /** Source Document Number */
             source_document_number?: string | null;
+            /** @default INVOICE */
+            source_type?: components["schemas"]["ReportSourceType"];
+            /** External Sale Id */
+            external_sale_id?: string | null;
+            /** External Source Name */
+            external_source_name?: string | null;
+            /** External Original Number */
+            external_original_number?: string | null;
             /** Taxable Amount */
             taxable_amount: string;
             /** Vat Amount */
@@ -8861,6 +11045,35 @@ export interface components {
             next_run_date: string;
         };
         /**
+         * SentCopySettings
+         * @description Provider-side copy; credentials always come from effective SMTP.
+         */
+        SentCopySettings: {
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled?: boolean;
+            /**
+             * Host
+             * @default
+             */
+            host?: string;
+            /**
+             * Port
+             * @default 993
+             */
+            port?: number;
+            /**
+             * Security
+             * @default SSL_TLS
+             * @enum {string}
+             */
+            security?: "SSL_TLS" | "STARTTLS";
+            /** Folder */
+            folder?: string | null;
+        };
+        /**
          * SmtpSettingsRead
          * @description SMTP settings as returned by the API – password is desensitised.
          */
@@ -8905,6 +11118,7 @@ export interface components {
              * @default false
              */
             use_ssl?: boolean;
+            sent_copy?: components["schemas"]["SentCopySettings"];
         };
         /**
          * SmtpSettingsUpdate
@@ -8945,6 +11159,26 @@ export interface components {
              * @default false
              */
             use_ssl?: boolean;
+            sent_copy?: components["schemas"]["SentCopySettings"] | null;
+        };
+        /** SmtpTestResult */
+        SmtpTestResult: {
+            /**
+             * Sent Copy Status
+             * @default NOT_ATTEMPTED
+             * @enum {string}
+             */
+            sent_copy_status?: "NOT_ATTEMPTED" | "SAVED" | "FAILED";
+            /** Sent Copy Error Code */
+            sent_copy_error_code?: string | null;
+            /** Sent Copy Saved At */
+            sent_copy_saved_at?: string | null;
+            /**
+             * Status
+             * @default sent
+             * @constant
+             */
+            status?: "sent";
         };
         /** SubmitReceiptOutput */
         SubmitReceiptOutput: {
@@ -9035,11 +11269,11 @@ export interface components {
          * @description Per-user preferences stored at USER level.
          *
          *     Stored at ``USER`` level with key ``SETTING_KEY_USER_PREFERENCES``
-         *     (``"user.preferences"``).  Holds the theme selection and the UI language;
-         *     more preferences will be added in later milestones.
+         *     (``"user.preferences"``). Holds the theme, UI language and optional
+         *     navigation visibility preferences.
          *
          *     The PUT endpoint replaces the whole object, so the frontend always persists
-         *     the full set (theme + locale together) — see ``composables/userPreferences``.
+         *     the full set together — see ``composables/userPreferences``.
          */
         UserPreferences: {
             /**
@@ -9056,6 +11290,12 @@ export interface components {
              * @enum {string}
              */
             locale?: "en" | "zh";
+            /**
+             * Show Battery Assets
+             * @description Show Battery Assets in navigation only; does not disable data or calculations.
+             * @default false
+             */
+            show_battery_assets?: boolean;
         };
         /**
          * UserRead
@@ -9143,6 +11383,39 @@ export interface components {
              * @description VAT / BTW amount (EUR).
              */
             vat: string;
+        };
+        /**
+         * VatBoxPrivateUse
+         * @description Private-use box with an unknown-aware taxable base.
+         */
+        VatBoxPrivateUse: {
+            /**
+             * Base
+             * @description Taxable base; null when a legacy contribution has no reliable base.
+             */
+            base: string | null;
+            /**
+             * Vat
+             * @description VAT / BTW amount (EUR).
+             */
+            vat: string;
+            /**
+             * Known Battery Base
+             * @description Known battery base included in 1d.
+             */
+            known_battery_base: string;
+            /**
+             * Known Battery Vat
+             * @description Known battery VAT included in 1d.
+             */
+            known_battery_vat: string;
+            /** Missing Inputs */
+            missing_inputs?: components["schemas"]["BatteryAnnualMissingInput"][];
+            /**
+             * Is Complete
+             * @default true
+             */
+            is_complete?: boolean;
         };
         /**
          * VatBoxVatOnly
@@ -9271,7 +11544,7 @@ export interface components {
             /** @description Other rates (e.g. 13% forfait); v1 always 0. */
             box_1c: components["schemas"]["VatBoxBaseVat"];
             /** @description Privégebruik (private-use correction); only non-zero in Q4 (year-end). */
-            box_1d: components["schemas"]["VatBoxVatOnly"];
+            box_1d: components["schemas"]["VatBoxPrivateUse"];
             /** @description 0% or reverse-charge supplier-side supplies (net only). */
             box_1e: components["schemas"]["VatBoxBaseOnly"];
             /** @description Domestic reverse-charge (recipient side); v1 always 0. */
@@ -10139,9 +12412,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["SmtpTestResult"];
                 };
             };
         };
@@ -12419,6 +14690,110 @@ export interface operations {
             };
         };
     };
+    list_invoice_revisions_endpoint_api_v1_invoices__invoice_id__revisions_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRevisionListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_invoice_revision_endpoint_api_v1_invoices__invoice_id__revisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceRevisionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    calculate_invoice_revision_endpoint_api_v1_invoices__invoice_id__revisions_calculate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceRevisionCalculateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceCalculationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_invoice_document_chain_endpoint_api_v1_invoices__invoice_id__document_chain_get: {
         parameters: {
             query?: never;
@@ -12962,6 +15337,37 @@ export interface operations {
                 "application/json": components["schemas"]["QuoteWrite"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    duplicate_quote_endpoint_api_v1_quotes__quote_id__duplicate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             201: {
@@ -13592,6 +15998,1334 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuoteRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_external_sales_sources_api_v1_external_sales_sources_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesSourceListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_external_sales_source_api_v1_external_sales_sources_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalSalesSourceInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesSourceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_external_sales_source_api_v1_external_sales_sources__source_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalSalesSourceInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesSourceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_external_sales_api_v1_external_sales_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_external_sale_api_v1_external_sales_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalSalesInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_external_sale_api_v1_external_sales__sale_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_external_sale_api_v1_external_sales__sale_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalSalesInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_external_sale_api_v1_external_sales__sale_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_external_sale_files_api_v1_external_sales__sale_id__files_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_post_external_sale_files_api_v1_external_sales__sale_id__files_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_external_sale_extract_api_v1_external_sales__sale_id__extract_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_external_sale_file_api_v1_external_sales__sale_id__files__file_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_external_sale_file_api_v1_external_sales__sale_id__files__file_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_external_sale_calculation_api_v1_external_sales__sale_id__calculate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalSalesCalculateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesCalculation"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_external_sale_confirmation_api_v1_external_sales__sale_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalSalesConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_external_sale_revision_preview_api_v1_external_sales__sale_id__revisions_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalSalesRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRevisionPreview"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_external_sale_revisions_api_v1_external_sales__sale_id__revisions_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRevisionListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_external_sale_revision_api_v1_external_sales__sale_id__revisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalSalesRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_external_sale_void_api_v1_external_sales__sale_id__void_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalSalesVoidInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalSalesConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_asset_api_v1_battery_assets_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatteryAssetPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAssetPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_assets_api_v1_battery_assets_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAssetListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_asset_api_v1_battery_assets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatteryAssetCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAssetRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
+    get_asset_api_v1_battery_assets__asset_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAssetRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_asset_revision_api_v1_battery_assets__asset_id__revisions_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatteryAssetRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAssetRevisionPreview"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
+    get_asset_revisions_api_v1_battery_assets__asset_id__revisions_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAssetRevisionListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revise_asset_api_v1_battery_assets__asset_id__revisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatteryAssetRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAssetRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
+    get_annual_use_api_v1_battery_assets__asset_id__annual_use__year__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAnnualUseRead"] | null;
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
+    put_annual_use_api_v1_battery_assets__asset_id__annual_use__year__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatteryAnnualUseInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAnnualUseRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
+    calculate_annual_use_api_v1_battery_assets__asset_id__annual_use__year__calculate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatteryAnnualCalculateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAnnualCalculation"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
+    preview_annual_revision_api_v1_battery_assets__asset_id__annual_use__year__revisions_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatteryAnnualRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAnnualRevisionPreview"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
+    get_annual_revisions_api_v1_battery_assets__asset_id__annual_use__year__revisions_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAnnualRevisionListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revise_annual_use_api_v1_battery_assets__asset_id__annual_use__year__revisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatteryAnnualRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAnnualUseRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
+    confirm_annual_use_api_v1_battery_assets__asset_id__annual_use__year__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatteryAnnualConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryAnnualUseRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
+    upload_annual_evidence_api_v1_battery_assets__asset_id__annual_use__year__evidence_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_annual_evidence_api_v1_battery_assets__asset_id__annual_use__year__evidence_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryEvidenceRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatteryConflictResponse"];
+                };
+            };
+        };
+    };
+    get_annual_evidence_content_api_v1_battery_assets__asset_id__annual_use__year__evidence__evidence_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+                evidence_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -14273,6 +18007,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExpenseCalculateResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    calculate_expense_cost_endpoint_api_v1_expenses_cost_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseCostPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseCostPreviewResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_expense_cost_endpoint_api_v1_expenses__expense_id__cost_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseCostPreviewResult"];
                 };
             };
             /** @description Validation Error */
@@ -15124,6 +18922,37 @@ export interface operations {
             };
         };
     };
+    get_recurring_expense_cost_endpoint_api_v1_recurring_expenses__recurring_id__cost_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recurring_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseCostPreviewResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_recurring_expense_endpoint_api_v1_recurring_expenses__recurring_id__get: {
         parameters: {
             query?: never;
@@ -15953,6 +19782,7 @@ export interface operations {
                 from: string;
                 /** @description Inclusive end date. */
                 to: string;
+                include_in_pl?: boolean | null;
             };
             header?: never;
             path?: never;

@@ -36,15 +36,20 @@ from jai.schemas.expense import (
     ExpenseAIPrefill,
     ExpenseCalculateRequest,
     ExpenseCalculateResult,
+    ExpenseCostPreviewRequest,
+    ExpenseCostPreviewResult,
     ExpenseInput,
     ExpenseListResponse,
     ExpenseRead,
 )
 from jai.services.expense import (
+    ExpenseConflict,
+    calculate_expense_cost_preview,
     calculate_expense_preview,
     create_expense,
     delete_expense,
     get_expense,
+    get_expense_cost_preview,
     list_expenses,
     update_expense,
 )
@@ -141,6 +146,40 @@ async def calculate_expense_endpoint(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
+
+
+@router.post("/expenses/cost-preview", response_model=ExpenseCostPreviewResult)
+async def calculate_expense_cost_endpoint(
+    body: ExpenseCostPreviewRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> ExpenseCostPreviewResult:
+    """Preview the annual cost basis selected for P/L, without persistence."""
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    try:
+        return await calculate_expense_cost_preview(session, company_id, body)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+
+@router.get("/expenses/{expense_id}/cost-preview", response_model=ExpenseCostPreviewResult)
+async def get_expense_cost_endpoint(
+    expense_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> ExpenseCostPreviewResult:
+    """Read current P/L cost from the stored amounts and VAT snapshots."""
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    try:
+        return await get_expense_cost_preview(session, expense_id, company_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +326,11 @@ async def update_expense_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except MileageExpenseUpdateError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ExpenseConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "detail": str(exc)},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -313,3 +357,8 @@ async def delete_expense_endpoint(
         await delete_expense(session, expense_id, company_id, storage=storage)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ExpenseConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "detail": str(exc)},
+        ) from exc

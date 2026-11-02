@@ -21,6 +21,7 @@ import { useI18n } from 'vue-i18n'
 import { useSettingsPanel } from '../composables/useSettingsPanel'
 import { useLocale } from '../composables/useLocale'
 import { useBreakpoint } from '../composables/useBreakpoint'
+import { showBatteryAssets } from '../composables/userPreferences'
 import {
   SettingsOutline,
   BusinessOutline,
@@ -33,6 +34,8 @@ import {
   DocumentTextOutline,
   ReceiptOutline,
   AlbumsOutline,
+  CashOutline,
+  BatteryChargingOutline,
   CalculatorOutline,
   WalletOutline,
   CardOutline,
@@ -74,6 +77,10 @@ const navOptions = computed<MenuOption[]>(() => [
   { label: t('nav.payments'), key: 'payment-list', icon: renderIcon(WalletOutline) },
   { label: t('nav.expenses'), key: 'expense-list', icon: renderIcon(CardOutline) },
   { label: t('nav.receiptInbox'), key: 'receipt-inbox', icon: renderIcon(AlbumsOutline) },
+  { label: t('nav.externalSales'), key: 'external-sales-list', icon: renderIcon(CashOutline) },
+  ...(showBatteryAssets.value
+    ? [{ label: t('nav.batteryAssets'), key: 'battery-assets', icon: renderIcon(BatteryChargingOutline) }]
+    : []),
   { label: t('nav.recurring'), key: 'recurring-expense-list', icon: renderIcon(RepeatOutline) },
   {
     label: t('nav.reports'),
@@ -100,6 +107,8 @@ const activeKey = computed<string | null>(() => {
   if (typeof name === 'string' && name.startsWith('recurring-expense')) return 'recurring-expense-list'
   if (typeof name === 'string' && name.startsWith('expense')) return 'expense-list'
   if (typeof name === 'string' && name.startsWith('receipt-inbox')) return 'receipt-inbox'
+  if (typeof name === 'string' && name.startsWith('external-sales')) return 'external-sales-list'
+  if (typeof name === 'string' && name.startsWith('battery-asset')) return 'battery-assets'
   if (name === 'report-profit-loss') return 'report-profit-loss'
   if (name === 'report-vat-return') return 'report-vat-return'
   if (name === 'report-icp') return 'report-icp'
@@ -146,6 +155,8 @@ function handleNav(key: string) {
   else if (key === 'payment-list') void router.push('/payments')
   else if (key === 'expense-list') void router.push({ path: '/expenses', query: { tab: 'purchase' } })
   else if (key === 'receipt-inbox') void router.push('/receipt-inbox')
+  else if (key === 'external-sales-list') void router.push('/external-sales')
+  else if (key === 'battery-assets') void router.push('/battery-assets')
   else if (key === 'recurring-expense-list') void router.push('/recurring-expenses')
   else if (key === 'report-profit-loss') void router.push('/reports/profit-loss')
   else if (key === 'report-vat-return') void router.push('/reports/vat-return')

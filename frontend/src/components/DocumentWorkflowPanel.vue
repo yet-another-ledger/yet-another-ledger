@@ -9,7 +9,7 @@ import {
 } from 'naive-ui'
 import { del, get, post, postFile, put, downloadBlob, ApiError } from '../api/http'
 import type { components } from '../api/schema'
-import { localDateStr } from '../utils/date'
+import { formatDateTime, localDateStr } from '../utils/date'
 import { advanceIntent, availableAction, creditIntent, type CreditIntentRow, uniqueTimelineNodes } from '../utils/lifecycleWorkflow'
 import { invoiceDocumentKindLabelKey } from '../utils/documentKind'
 import PdfPreviewDialog from './PdfPreviewDialog.vue'
@@ -30,6 +30,8 @@ type DocumentArtifactValidationRead = components['schemas']['DocumentArtifactVal
 const props = defineProps<{
   quoteId?: string | null
   invoice?: InvoiceRead | null
+  /** Invoice updated_at binds child previews/resources to the saved revision. */
+  invoiceVersion?: string
   /** Parent Quote mode-card request; a monotonic signal avoids stale booleans. */
   openAdvanceSignal?: number
   /** Page-owned authoritative chain.  Keeps payment and workflow refreshes aligned. */
@@ -478,12 +480,26 @@ async function refresh(): Promise<void> {
 // Keeping the status case in this watcher also prevents a second watcher from
 // invalidating that new read when two issued invoices are swapped in place.
 watch(
-  () => [documentOwnerKey.value, props.invoice?.status] as const,
-  ([owner, status], previous) => {
+  () => [documentOwnerKey.value, props.invoice?.status, props.invoiceVersion ?? props.invoice?.updated_at] as const,
+  ([owner, status, version], previous) => {
     if (!previous || owner !== previous[0]) {
       expandedNames.value = []
       resetWorkflowState(props.invoice)
       if (owner) void load()
+      return
+    }
+    if (status === previous[1] && version !== previous[2]) {
+      // A same-id SENT invoice can be revised in place. Existing credit
+      // source/calculation previews and original-PDF advice/confirmation are
+      // version-bound and must be discarded. Keep the selected File so the
+      // user can explicitly recheck or reconfirm it for the new version.
+      invalidateCreditMode()
+      invalidateArtifactUpload()
+      validation.value = null
+      uploadError.value = null
+      uploadNotice.value = null
+      error.value = null
+      if (hasIssuedOutput.value) void loadIssuedOutput(++issuedOutputGeneration)
       return
     }
     if (status === previous[1]) return
@@ -760,12 +776,12 @@ async function downloadRefundArtifact(paymentId: string, artifactId: string, fil
           <n-descriptions :column="2" size="small"><n-descriptions-item :label="t('workflow.entitlement')">{{ refund.remaining_entitlement }}</n-descriptions-item><n-descriptions-item :label="t('workflow.refundDue')">{{ refund.chain_refund_due_amount }}</n-descriptions-item></n-descriptions>
           <n-form class="workflow-form" inline @submit.prevent="recordRefund"><n-form-item :label="t('workflow.amount')"><n-input v-model:value="refundAmount" /></n-form-item><n-form-item :label="t('workflow.date')"><n-date-picker v-model:formatted-value="refundDate" value-format="yyyy-MM-dd" type="date" /></n-form-item><n-form-item :label="t('payments.paymentMethod')"><n-select v-model:value="refundMethodId" :options="paymentMethodOptions" clearable @focus="loadPaymentMethods" /></n-form-item><n-form-item :label="t('payments.reference')"><n-input v-model:value="refundReference" /></n-form-item><n-form-item :label="t('payments.note')"><n-input v-model:value="refundNote" /></n-form-item><n-button type="primary" attr-type="submit" :loading="busy">{{ editingRefund ? t('common.save') : t('workflow.recordRefund') }}</n-button></n-form>
           <n-empty v-if="!refund.items?.length" :description="t('workflow.noRefunds')" size="small" />
-          <n-list v-if="refund.items?.length" bordered class="workflow-scroll"><n-list-item v-for="item in refund.items" :key="item.id">{{ item.payment_date }} · {{ item.amount }} · {{ item.reference ?? '—' }} <n-space inline><n-button text @click="editRefund(item)">{{ t('common.edit') }}</n-button><n-button text type="error" @click="deleteRefund(item)">{{ t('common.delete') }}</n-button><n-button text @click="previewRefundConfirmation(item.id)">{{ t('pdf.preview') }}</n-button><n-button text :disabled="busy" @click="downloadRefundConfirmation(item.id)">{{ t('pdf.download') }}</n-button><n-button text type="primary" :disabled="busy" @click="openRefundSend(item.id)">{{ t('sendDialog.title') }}</n-button></n-space><n-list v-if="refundArtifacts[item.id]?.items.length" bordered style="margin-top:8px"><n-list-item v-for="artifact in refundArtifacts[item.id].items" :key="artifact.id">{{ artifact.filename }} · {{ artifactReasonText(artifact.creation_reason) }} <n-button text :disabled="busy" @click="downloadRefundArtifact(item.id, artifact.id, artifact.filename)">{{ t('workflow.historicalDownload') }}</n-button></n-list-item></n-list><n-empty v-else :description="t('workflow.noArtifacts')" size="small" /></n-list-item></n-list>
+          <n-list v-if="refund.items?.length" bordered class="workflow-scroll"><n-list-item v-for="item in refund.items" :key="item.id">{{ item.payment_date }} · {{ item.amount }} · {{ item.reference ?? '—' }} <n-space inline><n-button text @click="editRefund(item)">{{ t('common.edit') }}</n-button><n-button text type="error" @click="deleteRefund(item)">{{ t('common.delete') }}</n-button><n-button text @click="previewRefundConfirmation(item.id)">{{ t('pdf.preview') }}</n-button><n-button text :disabled="busy" @click="downloadRefundConfirmation(item.id)">{{ t('pdf.download') }}</n-button><n-button text type="primary" :disabled="busy" @click="openRefundSend(item.id)">{{ t('sendDialog.title') }}</n-button></n-space><n-list v-if="refundArtifacts[item.id]?.items.length" bordered style="margin-top:8px"><n-list-item v-for="artifact in refundArtifacts[item.id].items" :key="artifact.id">{{ artifact.filename }} · {{ artifactReasonText(artifact.creation_reason) }} · {{ formatDateTime(artifact.created_at, true) }} <n-button text :disabled="busy" @click="downloadRefundArtifact(item.id, artifact.id, artifact.filename)">{{ t('workflow.historicalDownload') }}</n-button></n-list-item></n-list><n-empty v-else :description="t('workflow.noArtifacts')" size="small" /></n-list-item></n-list>
         </template>
         <template v-if="artifacts">
           <n-divider>{{ t('workflow.artifacts') }}</n-divider>
           <n-text depth="3">{{ t('workflow.artifactHint') }}</n-text>
-          <n-list v-if="artifacts.items.length" bordered class="workflow-scroll"><n-list-item v-for="artifact in artifacts.items" :key="artifact.id">{{ artifact.filename }} · {{ artifact.locale }} · {{ artifactReasonText(artifact.creation_reason) }} <n-button text :disabled="busy" @click="downloadArtifact(artifact.id, artifact.filename)">{{ t('workflow.historicalDownload') }}</n-button></n-list-item></n-list>
+          <n-list v-if="artifacts.items.length" bordered class="workflow-scroll"><n-list-item v-for="artifact in artifacts.items" :key="artifact.id">{{ artifact.filename }} · {{ artifact.locale }} · {{ artifactReasonText(artifact.creation_reason) }} · {{ formatDateTime(artifact.created_at, true) }} <n-button text :disabled="busy" @click="downloadArtifact(artifact.id, artifact.filename)">{{ t('workflow.historicalDownload') }}</n-button></n-list-item></n-list>
           <n-alert v-if="uploadNotice" type="info" style="margin-top:8px">{{ uploadNotice.message }} <n-button v-if="uploadNotice.kind === 'AI_REVIEW'" text type="primary" @click="openSettings('ai')">{{ t('workflow.upload.openAiSettings') }}</n-button></n-alert>
           <template v-if="canUploadArtifact && uploadNotice?.kind !== 'ARTIFACT_CONFLICT'">
             <n-alert type="warning" style="margin-top:8px">{{ t('workflow.upload.permanentWarning') }}</n-alert>

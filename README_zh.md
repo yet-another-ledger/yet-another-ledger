@@ -6,18 +6,21 @@
 
 技术栈 **FastAPI + Vue 3 + PostgreSQL**。
 
-> **状态——1.0 前版本（`v0.7.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
+> **状态——1.0 前版本（`v0.10.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
 
 ## 功能
 
 - **发票** —— Standard、Advance、Final 以及绑定来源的 Credit Note；后端定价、并发安全编号、相互独立的生命周期/结算/贷记状态和可审计的单据链。
 - **报价** —— 可复用内容块/模板、到期自动失效，并可不可变地选择直接开票、仅收据定金或正式分阶段 Advance/Final 开票。
+- **编辑与复用** —— 对符合资格、未交付且未收款的 Standard Invoice 进行审计修订，保留 SENT、原编号、未修改的税务／身份快照及历史 PDF；Invoice、Quote、Estimate 编辑页支持明细拖动排序；Quote 可复制为独立新编号、新日期的草稿。
 - **成本核算 → 报价** —— 内部按 margin 反推卖价，成本/毛利绝不泄漏给客户。
 - **收付款与退款** —— 分次收款、Quote 定金、自动结算状态、关联 Credit 的 Refund，以及 Refund Confirmation。
-- **开支** —— 先审阅后入账的票据收件箱、图片／PDF 原件的 AI 提取、周期性开支、记账字段（付款来源 / 业务使用 % / 折旧年限）。
+- **开支** —— 先审阅后入账的票据收件箱、图片／PDF 原件的 AI 提取、周期性开支、记账字段（付款来源 / 业务使用 % / 折旧年限）、独立P/L计入选择及NET/GROSS/AUTO成本口径。
+- **外部销售** —— 保留平台／能源原件及原编号，审核可选AI建议、按多税率汇总入账，并审计修订、credit、结算差额及作废；可排除P/L收入而仍计入VAT。
+- **家用电池** —— 对符合普通VAT条件的购置仅登记一次，确认五年Q4调整所需年度私用输入，保留证据与修订历史，明确提示缺失或未确认输入。电池资产导航默认隐藏，可在 Settings → Preference 中开启。
 - **客户与目录** —— 地址、VAT 号、每客户默认币种与单据语言；产品/材料目录。
 - **单据** —— 发票、报价、收据和 Refund Confirmation 的中英 PDF/邮件，包含发出时交易方快照、实际下载/发送成品的精确留存，以及可选 AI 建议性比对的不可变历史 Invoice PDF 补传。
-- **报表** —— 盈亏（P/L）、**荷兰 BTW 申报汇总**、ICP 清单、开支报表和 ECharts 仪表盘，包含 Advance/Final/Credit 只计一次的投影。
+- **报表** —— 盈亏（P/L）、**荷兰 BTW 申报汇总**、ICP 清单、开支报表和 ECharts 仪表盘，包含 Advance/Final/Credit 只计一次的投影，以及独立里程费用与扣里程前／后利润。
 - **平台** —— TOTP 两步验证、类型化三层设置、`Decimal` 金额计算、双语界面（English / 中文）、单容器应用经 Docker Compose 部署。
 
 ## 技术栈
@@ -54,7 +57,7 @@ docker compose up -d
 
 停止：`docker compose down`（加 `-v` 同时删除数据库卷）。
 
-> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.7.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
+> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.10.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
 
 ## 配置
 
@@ -70,7 +73,19 @@ Compose 会自动读取 `.env`。最常用的变量：
 | `PUID` / `PGID` | `1000` | app 运行所用的宿主机 uid:gid（拥有存储目录）。 |
 | `AUTH_SECRET` | 自动 | 首次启动自动生成并持久化到 DB；仅在需固定外部密钥时设置。 |
 
-SMTP（用于密码重置和发送发票）在首次登录后于应用内「设置」中配置。
+### SMTP 与服务器端 Sent 副本
+
+首次登录后，在「设置」中配置 SMTP，用于单据邮件、收款收据、退款确认、测试邮件和密码重置。已保存且含 host 的 SMTP 设置优先；否则沿用 `SMTP_HOST`、`SMTP_PORT`、`SMTP_USERNAME`、`SMTP_PASSWORD`、`SMTP_FROM_EMAIL`、`SMTP_FROM_NAME`、`SMTP_USE_TLS` 和 `SMTP_USE_SSL` 环境变量回退。SMTP 回退时仍保留已保存的 Sent 配置，并复用**实际生效的 SMTP 用户名／密码**；没有独立 IMAP 登录表单。供应商可能要求应用专用密码，并同时允许 SMTP 和 IMAP。
+
+Sent 保存默认关闭。在 SMTP 面板开启后填供应商 IMAP host，选择 **SSL/TLS（通常端口 993）**或 **STARTTLS（通常端口 143）**。系统验证证书，不支持明文连接。切换安全模式不会改变显式填写的端口，请自行设置正确端口。
+
+填写已有文件夹的精确服务器名称（包括层级前缀），或留空 Folder，自动发现唯一可选择的特殊用途 `\Sent` 文件夹。若服务器未公布特殊目录，则尝试已有且可选择的 `Sent`。多个特殊目录、没有可用目录或显式名称错误时，需要指定有效目录；系统不会创建目录或任意挑选。副本将完整邮件保存在**供应商服务器上**，包括正文、To／CC 和全部附件；首次测试后请在 webmail 查看，并下载附件核对。如果供应商已经自动保存 SMTP 邮件，**保持开关关闭**，避免重复副本。
+
+SMTP 与 Sent 副本结果独立。复制失败时，SMTP 接受邮件仍代表发送成功；测试结果／发送警告和业务 Email log 独立显示复制结果。`SAVED` 表示服务器已确认 APPEND；`FAILED` 包括结果不确定；`NOT_ATTEMPTED` 表示关闭复制或 SMTP 失败。历史日志为 `NOT_ATTEMPTED`，不推断旧邮件是否已在供应商 Sent 中。密码重置响应保留原有行为，副本失败只记录安全运行日志码，不新增业务邮件记录。
+
+副本失败时检查稳定错误码：`IMAP_CONFIGURATION_FAILED` 表示缺少 host／可用共享凭据；连接／TLS／超时码需要检查 host、端口、安全模式、证书与可达性；`IMAP_AUTH_FAILED` 需要检查 IMAP 权限与实际生效的 SMTP 凭据；文件夹缺失／歧义／无效／失败码需要检查精确目录和发现支持；`IMAP_APPEND_FAILED` 需要检查写权限或配额；其他复制失败使用 `IMAP_COPY_FAILED`。错误只暴露安全码，不含供应商原始响应、凭据或邮件内容。**没有重试和历史回填**，恢复设置只影响新邮件。不要为了补副本重发已经送达的业务邮件，否则收件人会再次收到邮件。
+
+SMTP 测试失败仍返回通用的 `SMTP_SEND_FAILED` API 错误。服务端日志补充固定分类，例如 `SMTP_AUTH_FAILED`、`SMTP_SENDER_REJECTED`、`SMTP_RECIPIENT_REJECTED`、`SMTP_TIMEOUT`、`SMTP_TLS_FAILED` 和 `SMTP_CONNECTION_FAILED`，不记录供应商原文或凭据。再次手动测试前，可按分类核对相应配置。
 
 ## 开发
 
@@ -85,6 +100,10 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ## 路线图
 
 M0–M14 已完成。**M15 仍在开发中，作者于 2026-10-24 决定暂缓，优先开展其他工作**；尚未验收。实现与走查修复保存在 `wip/m15-agent-accounting-paused` 分支，不属于 `main` 的功能。M15 范围为具备 scope 的 Agent/MCP 收据接入及客户、报价、普通发票草稿工具；现有 M14 收件箱与 AI 提取保持独立。当前没有活动里程碑，后续工作由作者指定，不自动恢复 M15。详见 [M15 状态与恢复检查点](docs/plan/milestones/M15_zh.md)、[路线图](docs/plan/roadmap_zh.md)及 [M14](docs/plan/milestones/M14_zh.md)。
+
+[M16 设计](docs/plan/milestones/M16_zh.md)已于 2026-10-30 确认，尚未开始实施：以九个原子步骤规划外部销售凭证记账、VAT／P&L 分离、储能年度私用调整及并入的 SI3 里程利润拆分。该设计不是 `main` 已上线功能，也不恢复 M15。
+
+SI1（单据排序、Quote 复制和服务器侧 Sent 副本）已于2026-10-25按代表性走查范围验收；未实际执行的邮件类型和失败分支明确记录为自动化覆盖。参见 [SI1 计划与验收](docs/plan/improvements/SI1_zh.md)。
 
 ## 文档
 

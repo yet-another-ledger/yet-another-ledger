@@ -22,6 +22,7 @@ from decimal import Decimal
 from pydantic import BaseModel, Field
 
 from jai.models._enums import InvoiceDocumentKind, VatTreatmentEffect
+from jai.schemas.battery import BatteryAnnualMissingInput
 
 
 class ReportWarningCode(enum.StrEnum):
@@ -36,6 +37,19 @@ class ReportTaxEventKind(enum.StrEnum):
     DOCUMENT_TAX = "DOCUMENT_TAX"
     RECEIPT_ONLY_PAYMENT_TAX = "RECEIPT_ONLY_PAYMENT_TAX"
     RECEIPT_ONLY_INVOICE_OFFSET = "RECEIPT_ONLY_INVOICE_OFFSET"
+
+
+class ReportSourceType(enum.StrEnum):
+    INVOICE = "INVOICE"
+    EXTERNAL_SALE = "EXTERNAL_SALE"
+
+
+class ExternalSaleReportReference(BaseModel):
+    source_type: ReportSourceType = ReportSourceType.EXTERNAL_SALE
+    external_sale_id: str
+    source_name: str
+    original_number: str
+    event_date: date
 
 
 class ReportDocumentReference(BaseModel):
@@ -72,6 +86,10 @@ class ReportTaxEventRow(BaseModel):
     source_document_id: str | None = None
     source_document_kind: InvoiceDocumentKind | None = None
     source_document_number: str | None = None
+    source_type: ReportSourceType = ReportSourceType.INVOICE
+    external_sale_id: str | None = None
+    external_source_name: str | None = None
+    external_original_number: str | None = None
 
     taxable_amount: Decimal
     vat_amount: Decimal
@@ -98,6 +116,7 @@ class ReportWarning(BaseModel):
         description="Signed frozen base-currency gross correction amount (EUR)."
     )
 
+
 # ---------------------------------------------------------------------------
 # Sub-models
 # ---------------------------------------------------------------------------
@@ -116,7 +135,26 @@ class ProfitLossSeriesItem(BaseModel):
     expense_actual: Decimal = Field(
         description="Depreciation-adjusted, business%-prorated expense cost in this period (EUR)."
     )
-    profit: Decimal = Field(description="revenue_net − expense_actual for this period.")
+    mileage_expense_actual: Decimal = Field(
+        description=(
+            "Depreciation-adjusted, business%-prorated mileage expense cost in this period (EUR)."
+        )
+    )
+    other_expense_actual: Decimal = Field(
+        description=(
+            "Depreciation-adjusted, business%-prorated non-mileage expense cost "
+            "in this period (EUR)."
+        )
+    )
+    profit_before_mileage: Decimal = Field(
+        description="Revenue net minus non-mileage expense cost for this period (EUR)."
+    )
+    profit_after_mileage: Decimal = Field(
+        description="Revenue net minus all expense cost, including mileage, for this period (EUR)."
+    )
+    profit: Decimal = Field(
+        description="Compatibility alias for profit_after_mileage in this period."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +185,23 @@ class ProfitLossReport(BaseModel):
     expense_actual: Decimal = Field(
         description="Total depreciation-adjusted, business%-prorated expense cost (EUR)."
     )
-    profit: Decimal = Field(description="revenue_net − expense_actual across the full range.")
+    mileage_expense_actual: Decimal = Field(
+        description="Total depreciation-adjusted, business%-prorated mileage expense cost (EUR)."
+    )
+    other_expense_actual: Decimal = Field(
+        description=(
+            "Total depreciation-adjusted, business%-prorated non-mileage expense cost (EUR)."
+        )
+    )
+    profit_before_mileage: Decimal = Field(
+        description="Total revenue net minus non-mileage expense cost (EUR)."
+    )
+    profit_after_mileage: Decimal = Field(
+        description="Total revenue net minus all expense cost, including mileage (EUR)."
+    )
+    profit: Decimal = Field(
+        description="Compatibility alias for profit_after_mileage across the full range."
+    )
     series: list[ProfitLossSeriesItem] = Field(
         description="Time-bucketed breakdown by month or quarter."
     )
@@ -155,6 +209,7 @@ class ProfitLossReport(BaseModel):
         default=None,
         description="Reserved for future per-category breakdown (step 1: always null).",
     )
+    external_sales: list[ExternalSaleReportReference] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +236,19 @@ class VatBoxVatOnly(BaseModel):
     vat: Decimal = Field(description="VAT / BTW amount (EUR).")
 
 
+class VatBoxPrivateUse(BaseModel):
+    """Private-use box with an unknown-aware taxable base."""
+
+    base: Decimal | None = Field(
+        description="Taxable base; null when a legacy contribution has no reliable base."
+    )
+    vat: Decimal = Field(description="VAT / BTW amount (EUR).")
+    known_battery_base: Decimal = Field(description="Known battery base included in 1d.")
+    known_battery_vat: Decimal = Field(description="Known battery VAT included in 1d.")
+    missing_inputs: list[BatteryAnnualMissingInput] = Field(default_factory=list)
+    is_complete: bool = True
+
+
 class VatBoxBaseOnly(BaseModel):
     """A VAT return box that holds only a taxable base (no VAT column).
 
@@ -204,7 +272,7 @@ class VatReturnBoxes(BaseModel):
     box_1a: VatBoxBaseVat = Field(description="Domestic / EU-B2C hoog-tarief (21%) supplies.")
     box_1b: VatBoxBaseVat = Field(description="Domestic / EU-B2C laag-tarief (9%) supplies.")
     box_1c: VatBoxBaseVat = Field(description="Other rates (e.g. 13% forfait); v1 always 0.")
-    box_1d: VatBoxVatOnly = Field(
+    box_1d: VatBoxPrivateUse = Field(
         description="Privégebruik (private-use correction); only non-zero in Q4 (year-end)."
     )
     box_1e: VatBoxBaseOnly = Field(
@@ -467,6 +535,17 @@ class DashboardTopCategory(BaseModel):
     )
 
 
+class DashboardVatStatus(BaseModel):
+    """Completeness of the VAT projection used by the dashboard KPI."""
+
+    is_complete: bool = Field(
+        description="False when the VAT KPI is a known subtotal; copied from VAT box 1d."
+    )
+    missing_inputs: list[BatteryAnnualMissingInput] = Field(
+        description="Applicable annual battery inputs needing completion or confirmation."
+    )
+
+
 class DashboardSummary(BaseModel):
     """Response schema for GET /api/v1/reports/dashboard.
 
@@ -482,6 +561,9 @@ class DashboardSummary(BaseModel):
         )
     )
     kpi: DashboardKpi = Field(description="Key performance indicators.")
+    current_quarter_vat_status: DashboardVatStatus = Field(
+        description="Completeness and traceable missing inputs for the VAT KPI."
+    )
     monthly: list[DashboardMonthly] = Field(
         description="12-month series (Jan–Dec) for the selected year."
     )

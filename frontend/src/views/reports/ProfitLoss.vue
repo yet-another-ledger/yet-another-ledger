@@ -28,6 +28,7 @@ import {
 import type { DataTableColumns } from 'naive-ui'
 import { useReportsStore } from '../../stores/reports'
 import type { ProfitLossSeriesItem } from '../../stores/reports'
+import ReportSourcePanel from '../../components/reports/ReportSourcePanel.vue'
 import { localDateStr } from '../../utils/date'
 
 const { t } = useI18n()
@@ -121,13 +122,22 @@ const summaryRevenue = computed(() =>
 const summaryExpense = computed(() =>
   store.plReport ? fmtMoney(store.plReport.expense_actual) : '—',
 )
-const summaryProfit = computed(() =>
-  store.plReport ? fmtMoney(store.plReport.profit) : '—',
+const summaryMileageExpense = computed(() =>
+  store.plReport ? fmtMoney(store.plReport.mileage_expense_actual) : '—',
+)
+const summaryOtherExpense = computed(() =>
+  store.plReport ? fmtMoney(store.plReport.other_expense_actual) : '—',
+)
+const summaryProfitBeforeMileage = computed(() =>
+  store.plReport ? fmtMoney(store.plReport.profit_before_mileage) : '—',
+)
+const summaryProfitAfterMileage = computed(() =>
+  store.plReport ? fmtMoney(store.plReport.profit_after_mileage) : '—',
 )
 
 const profitPositive = computed(() => {
   if (!store.plReport) return true
-  return parseFloat(store.plReport.profit) >= 0
+  return parseFloat(store.plReport.profit_after_mileage) >= 0
 })
 
 // ─── Series table ─────────────────────────────────────────────────────────────
@@ -152,6 +162,22 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
     },
   },
   {
+    title: t('reports.pl.otherExpenseActual'),
+    key: 'other_expense_actual',
+    align: 'right',
+    render(row) {
+      return fmtMoney(row.other_expense_actual)
+    },
+  },
+  {
+    title: t('reports.pl.mileageExpenseActual'),
+    key: 'mileage_expense_actual',
+    align: 'right',
+    render(row) {
+      return fmtMoney(row.mileage_expense_actual)
+    },
+  },
+  {
     title: t('reports.pl.expenseActual'),
     key: 'expense_actual',
     align: 'right',
@@ -160,12 +186,20 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
     },
   },
   {
-    title: t('reports.pl.profit'),
-    key: 'profit',
+    title: t('reports.pl.profitBeforeMileage'),
+    key: 'profit_before_mileage',
     align: 'right',
     render(row) {
-      const val = parseFloat(row.profit)
-      return h(NText, { type: val >= 0 ? 'success' : 'error' }, () => fmtMoney(row.profit))
+      return fmtMoney(row.profit_before_mileage)
+    },
+  },
+  {
+    title: t('reports.pl.profitAfterMileage'),
+    key: 'profit_after_mileage',
+    align: 'right',
+    render(row) {
+      const val = parseFloat(row.profit_after_mileage)
+      return h(NText, { type: val >= 0 ? 'success' : 'error' }, () => fmtMoney(row.profit_after_mileage))
     },
   },
 ])
@@ -226,9 +260,27 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
             </n-grid-item>
             <n-grid-item>
               <n-card>
+                <n-statistic :label="t('reports.pl.mileageExpenseActual')" :value="summaryMileageExpense" />
+              </n-card>
+            </n-grid-item>
+            <n-grid-item>
+              <n-card>
+                <n-statistic :label="t('reports.pl.otherExpenseActual')" :value="summaryOtherExpense" />
+              </n-card>
+            </n-grid-item>
+            <n-grid-item>
+              <n-card>
                 <n-statistic
-                  :label="t('reports.pl.profit')"
-                  :value="summaryProfit"
+                  :label="t('reports.pl.profitBeforeMileage')"
+                  :value="summaryProfitBeforeMileage"
+                />
+              </n-card>
+            </n-grid-item>
+            <n-grid-item>
+              <n-card>
+                <n-statistic
+                  :label="t('reports.pl.profitAfterMileage')"
+                  :value="summaryProfitAfterMileage"
                   :value-style="{ color: profitPositive ? 'var(--n-color-success)' : 'var(--n-color-error)' }"
                 />
               </n-card>
@@ -247,6 +299,16 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
               size="small"
             />
           </n-card>
+          <ReportSourcePanel
+            v-if="store.plReport?.external_sales?.length"
+            :title="t('reports.pl.externalSales')"
+            :action-label="t('reports.sourceAction')"
+            :empty-label="t('reports.noSources')"
+            :items="(store.plReport.external_sales ?? []).map((sale) => ({
+              id: sale.external_sale_id,
+              label: `${sale.source_name} · ${sale.original_number} · ${sale.event_date}`,
+            }))"
+          />
     </div>
   </div>
 </template>

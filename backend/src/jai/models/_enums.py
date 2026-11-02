@@ -43,6 +43,14 @@ class VatTreatmentEffect(enum.StrEnum):
     EXEMPT = "EXEMPT"
 
 
+class PlCostBasis(enum.StrEnum):
+    """Source amount used to recognize an Expense in profit and loss."""
+
+    NET = "NET"
+    GROSS = "GROSS"
+    AUTO = "AUTO"
+
+
 class InvoiceStatus(enum.StrEnum):
     """Lifecycle status of an invoice."""
 
@@ -100,6 +108,7 @@ class DocumentChainEventType(enum.StrEnum):
     REPLACEMENT_CREATED = "REPLACEMENT_CREATED"
     COMPENSATING_INVOICE_CREATED = "COMPENSATING_INVOICE_CREATED"
     PROJECT_CANCELLATION_CREDIT_CREATED = "PROJECT_CANCELLATION_CREDIT_CREATED"
+    INVOICE_REVISED = "INVOICE_REVISED"
 
 
 class InvoiceRelationType(enum.StrEnum):

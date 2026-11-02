@@ -2,13 +2,13 @@
 
 > 🌐 **English** · [中文](roadmap_zh.md)
 
-> **Current scheduling (2026-10-24)**: M15 remains in development but is paused, with its work preserved on `wip/m15-agent-accounting-paused`, outside `main`. No milestone is currently active; the author chooses the next work. Do not continue M15 automatically.
+> **Current scheduling (2026-11-01)**: M15 remains in development but is paused, with its work preserved on `wip/m15-agent-accounting-paused`, outside `main`. M16 is accepted on its recorded representative scope; no subsequent milestone has started. SI1 was accepted on the recorded representative walkthrough scope on 2026-10-25. The author agreed the [SI2 implementation plan](improvements/SI2.md) on 2026-10-26: five atomic steps for audited revision of undelivered, unpaid Standard Invoices; all five implementation steps, full local gates and independent blind reviews are complete as of 2026-10-27; the author accepted the recorded representative walkthrough scope on 2026-10-28, with skipped/unretested paths explicitly retained. Walkthrough UI follow-ups were validated separately without a new independent review. Release CI results are tracked in GitHub Actions. Small improvements are separately numbered and do not resume M15. The author agreed the [M16 design](milestones/M16.md) on 2026-10-30: external sales bookkeeping, VAT/P&L separation and annual battery private-use adjustment in nine atomic steps; Steps 1–9 of 9 completed local automated gates and independent review on 2026-10-31. The author accepted the recorded representative walkthrough scope on 2026-11-01. External sales, Expense/receipt inbox, battery 45%→0% revisions and in-service-date reconfirmation were checked with read-only report/original/history verification. Step 7 reporting reconciles; the author accepted a brief page check. Step 8 was accepted on the author’s confirmation of prior testing, without repeating pending deletion in this round. Recurring-expense walkthrough was explicitly skipped; untested provider, concurrency and second-account UI paths remain distinguished from automated evidence. Prior orchestrated UI refinements passed independent review; the later upload-state/error-display fix passed separate automated checks and author confirmation without another blind review. Known carryovers remain documented. SI3 is incorporated into M16 with no independent schedule.
 
-> **What this is**: A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the planned receipt-inbox and agent-accounting follow-ons **M14–M15**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
+> **What this is**: A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the receipt-inbox, agent-accounting and external-bookkeeping/VAT–P&L follow-ons **M14–M16**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
 >
 > **What this is not**: A line-by-line construction guide. This document stays at the level of "milestones + methodology + constraints"; the **atomic step list** for each milestone is written out JIT in `docs/plan/milestones/M<x>.md` (template: `milestones/_TEMPLATE.md`).
 >
-> **Authoritative sources**: Direction, scope, domain model, and decision records are governed by **this roadmap + each `milestones/M<x>.md` (frozen per-milestone decisions)**; Dutch VAT/BTW filing conventions are governed by `docs/insight/btw-aangifte-2026-guide.md` (structured guide to the official Tax Authority filing instructions). (Early upstream "analysis documents" were removed from the repository on 2026-06-15 — their content has been absorbed into the above documents; any remaining "analysis doc §x" references in older milestone files are historical artefacts only.)
+> **Authoritative sources**: Direction, scope, domain model, and decision records are governed by **this roadmap + each `milestones/M<x>.md` (frozen per-milestone decisions)**, with separately numbered small-improvement plans in **`improvements/SI<n>.md`**; Dutch VAT/BTW filing conventions are governed by `docs/insight/btw-aangifte-2026-guide.md` (structured guide to the official Tax Authority filing instructions). (Early upstream "analysis documents" were removed from the repository on 2026-06-15 — their content has been absorbed into the above documents; any remaining "analysis doc §x" references in older milestone files are historical artefacts only.)
 >
 > **Architecture reference**: `~/workspace/trading-journal` (isomorphic, live in production). Skeleton, conventions, Dockerfile, and CI all align with it; the only differences are "swap SQLite for PostgreSQL + invoice domain".
 
@@ -111,10 +111,11 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4. Milestone Map M0–M15 (including inserted M2.5 · Settings UX refactor / M6.5 · Cost accounting / M11.5 · Quote deposits)
+## 4. Milestone Map M0–M16 (including inserted M2.5 · Settings UX refactor / M6.5 · Cost accounting / M11.5 · Quote deposits)
 
 > Dependencies: **M0 → M1 → M2 → (M2.5) → {M3, M4}**, then two parallelisable tracks:
 > ① **Document track**: M5 → M6 → **M6.5** → M7; ② **Expense track**: M8 (depends only on M2 base currency + M4 dictionaries, optionally M3 customers, **independent of invoices/quotes/payments**). The two tracks converge at M9 → M10, then continue through **M11 (private-transport business mileage) → M11.5 (quote deposits and final-invoice settlement) → M12 (advance/final invoices and credit notes) → M13 (Document Artifact backfill) → M14 (receipt inbox and review) → M15 (agent receipt intake and business drafts)**.
+> **M16 branch dependency**: builds on completed Expense/report/receipt foundations and incorporates SI3; it neither depends on nor resumes paused M15.
 > Parallelisable: M3‖M4; document track‖expense track (M8 can run alongside M5/M6/M7). **M2.5 is a pure frontend UX fix, non-blocking** — it slots after M2 and can run in parallel with M3/M4; it blocks nothing. The "🟢 deployment smoke test" at the end of each entry is that milestone's acceptance signal.
 
 ### M0 · Foundation skeleton (walking skeleton) | corresponds to P0
@@ -274,11 +275,28 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **Automated closure**: historical backend/frontend gates and isolated Docker build evidence remain in the local ignored `review-notes/M15-report.md`. The milestone is unaccepted and paused; check the resume checkpoint and author exceptions before continuing, without automatically repeating skipped manual checks.
 - **Walkthrough repair (2026-10-01)**: the real PDF remote-transfer failure triggered the frozen local adapter/upload route, which was implemented and installed. The author subsequently confirmed real PDF/valid-image intake, replay and the single-Expense path. Work is now paused; see the resume checkpoint in `milestones/M15.md` for remaining and author-skipped checks. Adapter instructions are preserved on the development branch.
 
+### M16 · External sales bookkeeping and VAT / P&L separation | completed Expense/report/receipt foundations
+- **Status**: 🟢 Steps 1–9 of 9 completed local automated gates and independent review on 2026-10-31. The author accepted the recorded representative walkthrough scope on 2026-11-01. External sales, Expense/receipt inbox, battery 45%→0% revisions and in-service-date reconfirmation were checked with read-only report/original/history verification. Step 7 reporting reconciles; the author accepted a brief page check. Step 8 was accepted on the author’s confirmation of prior testing, without repeating pending deletion in this round. Recurring-expense walkthrough was explicitly skipped; untested provider, concurrency and second-account UI paths remain distinguished from automated evidence. Prior orchestrated UI refinements passed independent review; the later upload-state/error-display fix passed separate automated checks and author confirmation without another blind review. Known carryovers remain documented. M15 remains paused.
+- **Goal**: book original sales documents from platforms and energy companies, independently control VAT/company P&L effects, and support annual battery private use plus the SI3 mileage/profit breakdown.
+- **Key content**: retained external source/number/originals, tax-rate summaries, manual/advisory-AI entry and explicit atomic posting; audited revisions/credits/settlement adjustments/mistaken-entry voids; Expense P&L inclusion and NET/GROSS/AUTO cost basis with legacy defaults; five-year battery annual inputs, Q4 1d base/VAT and missing-input status; traceable P&L/VAT/Dashboard consistency.
+- **Frozen boundary**: Dutch domestic ordinary sales in the existing single EUR/VAT-return context; no duplicate JAI issuance/native numbering, KOR, external EU/export/reverse-charge sales, platform/bank/EMS integrations, full settlement, income-tax classification or automatic filing. Source changes never rewrite history; upgrades do not recalculate old Expenses or discover old assets.
+- **Atomic delivery**: nine steps cover Expense basis, pending external originals, posting/reports, revision/correction, AI, annual battery rules, battery audit, SI3 and cross-module acceptance. Contract-first, full DoD/review per step and one final author walkthrough.
+- **🟢 Deployment smoke test**: platform sales affect VAT/P&L, electricity sales VAT only, original numbers/bytes retained; €12,100 battery at 45% private use produces €900/€189 in Q4 1d, missing input is not zero and year six stops that acquisition adjustment; mileage/profit reconciliation. Full acceptance matrix in M16.
+
 ---
 
-## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M15)
+## 4.si Small improvements (separate from milestone numbering)
 
-> **Status**: Explicitly **not doing** in the current roadmap through M15; this note is kept here so it's easy to pick up later. **No DB schema is reserved now** — any future columns/tables are additive migrations, existing data is unaffected, cost is acceptable, no need to pre-allocate.
+- **SI1 · Document ordering, Quote duplication and Sent copies**: design agreed on 2026-10-25; all four implementation steps, automated gates and independent blind reviews are complete, and the author accepted the recorded representative walkthrough scope on 2026-10-25. The [implementation plan](improvements/SI1.md) follows the milestone format with four atomic steps, contracts, migration notes, review points and acceptance checks. Reuse existing line-order persistence and rounding; duplicate Quotes into new independently numbered drafts; optionally save all new outgoing messages and attachments to the provider's Sent mailbox through IMAP. M15 remains paused.
+- **SI2 · Revising undelivered Standard Invoices**: design agreed on 2026-10-26; all five implementation steps, full local gates and independent blind reviews are complete as of 2026-10-27; the author accepted the recorded representative walkthrough scope on 2026-10-28, with skipped/unretested paths explicitly retained. Walkthrough UI follow-ups were validated separately without a new independent review. Release CI results are tracked in GitHub Actions. The [implementation plan](improvements/SI2.md) defines five atomic steps covering audit/eligibility, snapshot-preserving preview, transactional save, editor/history and regression closure. Retain SENT and the original number; allow revision only before delivery/payment and without dependent correction/settlement chains. This is a narrowly scoped exception to issued-document immutability: only the locked, version-checked revision command may update an eligible Invoice, with immutable before/after audit; ordinary PUT remains draft-only. Preserve first-issue/party/FX snapshots and all historical PDF/email records. Delivered financial changes use existing correction workflows. Reuse existing T&C content blocks; no new Dictionary template feature. M15 remains paused.
+- **SI3 · P/L mileage breakdown**: incorporated into [M16](milestones/M16.md) D10 / Step 8 on 2026-10-30, with no independent implementation schedule. Retain the [original request](improvements/SI3.md) for traceability; expose same-period mileage and profit before/after it, preserve existing `profit` semantics, and provide no unverified income-tax field guidance. M15 remains paused.
+- **Deferred**: product-manual PDF management and checkboxes for choosing extra quote attachments need a separately designed future milestone. SI1 reserves no schema or milestone number for it.
+
+---
+
+## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M16)
+
+> **Status**: Explicitly **not doing** in the current roadmap through M16; this note is kept here so it's easy to pick up later. **No DB schema is reserved now** — any future columns/tables are additive migrations, existing data is unaffected, cost is acceptable, no need to pre-allocate.
 
 - **What it is**: Connect an **external transaction provider** and automatically pull transaction feeds from partner banks via API, eliminating manual entry. **Provider-agnostic**: Plaid (used behind YNAB), GoCardless Bank Account Data (formerly Nordigen, EU open banking, AIS free tier), Tink / TrueLayer, etc. — selection deferred.
 - **Two use cases**:
@@ -292,7 +310,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4.y Beyond the roadmap (vNext) · PDF document/letterhead template customisation (memo only, not in M0–M15)
+## 4.y Beyond the roadmap (vNext) · PDF document/letterhead template customisation (memo only, not in M0–M16)
 
 > **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**. Elaborates on M9's OUT item "custom / multiple PDF template sets → deferred (one template family + CSS interface)". **No schema reserved now** — everything will be additive.
 >
@@ -303,7 +321,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **The big concern is security (guardrail 7)**: User input entering PDF = XSS/SSRF surface; reuse / strengthen sanitisation — reference the two bugs fixed 2026-06-14: `{{ css | safe }}` font escaping and SVG `<style>` inline class sanitisation; body uses "plain text + explicit placeholders + escaping" rather than arbitrary HTML/CSS. Plus template editor UI + preview + built-in defaults when values are absent.
 - **Granularity**: Configured per document type (invoice / quote) × language (EN / ZH), following the email template structure.
 
-## 4.z Beyond the roadmap (vNext) · Customer address free-text block (memo only, not in M0–M15)
+## 4.z Beyond the roadmap (vNext) · Customer address free-text block (memo only, not in M0–M16)
 
 > **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**.
 
@@ -320,6 +338,19 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **Continuing rule**: i18n symmetry, security regression coverage, performance/query-count checks where relevant, Docker build and documentation parity remain part of ordinary Definition of Done; moving generic cleanup here does not weaken those gates.
 - **Migration baselining remains DROPPED (decided 2026-06-19)**: `v0.1.0` went live for self-use on 2026-06-17, so the production database carries real data and its `alembic_version` follows the live chain. Keep the accumulated linear Alembic migrations; fresh databases replay them, and all future migrations are additive.
 - **Release `latest` handling remains DONE (2026-06-17)**: `release.yml` uses `flavor: latest=auto`; only stable semver tags move `:latest`, while prereleases do not.
+
+---
+
+## 4.ab Beyond the roadmap · Shared address search/autofill and mileage route distance (awaiting planning)
+
+> **Status**: Direction agreed with the author on **2026-11-02**; unscheduled. Decide later whether to deliver as a small improvement or a milestone. No SI/milestone number, schema or implementation is reserved. A joint manual command-line API trial may precede application development.
+
+- **Shared interaction**: Search by partial address or Dutch postcode + house number → show candidates with city/postcode/country to distinguish identical street names → explicitly select an address. Providers return ranked, limited suggestions, not an exhaustive list of all matching cities.
+- **Customer create/edit**: Add search above the existing billing/shipping address fields; selection fills street, house number, postcode, city and country, plus province/house-number addition when available. Keep individual fields editable; missing apartment numbers or Dutch additions such as `A` / `bis` can be entered manually. Reuse the existing structured address form. This picks up the deferred autocomplete idea in [M3](milestones/M3.md).
+- **Mileage**: Reuse address search for Origin/Destination, retaining the selected display address and obtaining coordinates for a road-route query. Once both endpoints are selected, offer the one-way route distance as an editable suggestion. Changing either endpoint invalidates the old suggestion. Manual entry remains available without a key or when queries fail; user-confirmed kilometres remain authoritative under [M11](milestones/M11.md) D18. Saved trips must not drift with later provider data changes. Initial scope retains the existing one-way distance + return-trip checkbox; a map display is not required.
+- **Provider candidates, not a final selection**: [Geoapify](https://apidocs.geoapify.com/docs/geocoding/address-autocomplete/) autocomplete + [Routing](https://apidocs.geoapify.com/docs/routing/) is the initial trial candidate for both uses with one key. [Google Places Autocomplete](https://developers.google.com/maps/documentation/places/web-service/place-autocomplete) + Place Details + Routes is an alternative matching the author's familiar shopping/form experience. Other candidates are [TomTom](https://docs.tomtom.com/pricing), or Dutch [PDOK](https://www.pdok.nl/pdok-locatieserver) address search combined with [openrouteservice](https://giscience.github.io/openrouteservice/frequently-asked-questions) routing. Prefer free/low-volume-free access with user-supplied keys; recheck quotas, billing requirements, attribution and permission to retain address/distance data, including Google's EEA terms, when choosing.
+- **Integration direction**: Share address search and structured-result mapping across the two screens; routing is an additional mileage capability. Use typed settings for user-supplied credentials and backend proxying. Detailed contracts and any additive storage changes belong to the later implementation plan.
+- **Manual trial anchors**: With the author's own key where needed, query APIs from the command line using a small set of agreed example addresses: postcode + house number, identical street names in different cities, house-number additions and an international address. Inspect structured fields and missing values, then query a two-point driving route and compare its distance with a manually checked route, recording route options rather than expecting exact Google Maps parity. Recheck price/usage and retention terms; do not write trial results into live customer/mileage records. No keyed accuracy or route trial has been performed yet.
 
 ---
 
@@ -361,10 +392,12 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 docs/
   insight/btw-aangifte-2026-guide.md # Dutch VAT/BTW filing conventions (authoritative, structured guide to official Tax Authority instructions)
   plan/
-    roadmap.md                       # This document: overview + methodology + constraints + M0–M15
+    roadmap.md                       # This document: overview + methodology + constraints + M0–M16
     milestones/
       _TEMPLATE.md                   # Milestone refinement template
       M0.md, M1.md, ...              # Produced JIT before starting work (atomic step lists)
+    improvements/
+      SI1.md                         # Separately numbered small-improvement implementation plans
 ```
 
 **JIT refinement flow (when entering each milestone)**:
@@ -372,6 +405,8 @@ docs/
 2. Review the atomic step list for that milestone (backfill "to be refined" product decisions from the analysis docs as needed, e.g. whether units are optional, exact VAT numeric conventions, etc.).
 3. Implement step by step, each step passing [§5] DoD.
 4. Milestone wrap-up: walk through "🟢 deployment smoke test" and record acceptance conclusion.
+
+Small improvements use the same implementation-plan structure and quality gates, with their own `SI<n>` identifiers under `improvements/`; they do not change milestone numbering or resume a paused milestone. English plans ship with matching `_zh.md` mirrors.
 
 ---
 
@@ -400,5 +435,14 @@ docs/
 | M13 | Document Artifact Backfill | 🟢 Done (2026-09-05; orchestrated Steps 1–4 and blind reviews converged; AI output-budget walkthrough fix re-reviewed with no findings; Ruff/mypy/default 1243/integration 1074, migrations, codegen, frontend 148 + build + EN/ZH 1458, Docker/CJK PDF all green; author Standard-Invoice Happy Path passed, remaining manual paths accepted on automated evidence) |
 | M14 | Receipt inbox and review | 🟢 Done (2026-09-29; author PDF walkthrough accepted; browser concurrency and images accepted on automated evidence; non-blocking carryovers in `milestones/M14.md`) |
 | M15 | Agent receipt intake and business drafts (MCP; Hermes/Telegram first) | ⏸️ In development, paused by the author on 2026-10-24; implementation preserved on `wip/m15-agent-accounting-paused`, outside main; walkthrough stopped at 3/6 preparation, not accepted; see `milestones/M15.md` |
+| M16 | External sales bookkeeping and VAT / P&L separation (including SI3) | 🟢 Steps 1–9 of 9 completed local automated gates and independent review on 2026-10-31. The author accepted the recorded representative walkthrough scope on 2026-11-01. External sales, Expense/receipt inbox, battery 45%→0% revisions and in-service-date reconfirmation were checked with read-only report/original/history verification. Step 7 reporting reconciles; the author accepted a brief page check. Step 8 was accepted on the author’s confirmation of prior testing, without repeating pending deletion in this round. Recurring-expense walkthrough was explicitly skipped; untested provider, concurrency and second-account UI paths remain distinguished from automated evidence. Prior orchestrated UI refinements passed independent review; the later upload-state/error-display fix passed separate automated checks and author confirmation without another blind review. Known carryovers remain documented. See [M16](milestones/M16.md); M15 remains paused. Post-acceptance follow-up: a USER-level Battery Assets navigation preference defaults off; stored data and calculations are unaffected. Local checks and the author UI check passed; release preparation resumed for the same v0.10.0. |
+
+Separately numbered improvements:
+
+| Improvement | Content | Status |
+| --- | --- | --- |
+| SI1 | Document ordering, Quote duplication and server-side Sent copies | 🟢 Done (2026-10-25; four steps and independent blind reviews complete; Quote action refinement accepted; representative author walkthrough accepted with skipped paths recorded); see [implementation plan](improvements/SI1.md) |
+| SI2 | Audited revision of undelivered, unpaid Standard Invoices | 🟢 Accepted on the recorded representative walkthrough scope (2026-10-28); skipped/unretested paths retained; frontend follow-ups validated separately without new independent review; release CI tracked in GitHub Actions; see [implementation plan](improvements/SI2.md) |
+| SI3 | P/L profit before/after mileage expenses and a separate mileage amount | ↪ Incorporated into [M16](milestones/M16.md) D10 / Step 8 on 2026-10-30; retain [requirement history](improvements/SI3.md), no separate implementation or acceptance |
 
 > Legend: ⬜ Not started | 🟡 In progress | 🟢 Done (deployment smoke test passed) | ⏸️ In development but paused (not the active milestone)

@@ -17,7 +17,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, func
+from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -117,6 +117,12 @@ class EmailLog(Base):
         ),
     )
 
+    sent_copy_status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="NOT_ATTEMPTED", server_default="NOT_ATTEMPTED"
+    )
+    sent_copy_error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_copy_saved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # -- Audit timestamps -----------------------------------------------------
     creator_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -137,6 +143,10 @@ class EmailLog(Base):
 
     # -- Composite index for per-document log queries -------------------------
     __table_args__ = (
+        CheckConstraint(
+            "sent_copy_status IN ('NOT_ATTEMPTED', 'SAVED', 'FAILED')",
+            name="ck_email_log_sent_copy_status",
+        ),
         Index(
             "ix_email_log_company_related",
             "company_id",

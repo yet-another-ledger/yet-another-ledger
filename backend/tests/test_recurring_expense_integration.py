@@ -100,6 +100,8 @@ async def _create_recurring(
     max_occurrences: int | None = None,
     active: bool = True,
     deductible: bool | None = None,
+    include_in_pl: bool = True,
+    pl_cost_basis: str = "NET",
 ) -> dict:
     body: dict = {
         "name": name,
@@ -111,6 +113,8 @@ async def _create_recurring(
         "frequency": frequency,
         "start_date": start_date,
         "active": active,
+        "include_in_pl": include_in_pl,
+        "pl_cost_basis": pl_cost_basis,
     }
     if end_date is not None:
         body["end_date"] = end_date
@@ -359,6 +363,8 @@ class TestRecurringExpenseGeneration:
             net_amount="200.00",
             vat_amount="42.00",
             name="Monthly SaaS",
+            include_in_pl=False,
+            pl_cost_basis="GROSS",
         )
 
         run_resp = await db_client.post(f"/api/v1/recurring-expenses/{rec['id']}/run-now")
@@ -375,6 +381,8 @@ class TestRecurringExpenseGeneration:
         assert Decimal(item["vat_amount"]) == Decimal("42.00")
         assert Decimal(item["gross_amount"]) == Decimal("242.00")
         assert item["category_name"] == "Software"
+        assert item["include_in_pl"] is False
+        assert item["pl_cost_basis"] == "GROSS"
 
         # Full expense has recurring_expense_id
         exp = await db_client.get(f"/api/v1/expenses/{item['id']}")
@@ -770,3 +778,88 @@ class TestEndDateBoundary:
 
         expenses_resp = await db_client.get("/api/v1/expenses")
         assert expenses_resp.json()["total"] == 0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("basis", ["AUTO", "GROSS"])
+async def test_legacy_template_cost_preview_and_generation(
+    db_client: AsyncClient, basis: str,
+) -> None:
+    """NET→AUTO/GROSS previews use stored current values and agree with future generation."""
+    from decimal import Decimal
+
+    await _full_auth(db_client)
+    seeds = await _setup_company(db_client)
+    cat = await _create_category(db_client, default_deductible=False)
+    treatment = seeds["purch_treatments"]["NL_DOMESTIC_PURCH"]
+    rate = seeds["rates"]["NL standard (21%)"]
+    template = await _create_recurring(
+        db_client, category_id=cat["id"], vat_treatment_id=treatment["id"],
+        vat_rate_id=rate["id"], start_date=str(date.today()), net_amount="100", vat_amount="21",
+    )
+    path = f"/api/v1/recurring-expenses/{template['id']}/cost-preview"
+    current = await db_client.get(path)
+    assert current.status_code == 200, current.text
+    assert Decimal(current.json()["annual_cost"]) == Decimal("100")
+    body = {
+        "category_id": cat["id"], "vat_treatment_id": treatment["id"],
+        "net_amount": "100", "vat_amount": "21", "deductible": None,
+        "business_percentage": "100", "depreciation_years": 1, "pl_cost_basis": basis,
+    }
+    proposal = await db_client.post("/api/v1/expenses/cost-preview", json=body)
+    assert proposal.status_code == 200, proposal.text
+    assert Decimal(proposal.json()["annual_cost"]) == Decimal("121")
+    assert (await db_client.get(path)).json() == current.json()
+    updated = await db_client.put(f"/api/v1/recurring-expenses/{template['id']}", json={
+        **template, **body, "vat_rate_id": rate["id"],
+    })
+    assert updated.status_code == 200, updated.text
+    saved_cost = await db_client.get(path)
+    for field in ("annual_cost", "cost_basis_amount"):
+        assert Decimal(saved_cost.json()[field]) == Decimal(proposal.json()[field])
+    generated = await db_client.post(f"/api/v1/recurring-expenses/{template['id']}/run-now")
+    assert generated.status_code == 200, generated.text
+    expenses = await db_client.get("/api/v1/expenses")
+    expense = expenses.json()["items"][0]
+    assert expense["pl_cost_basis"] == basis
+    generated_cost = await db_client.get(f"/api/v1/expenses/{expense['id']}/cost-preview")
+    assert generated_cost.json() == saved_cost.json()
+
+
+@pytest.mark.integration
+async def test_template_current_cost_and_generation_keep_tax_snapshot_after_dictionary_edit(
+    db_client: AsyncClient,
+) -> None:
+    from decimal import Decimal
+
+    await _full_auth(db_client)
+    seeds = await _setup_company(db_client)
+    cat = await _create_category(db_client, default_deductible=False)
+    treatment = seeds["purch_treatments"]["NL_DOMESTIC_PURCH"]
+    template = await _create_recurring(
+        db_client, category_id=cat["id"], vat_treatment_id=treatment["id"],
+        vat_rate_id=seeds["rates"]["NL standard (21%)"]["id"], start_date=str(date.today()),
+        net_amount="100", vat_amount="21", pl_cost_basis="AUTO",
+    )
+    path = f"/api/v1/recurring-expenses/{template['id']}/cost-preview"
+    before = await db_client.get(path)
+    changed = await db_client.put(f"/api/v1/vat-treatments/{treatment['id']}", json={
+        **treatment, "effect": "ZERO_REVERSE",
+    })
+    assert changed.status_code == 200, changed.text
+    after = await db_client.get(path)
+    assert after.json() == before.json()
+    assert Decimal(after.json()["annual_cost"]) == Decimal("121")
+    proposal = await db_client.post("/api/v1/expenses/cost-preview", json={
+        "net_amount": "100", "vat_amount": "21", "vat_treatment_id": treatment["id"],
+        "deductible": False, "pl_cost_basis": "AUTO", "business_percentage": "100",
+        "depreciation_years": 1,
+    })
+    assert proposal.status_code == 200, proposal.text
+    assert Decimal(proposal.json()["annual_cost"]) == Decimal("100")
+    generated = await db_client.post(f"/api/v1/recurring-expenses/{template['id']}/run-now")
+    assert generated.status_code == 200, generated.text
+    expenses = await db_client.get("/api/v1/expenses")
+    expense = expenses.json()["items"][0]
+    current = await db_client.get(f"/api/v1/expenses/{expense['id']}/cost-preview")
+    assert current.json() == before.json()

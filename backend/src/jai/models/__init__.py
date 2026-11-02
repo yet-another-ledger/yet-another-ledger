@@ -2,6 +2,14 @@
 from jai.models.address import Address  # noqa: F401
 from jai.models.agent_operation import AgentOperation  # noqa: F401
 from jai.models.agent_token import AgentToken  # noqa: F401
+from jai.models.battery import (  # noqa: F401
+    BatteryAnnualConfirmation,
+    BatteryAnnualEvidence,
+    BatteryAnnualRevision,
+    BatteryAnnualUse,
+    BatteryAsset,
+    BatteryAssetRevision,
+)
 from jai.models.binary_asset import BinaryAsset  # noqa: F401
 from jai.models.company import Company  # noqa: F401
 from jai.models.content import (  # noqa: F401
@@ -21,12 +29,20 @@ from jai.models.document import (  # noqa: F401
     InvoiceCreditBasisLine,
     InvoicePartySnapshot,
     InvoiceRelation,
+    InvoiceRevision,
 )
 from jai.models.document_artifact import DocumentArtifact  # noqa: F401
 from jai.models.email_log import EmailLog  # noqa: F401
 from jai.models.estimate import Estimate, EstimateGroup, EstimateLine  # noqa: F401
 from jai.models.expense import Expense  # noqa: F401
 from jai.models.expense_attachment import ExpenseAttachment  # noqa: F401
+from jai.models.external_sales import (  # noqa: F401
+    ExternalSale,
+    ExternalSaleFile,
+    ExternalSalePosting,
+    ExternalSalesSource,
+    ExternalSaleTax,
+)
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax  # noqa: F401
 from jai.models.mileage import (  # noqa: F401
     MileageRate,

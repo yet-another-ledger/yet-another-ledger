@@ -19,15 +19,24 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
-from sqlalchemy.engine import URL
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from jai.config import get_settings
 from jai.services.mileage import get_mileage_defaults
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+def _script_head() -> str:
+    config = Config(str(BACKEND_DIR / "alembic.ini"))
+    head = ScriptDirectory.from_config(config).get_current_head()
+    assert head is not None
+    return head
 
 
 def _alembic_url() -> str:
@@ -42,6 +51,20 @@ def _alembic_url() -> str:
         database="jai_test_migrations",
     ).render_as_string(hide_password=False)
     return migration_url
+
+
+def _runtime_url(url: str) -> str:
+    """Use the NOBYPASSRLS application role against the same isolated database."""
+    settings = get_settings()
+    parsed = make_url(url)
+    return URL.create(
+        drivername="postgresql+asyncpg",
+        username=settings.postgres_app_user,
+        password=settings.postgres_app_password,
+        host=settings.postgres_host,
+        port=settings.postgres_port,
+        database=parsed.database,
+    ).render_as_string(hide_password=False)
 
 
 def _run_alembic(*extra_args: str, url: str) -> subprocess.CompletedProcess[str]:
@@ -148,7 +171,7 @@ def _query(
 
 
 def _expect_integrity_error(
-    url: str, statement: str, params: dict[str, object]
+    url: str, statement: str, params: dict[str, object], *, company_id: uuid.UUID | None = None
 ) -> str:
     """Execute one invalid raw SQL write and return its database error text."""
 
@@ -158,6 +181,11 @@ def _expect_integrity_error(
             async with engine.connect() as conn:
                 transaction = await conn.begin()
                 try:
+                    if company_id is not None:
+                        await conn.execute(
+                            text("SELECT set_config('jai.company_id', :company, true)"),
+                            {"company": str(company_id)},
+                        )
                     await conn.execute(text(statement), params)
                 except IntegrityError as exc:
                     await transaction.rollback()
@@ -366,6 +394,1135 @@ class TestMigrations:
             f"upgrade head failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
+    def test_0051_production_shaped_upgrade_and_retained_battery_downgrade_guard(self) -> None:
+        """0051 upgrades from 0050 and refuses to discard confirmed records."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_battery_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        (
+            company_id,
+            category_id,
+            treatment_id,
+            rate_id,
+            expense_id,
+            asset_id,
+            annual_id,
+            evidence_id,
+            confirmation_id,
+        ) = (uuid.uuid4() for _ in range(9))
+        params = {
+            "company_id": company_id,
+            "category_id": category_id,
+            "treatment_id": treatment_id,
+            "rate_id": rate_id,
+            "expense_id": expense_id,
+            "asset_id": asset_id,
+            "annual_id": annual_id,
+            "evidence_id": evidence_id,
+            "confirmation_id": confirmation_id,
+        }
+        try:
+            prior = _run_alembic("upgrade", "0050", url=isolated_url)
+            assert prior.returncode == 0, prior.stderr
+            upgraded = _run_alembic("upgrade", "0051", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                isolated_url,
+                "INSERT INTO company (id,name,base_currency) "
+                "VALUES (:company_id,'M16 battery retained','EUR'); "
+                "INSERT INTO expense_category (id,company_id,name,default_deductible,active) "
+                "VALUES (:category_id,:company_id,'Equipment',true,true); "
+                "INSERT INTO vat_rate (id,company_id,label,percent,active) "
+                "VALUES (:rate_id,:company_id,'21%',21,true); "
+                "INSERT INTO vat_treatment "
+                "(id,company_id,code,label,side,effect,report_box,requires_icp,deductible,active) "
+                "VALUES (:treatment_id,:company_id,'NL_DOMESTIC_PURCH','Domestic purchase',"
+                "'PURCHASE','APPLY_RATE','5b',false,true,true); "
+                "INSERT INTO expense "
+                "(id,company_id,expense_date,category_id,category_name,supplier_name,"
+                "vat_treatment_id,vat_treatment_code,vat_treatment_label,vat_treatment_effect,"
+                "vat_rate_id,vat_rate_percent,vat_rate_label,net_amount,vat_amount,gross_amount,"
+                "deductible,currency,exchange_rate,base_net_amount,base_vat_amount,"
+                "base_gross_amount) "
+                "VALUES (:expense_id,:company_id,DATE '2024-12-20',:category_id,'Equipment',"
+                "'Supplier',:treatment_id,'NL_DOMESTIC_PURCH','Domestic purchase','APPLY_RATE',"
+                ":rate_id,21,'21%',10000,2100,12100,true,'EUR',1,10000,2100,12100); "
+                "INSERT INTO battery_asset "
+                "(id,company_id,acquisition_expense_id,acquisition_expense_date,in_service_date,"
+                "net_basis,purchase_vat,purchase_vat_rate_percent,currency,"
+                "ordinary_vat_full_deduction_confirmed,owner_confirmed_at,"
+                "historical_acknowledged_periods) "
+                "VALUES (:asset_id,:company_id,:expense_id,DATE '2024-12-20',DATE '2025-02-01',"
+                "10000,2100,21,'EUR',true,now(),'[\"2024-Q4\"]'::jsonb); "
+                "INSERT INTO battery_annual_use "
+                "(id,company_id,asset_id,year,private_use_percentage,basis_note,confirmed,"
+                "confirmed_at,calculation_base,calculation_vat,asset_version_used) "
+                "VALUES (:annual_id,:company_id,:asset_id,2025,45,'EMS annual statement',true,"
+                "now(),900,189,1); "
+                "INSERT INTO battery_annual_evidence "
+                "(id,company_id,annual_use_id,storage_key,filename,media_type,byte_size,sha256) "
+                "VALUES (:evidence_id,:company_id,:annual_id,'battery/evidence/retained',"
+                "'annual.pdf','application/pdf',3,'retained-sha'); "
+                "INSERT INTO battery_annual_confirmation "
+                "(id,company_id,annual_use_id,version,private_use_percentage,calculation_base,"
+                "calculation_vat,asset_version_used) "
+                "VALUES (:confirmation_id,:company_id,:annual_id,1,45,900,189,1)",
+                params,
+                company_id=company_id,
+            )
+            runtime = _runtime_url(isolated_url)
+            other_company_id = uuid.uuid4()
+            for table in (
+                "battery_asset",
+                "battery_annual_use",
+                "battery_annual_evidence",
+                "battery_annual_confirmation",
+            ):
+                assert _query(runtime, f"SELECT count(*) AS n FROM {table}") == [{"n": 0}]
+                assert _query(
+                    runtime,
+                    f"SELECT count(*) AS n FROM {table}",
+                    company_id=company_id,
+                ) == [{"n": 1}]
+                assert _query(
+                    runtime,
+                    f"SELECT count(*) AS n FROM {table}",
+                    company_id=other_company_id,
+                ) == [{"n": 0}]
+            rls_flags = _query(
+                isolated_url,
+                "SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname LIKE 'battery_%' AND relkind='r' ORDER BY relname",
+            )
+            assert [
+                (row["relname"], row["relrowsecurity"], row["relforcerowsecurity"])
+                for row in rls_flags
+            ] == [
+                ("battery_annual_confirmation", True, True),
+                ("battery_annual_evidence", True, True),
+                ("battery_annual_use", True, True),
+                ("battery_asset", True, True),
+            ]
+            declined = _run_alembic("downgrade", "0050", url=isolated_url)
+            assert declined.returncode != 0
+            assert "Refusing to discard retained battery asset/annual confirmation data" in (
+                declined.stderr
+            )
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": "0051"}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT calculation_base,calculation_vat FROM battery_annual_use "
+                "WHERE id=:annual_id",
+                {"annual_id": annual_id},
+                company_id=company_id,
+            ) == [
+                {"calculation_base": Decimal("900.000"), "calculation_vat": Decimal("189.000")}
+            ]
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0052_runtime_revision_rls_append_only_and_retained_downgrade_guard(self) -> None:
+        """0052 isolates runtime audit reads and refuses to discard live history."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_revision_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        company_id, other_company_id, category_id, treatment_id, rate_id = (
+            uuid.uuid4() for _ in range(5)
+        )
+        expense_id, asset_id, annual_id, asset_revision_id, annual_revision_id = (
+            uuid.uuid4() for _ in range(5)
+        )
+        params = {
+            "company_id": company_id,
+            "category_id": category_id,
+            "treatment_id": treatment_id,
+            "rate_id": rate_id,
+            "expense_id": expense_id,
+            "asset_id": asset_id,
+            "annual_id": annual_id,
+            "asset_revision_id": asset_revision_id,
+            "annual_revision_id": annual_revision_id,
+        }
+        try:
+            prior = _run_alembic("upgrade", "0051", url=isolated_url)
+            assert prior.returncode == 0, prior.stderr
+            upgraded = _run_alembic("upgrade", "0052", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                isolated_url,
+                "INSERT INTO company (id,name,base_currency) "
+                "VALUES (:company_id,'M16 revisions','EUR'); "
+                "INSERT INTO expense_category (id,company_id,name,default_deductible,active) "
+                "VALUES (:category_id,:company_id,'Equipment',true,true); "
+                "INSERT INTO vat_rate (id,company_id,label,percent,active) "
+                "VALUES (:rate_id,:company_id,'21%',21,true); "
+                "INSERT INTO vat_treatment "
+                "(id,company_id,code,label,side,effect,report_box,requires_icp,deductible,active) "
+                "VALUES (:treatment_id,:company_id,'NL_DOMESTIC_PURCH','Domestic purchase',"
+                "'PURCHASE','APPLY_RATE','5b',false,true,true); "
+                "INSERT INTO expense "
+                "(id,company_id,expense_date,category_id,category_name,supplier_name,"
+                "vat_treatment_id,vat_treatment_code,vat_treatment_label,vat_treatment_effect,"
+                "vat_rate_id,vat_rate_percent,vat_rate_label,net_amount,vat_amount,gross_amount,"
+                "deductible,currency,exchange_rate,base_net_amount,base_vat_amount,"
+                "base_gross_amount) "
+                "VALUES (:expense_id,:company_id,DATE '2025-01-02',:category_id,'Equipment',"
+                "'Supplier',:treatment_id,'NL_DOMESTIC_PURCH','Domestic purchase','APPLY_RATE',"
+                ":rate_id,21,'21%',10000,2100,12100,true,'EUR',1,10000,2100,12100); "
+                "INSERT INTO battery_asset "
+                "(id,company_id,acquisition_expense_id,acquisition_expense_date,in_service_date,"
+                "net_basis,purchase_vat,purchase_vat_rate_percent,currency,"
+                "ordinary_vat_full_deduction_confirmed,owner_confirmed_at) "
+                "VALUES (:asset_id,:company_id,:expense_id,DATE '2025-01-02',DATE '2025-01-02',"
+                "10000,2100,21,'EUR',true,now()); "
+                "INSERT INTO battery_annual_use "
+                "(id,company_id,asset_id,year,private_use_percentage,basis_note) "
+                "VALUES (:annual_id,:company_id,:asset_id,2025,45,'EMS'); "
+                "INSERT INTO battery_asset_revision "
+                "(id,company_id,asset_id,version,reason,affected_periods,before_snapshot,"
+                "after_snapshot) "
+                "VALUES (:asset_revision_id,:company_id,:asset_id,2,'Corrected basis','[]',"
+                "'{}','{}'); "
+                "INSERT INTO battery_annual_revision "
+                "(id,company_id,annual_use_id,version,reason,before_snapshot,after_snapshot) "
+                "VALUES (:annual_revision_id,:company_id,:annual_id,2,'Corrected EMS','{}','{}')",
+                params,
+                company_id=company_id,
+            )
+            rls_flags = _query(
+                isolated_url,
+                "SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('battery_asset_revision','battery_annual_revision') "
+                "ORDER BY relname",
+            )
+            assert [
+                (row["relname"], row["relrowsecurity"], row["relforcerowsecurity"])
+                for row in rls_flags
+            ] == [
+                ("battery_annual_revision", True, True),
+                ("battery_asset_revision", True, True),
+            ]
+            runtime = _runtime_url(isolated_url)
+            assert _query(runtime, "SELECT count(*) AS n FROM battery_asset_revision") == [
+                {"n": 0}
+            ]
+            assert _query(
+                runtime,
+                "SELECT count(*) AS n FROM battery_asset_revision",
+                company_id=company_id,
+            ) == [{"n": 1}]
+            assert _query(
+                runtime,
+                "SELECT count(*) AS n FROM battery_asset_revision",
+                company_id=other_company_id,
+            ) == [{"n": 0}]
+            assert _query(
+                runtime,
+                "SELECT count(*) AS n FROM battery_annual_revision",
+                company_id=company_id,
+            ) == [{"n": 1}]
+            assert _query(
+                runtime,
+                "SELECT count(*) AS n FROM battery_annual_revision",
+                company_id=other_company_id,
+            ) == [{"n": 0}]
+            with pytest.raises(DBAPIError, match="battery revisions are append-only"):
+                _query(
+                    isolated_url,
+                    "UPDATE battery_asset_revision SET reason='rewritten' "
+                    "WHERE id=:asset_revision_id",
+                    {"asset_revision_id": asset_revision_id},
+                    company_id=company_id,
+                )
+            with pytest.raises(DBAPIError, match="battery revisions are append-only"):
+                _query(
+                    isolated_url,
+                    "DELETE FROM battery_annual_revision WHERE id=:annual_revision_id",
+                    {"annual_revision_id": annual_revision_id},
+                    company_id=company_id,
+                )
+            refused = _run_alembic("downgrade", "0051", url=isolated_url)
+            assert refused.returncode != 0
+            assert "Refusing to discard retained battery revision history" in refused.stderr
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": "0052"}
+            ]
+            assert _query(
+                runtime,
+                "SELECT count(*) AS n FROM battery_asset_revision",
+                company_id=company_id,
+            ) == [{"n": 1}]
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0046_backfills_legacy_expense_modes_without_changing_amounts(self) -> None:
+        """The 0045→head production-shaped upgrade preserves legacy business records."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_expense_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        try:
+            initial = _run_alembic("upgrade", "0045", url=isolated_url)
+            assert initial.returncode == 0, initial.stderr
+            ids = _insert_0025_expense_sentinel(isolated_url)
+            invoice = _insert_0028_downgrade_sentinel(
+                isolated_url, quote_provenance=False, payment_tax=True
+            )
+            amount_columns = (
+                "net_amount, vat_amount, gross_amount, base_net_amount, "
+                "base_vat_amount, base_gross_amount, business_percentage, depreciation_years"
+            )
+            before_expense = _query(
+                isolated_url,
+                f"SELECT {amount_columns} FROM expense WHERE id=:expense_id",
+                {"expense_id": ids["expense_id"]},
+                company_id=ids["company_id"],
+            )
+            before_recurring = _query(
+                isolated_url,
+                "SELECT net_amount, vat_amount, gross_amount, business_percentage, "
+                "depreciation_years FROM recurring_expense WHERE id=:recurring_id",
+                {"recurring_id": ids["recurring_id"]},
+                company_id=ids["company_id"],
+            )
+            before_invoice = _query(
+                isolated_url,
+                "SELECT invoice_number, sequence_number, subtotal_excl_vat, vat_total, "
+                "total_incl_vat, due_amount FROM invoice WHERE id=:invoice_id",
+                {"invoice_id": invoice["invoice_id"]},
+                company_id=invoice["company_id"],
+            )
+            before_file = _query(
+                isolated_url,
+                "SELECT storage_key, filename, mime_type, byte_size, sha256 "
+                "FROM expense_attachment WHERE id=:attachment_id",
+                {"attachment_id": ids["attachment_id"]},
+                company_id=ids["company_id"],
+            )
+            upgrade = _run_alembic("upgrade", "head", url=isolated_url)
+            assert upgrade.returncode == 0, upgrade.stderr
+            assert _query(
+                isolated_url,
+                "SELECT include_in_pl, pl_cost_basis FROM expense WHERE id=:expense_id",
+                {"expense_id": ids["expense_id"]},
+                company_id=ids["company_id"],
+            ) == [{"include_in_pl": True, "pl_cost_basis": "NET"}]
+            assert _query(
+                isolated_url,
+                "SELECT include_in_pl, pl_cost_basis FROM recurring_expense WHERE id=:recurring_id",
+                {"recurring_id": ids["recurring_id"]},
+                company_id=ids["company_id"],
+            ) == [{"include_in_pl": True, "pl_cost_basis": "NET"}]
+            assert (
+                _query(
+                    isolated_url,
+                    f"SELECT {amount_columns} FROM expense WHERE id=:expense_id",
+                    {"expense_id": ids["expense_id"]},
+                    company_id=ids["company_id"],
+                )
+                == before_expense
+            )
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT net_amount, vat_amount, gross_amount, business_percentage, "
+                    "depreciation_years FROM recurring_expense WHERE id=:recurring_id",
+                    {"recurring_id": ids["recurring_id"]},
+                    company_id=ids["company_id"],
+                )
+                == before_recurring
+            )
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT invoice_number, sequence_number, subtotal_excl_vat, vat_total, "
+                    "total_incl_vat, due_amount FROM invoice WHERE id=:invoice_id",
+                    {"invoice_id": invoice["invoice_id"]},
+                    company_id=invoice["company_id"],
+                )
+                == before_invoice
+            )
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT storage_key, filename, mime_type, byte_size, sha256 "
+                    "FROM expense_attachment WHERE id=:attachment_id",
+                    {"attachment_id": ids["attachment_id"]},
+                    company_id=ids["company_id"],
+                )
+                == before_file
+            )
+            assert _query(
+                isolated_url,
+                "SELECT count(*) AS n FROM battery_asset WHERE acquisition_expense_id=:expense_id",
+                {"expense_id": ids["expense_id"]},
+                company_id=ids["company_id"],
+            ) == [{"n": 0}]
+            original_expense_rls = _query(
+                isolated_url,
+                "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('expense','recurring_expense') ORDER BY relname",
+            )
+            _query(
+                isolated_url,
+                "UPDATE expense SET include_in_pl=false WHERE id=:expense_id",
+                {"expense_id": ids["expense_id"]},
+                company_id=ids["company_id"],
+            )
+            refused = _run_alembic("downgrade", "0045", url=isolated_url)
+            assert refused.returncode != 0
+            assert "M16 Expense settings contain non-default values" in refused.stderr
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": _script_head()}
+            ]
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
+                    "WHERE relname IN ('expense','recurring_expense') ORDER BY relname",
+                )
+                == original_expense_rls
+            )
+            visible_without_context = _query(
+                isolated_url,
+                "SELECT count(*) AS n FROM expense WHERE id=:expense_id",
+                {"expense_id": ids["expense_id"]},
+            )[0]["n"]
+            assert visible_without_context == (
+                0 if original_expense_rls[0]["relrowsecurity"] else 1
+            )
+            assert _query(
+                isolated_url,
+                "SELECT id, include_in_pl FROM expense WHERE id=:expense_id",
+                {"expense_id": ids["expense_id"]},
+                company_id=ids["company_id"],
+            ) == [{"id": ids["expense_id"], "include_in_pl": False}]
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0047_downgrade_guard_sees_retained_rows_without_tenant_context(self) -> None:
+        """A real NOBYPASSRLS migrator cannot hide retained external sales from downgrade."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_sale_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        company_id, source_id, sale_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        try:
+            upgraded = _run_alembic("upgrade", "head", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            expected_head = _script_head()
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": expected_head}
+            ]
+            _query(
+                isolated_url,
+                "INSERT INTO company (id,name,base_currency) "
+                "VALUES (:company_id,'M16 retained sale','EUR'); "
+                "INSERT INTO external_sales_source "
+                "(id,company_id,name,kind,default_include_in_pl) "
+                "VALUES (:source_id,:company_id,'Platform','PLATFORM',true); "
+                "INSERT INTO external_sale (id,company_id,source_id,original_number) "
+                "VALUES (:sale_id,:company_id,:source_id,'retained-001')",
+                {"company_id": company_id, "source_id": source_id, "sale_id": sale_id},
+                company_id=company_id,
+            )
+            assert _query(
+                isolated_url,
+                "SELECT count(*) AS n FROM external_sale",
+            ) == [{"n": 0}]
+            assert _query(
+                isolated_url,
+                "SELECT count(*) AS n FROM external_sale WHERE id=:sale_id",
+                {"sale_id": sale_id},
+                company_id=company_id,
+            ) == [{"n": 1}]
+            refused = _run_alembic("downgrade", "0046", url=isolated_url)
+            assert refused.returncode != 0
+            assert (
+                "Refusing to discard external sales drafts or original metadata" in refused.stderr
+            )
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": expected_head}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('external_sales_source','external_sale',"
+                "'external_sale_tax','external_sale_file') ORDER BY relname",
+            ) == [
+                {
+                    "relname": table,
+                    "relrowsecurity": True,
+                    "relforcerowsecurity": True,
+                }
+                for table in (
+                    "external_sale",
+                    "external_sale_file",
+                    "external_sale_tax",
+                    "external_sales_source",
+                )
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT id,original_number FROM external_sale WHERE id=:sale_id",
+                {"sale_id": sale_id},
+                company_id=company_id,
+            ) == [{"id": sale_id, "original_number": "retained-001"}]
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0048_empty_downgrade_restores_external_sale_rls_flags(self) -> None:
+        """A permitted posting downgrade leaves the retained header protected."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_down_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        try:
+            upgraded = _run_alembic("upgrade", "0048", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            before = _query(
+                isolated_url,
+                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
+                "WHERE relname='external_sale'",
+            )
+            assert before == [{"relrowsecurity": True, "relforcerowsecurity": True}]
+
+            downgraded = _run_alembic("downgrade", "0047", url=isolated_url)
+            assert downgraded.returncode == 0, downgraded.stderr
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": "0047"}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
+                "WHERE relname='external_sale'",
+            ) == [{"relrowsecurity": True, "relforcerowsecurity": True}]
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0048_downgrade_rejects_posted_history_without_tenant_context(self) -> None:
+        """A NOBYPASSRLS migrator detects retained posting data and rolls back DDL."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_keep_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        company_id, source_id, sale_id, posting_id = (uuid.uuid4() for _ in range(4))
+        params = {
+            "company_id": company_id,
+            "source_id": source_id,
+            "sale_id": sale_id,
+            "posting_id": posting_id,
+        }
+        try:
+            upgraded = _run_alembic("upgrade", "0048", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                isolated_url,
+                "INSERT INTO company (id,name,base_currency) "
+                "VALUES (:company_id,'M16 posted retained','EUR'); "
+                "INSERT INTO external_sales_source "
+                "(id,company_id,name,kind,default_include_in_pl) "
+                "VALUES (:source_id,:company_id,'Platform','PLATFORM',true); "
+                "INSERT INTO external_sale "
+                "(id,company_id,source_id,original_number,status,version,posted_at,"
+                "original_net_total,original_vat_total) "
+                "VALUES (:sale_id,:company_id,:source_id,'posted-001','POSTED',2,now(),10,2)",
+                params,
+                company_id=company_id,
+            )
+            _query(
+                isolated_url,
+                "INSERT INTO external_sale_posting "
+                "(id,company_id,external_sale_id,version,snapshot) "
+                "VALUES (:posting_id,:company_id,:sale_id,2,'{}'::jsonb)",
+                params,
+                company_id=company_id,
+            )
+            assert _query(isolated_url, "SELECT count(*) AS n FROM external_sale") == [
+                {"n": 0}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT count(*) AS n FROM external_sale_posting",
+            ) == [{"n": 0}]
+
+            refused = _run_alembic("downgrade", "0047", url=isolated_url)
+            assert refused.returncode != 0
+            assert "Refusing to discard retained external sale posting history" in refused.stderr
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": "0048"}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('external_sale','external_sale_posting') ORDER BY relname",
+            ) == [
+                {
+                    "relname": name,
+                    "relrowsecurity": True,
+                    "relforcerowsecurity": True,
+                }
+                for name in ("external_sale", "external_sale_posting")
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT status,version,original_net_total,original_vat_total "
+                "FROM external_sale WHERE id=:sale_id",
+                {"sale_id": sale_id},
+                company_id=company_id,
+            ) == [
+                {
+                    "status": "POSTED",
+                    "version": 2,
+                    "original_net_total": Decimal("10.00"),
+                    "original_vat_total": Decimal("2.00"),
+                }
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT id,version,snapshot FROM external_sale_posting "
+                "WHERE external_sale_id=:sale_id",
+                {"sale_id": sale_id},
+                company_id=company_id,
+            ) == [{"id": posting_id, "version": 2, "snapshot": {}}]
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0049_upgrade_preserves_rows_and_audits_a_live_revision(self) -> None:
+        """The production-shaped 0048→0049 upgrade retains old rows and enables audited edits."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_upgrade_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        company_id, source_id, pending_id, posted_id, file_id, posting_id = (
+            uuid.uuid4() for _ in range(6)
+        )
+        params = {
+            "company_id": company_id,
+            "source_id": source_id,
+            "pending_id": pending_id,
+            "posted_id": posted_id,
+            "file_id": file_id,
+            "posting_id": posting_id,
+        }
+        try:
+            upgraded = _run_alembic("upgrade", "0048", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                isolated_url,
+                "INSERT INTO company (id,name,base_currency) "
+                "VALUES (:company_id,'M16 0049 upgrade','EUR'); "
+                "INSERT INTO external_sales_source (id,company_id,name,kind) "
+                "VALUES (:source_id,:company_id,'Retained source','OTHER'); "
+                "INSERT INTO external_sale (id,company_id,source_id,original_number) "
+                "VALUES (:pending_id,:company_id,:source_id,'pending-0048'); "
+                "INSERT INTO external_sale "
+                "(id,company_id,source_id,original_number,status,version,posted_at,"
+                "original_net_total,original_vat_total) "
+                "VALUES (:posted_id,:company_id,:source_id,'posted-0048','POSTED',2,now(),"
+                "100.00,21.00); "
+                "INSERT INTO external_sale_file "
+                "(id,company_id,external_sale_id,storage_key,filename,mime_type,byte_size,sha256) "
+                "VALUES (:file_id,:company_id,:posted_id,'external-sales/retained.pdf',"
+                "'retained.pdf','application/pdf',8,:sha); "
+                "INSERT INTO external_sale_posting "
+                "(id,company_id,external_sale_id,version,snapshot) "
+                "VALUES (:posting_id,:company_id,:posted_id,2,CAST(:snapshot AS jsonb))",
+                {**params, "sha": "a" * 64, "snapshot": '{"original_number":"posted-0048"}'},
+                company_id=company_id,
+            )
+            before = _query(
+                isolated_url,
+                "SELECT s.id,s.original_number,s.status,s.version,s.original_net_total,"
+                "f.storage_key,f.sha256,p.snapshot FROM external_sale s "
+                "JOIN external_sale_file f ON f.external_sale_id=s.id "
+                "JOIN external_sale_posting p ON p.external_sale_id=s.id "
+                "WHERE s.id=:posted_id",
+                params,
+                company_id=company_id,
+            )
+            step4 = _run_alembic("upgrade", "0049", url=isolated_url)
+            assert step4.returncode == 0, step4.stderr
+            assert _query(
+                isolated_url,
+                "SELECT document_kind,related_external_sale_id,historical_original_number "
+                "FROM external_sale WHERE id=:posted_id",
+                params,
+                company_id=company_id,
+            ) == [{
+                "document_kind": "SALE",
+                "related_external_sale_id": None,
+                "historical_original_number": None,
+            }]
+            after = _query(
+                isolated_url,
+                "SELECT s.id,s.original_number,s.status,s.version,s.original_net_total,"
+                "f.storage_key,f.sha256,p.snapshot FROM external_sale s "
+                "JOIN external_sale_file f ON f.external_sale_id=s.id "
+                "JOIN external_sale_posting p ON p.external_sale_id=s.id "
+                "WHERE s.id=:posted_id",
+                params,
+                company_id=company_id,
+            )
+            assert after == before
+            assert _query(
+                isolated_url,
+                "SELECT status,original_number FROM external_sale WHERE id=:pending_id",
+                params,
+                company_id=company_id,
+            ) == [{"status": "PENDING", "original_number": "pending-0048"}]
+
+            audit_id = uuid.uuid4()
+            _query(
+                _runtime_url(isolated_url),
+                "INSERT INTO external_sale_revision "
+                "(id,company_id,external_sale_id,version,action,reason,before_snapshot,"
+                "after_snapshot) "
+                "VALUES (:audit_id,:company_id,:posted_id,3,'REVISION','upgrade-path test',"
+                "'{}'::jsonb,'{}'::jsonb); "
+                "SELECT set_config('jai.external_sale_revision_id',:audit_id,true); "
+                "UPDATE external_sale SET document_date=DATE '2027-01-10',version=3 "
+                "WHERE id=:posted_id",
+                {**params, "audit_id": str(audit_id)},
+                company_id=company_id,
+            )
+            assert _query(
+                isolated_url,
+                "SELECT status,version,document_date FROM external_sale WHERE id=:posted_id",
+                params,
+                company_id=company_id,
+            ) == [{"status": "POSTED", "version": 3, "document_date": date(2027, 1, 10)}]
+            assert _query(
+                isolated_url,
+                "SELECT action,reason,version FROM external_sale_revision WHERE id=:audit_id",
+                {"audit_id": audit_id},
+                company_id=company_id,
+            ) == [{"action": "REVISION", "reason": "upgrade-path test", "version": 3}]
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0049_retained_revision_blocks_downgrade_for_nobypass_migrator(self) -> None:
+        """The NOBYPASSRLS migration role cannot hide retained revision history."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_retained_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        company_id, source_id, sale_id, file_id, posting_id, revision_id = (
+            uuid.uuid4() for _ in range(6)
+        )
+        params = {
+            "company_id": company_id,
+            "source_id": source_id,
+            "sale_id": sale_id,
+            "file_id": file_id,
+            "posting_id": posting_id,
+            "revision_id": revision_id,
+        }
+        try:
+            upgraded = _run_alembic("upgrade", "head", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                isolated_url,
+                "INSERT INTO company (id,name,base_currency) "
+                "VALUES (:company_id,'M16 retained revision','EUR'); "
+                "INSERT INTO external_sales_source (id,company_id,name,kind) "
+                "VALUES (:source_id,:company_id,'Retained source','OTHER'); "
+                "INSERT INTO external_sale "
+                "(id,company_id,source_id,original_number,status,version,posted_at,"
+                "original_net_total,original_vat_total) "
+                "VALUES (:sale_id,:company_id,:source_id,'retained-0049','POSTED',2,now(),"
+                "100.00,21.00); "
+                "INSERT INTO external_sale_file "
+                "(id,company_id,external_sale_id,storage_key,filename,mime_type,byte_size,sha256) "
+                "VALUES (:file_id,:company_id,:sale_id,'external-sales/retained.pdf',"
+                "'retained.pdf','application/pdf',8,:sha); "
+                "INSERT INTO external_sale_posting "
+                "(id,company_id,external_sale_id,version,snapshot) "
+                "VALUES (:posting_id,:company_id,:sale_id,2,'{}'::jsonb); "
+                "INSERT INTO external_sale_revision "
+                "(id,company_id,external_sale_id,version,action,reason,before_snapshot,"
+                "after_snapshot) "
+                "VALUES (:revision_id,:company_id,:sale_id,3,'REVISION','retain audit',"
+                "'{}'::jsonb,'{}'::jsonb)",
+                {**params, "sha": "b" * 64},
+                company_id=company_id,
+            )
+            refused = _run_alembic("downgrade", "0048", url=isolated_url)
+            assert refused.returncode != 0
+            assert (
+                "Refusing to discard retained external sale revision/void history"
+                in refused.stderr
+            )
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": _script_head()}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('external_sale','external_sale_revision') ORDER BY relname",
+            ) == [
+                {"relname": name, "relrowsecurity": True, "relforcerowsecurity": True}
+                for name in ("external_sale", "external_sale_revision")
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT status,original_number FROM external_sale WHERE id=:sale_id",
+                params,
+                company_id=company_id,
+            ) == [{"status": "POSTED", "original_number": "retained-0049"}]
+            assert _query(
+                isolated_url,
+                "SELECT reason FROM external_sale_revision WHERE id=:revision_id",
+                params,
+                company_id=company_id,
+            ) == [{"reason": "retain audit"}]
+        finally:
+            _drop_database(isolated_url)
+
+    @pytest.mark.parametrize(
+        "kind,reference",
+        [
+            ("CREDIT", "known"),
+            ("CREDIT", "historical"),
+            ("SETTLEMENT_ADJUSTMENT", "none"),
+        ],
+    )
+    def test_0049_unrevised_posted_semantics_block_downgrade_across_tenants(
+        self, kind: str, reference: str
+    ) -> None:
+        """No revision is needed to retain a first-posted credit/adjustment."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_fix01_down_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        company_id, other_company, source_id, original_id, sale_id, tax_id, file_id, posting_id = (
+            uuid.uuid4() for _ in range(8)
+        )
+        params = dict(
+            company=company_id,
+            other_company=other_company,
+            source=source_id,
+            original=original_id,
+            sale=sale_id,
+            tax=tax_id,
+            file=file_id,
+            posting=posting_id,
+            kind=kind,
+            related=original_id if reference == "known" else None,
+            number="OLD-17" if reference == "historical" else None,
+            explanation="Predates system" if reference == "historical" else None,
+            sha="c" * 64,
+        )
+        try:
+            upgraded = _run_alembic("upgrade", "0048", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                isolated_url,
+                "INSERT INTO company(id,name,base_currency) VALUES(:company,'Retained','EUR'),"
+                "(:other_company,'Unrelated tenant','EUR'); "
+                "INSERT INTO external_sales_source(id,company_id,name,kind) "
+                "VALUES(:source,:company,'Source','PLATFORM'); "
+                "INSERT INTO external_sale(id,company_id,source_id,original_number,status,version,"
+                "document_date,include_in_pl,original_net_total,original_vat_total) "
+                "VALUES(:original,:company,:source,'ORIGINAL','POSTED',2,'2026-10-01',true,100,21)",
+                params,
+                company_id=company_id,
+            )
+            upgraded = _run_alembic("upgrade", "0049", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            _query(
+                _runtime_url(isolated_url),
+                "INSERT INTO external_sale(id,company_id,source_id,original_number,status,version,"
+                "document_date,include_in_pl,original_net_total,original_vat_total,document_kind,"
+                "related_external_sale_id,historical_original_number,"
+                "historical_original_explanation) "
+                "VALUES(:sale,:company,:source,'CORRECTION','POSTED',2,'2026-10-02',true,-10,-2.1,"
+                ":kind,:related,:number,:explanation); "
+                "INSERT INTO external_sale_tax(id,company_id,external_sale_id,treatment_code,"
+                "rate_percent,net_amount,vat_amount) "
+                "VALUES(:tax,:company,:sale,'NL_DOMESTIC',21,-10,-2.1); "
+                "INSERT INTO external_sale_file(id,company_id,external_sale_id,"
+                "storage_key,filename,"
+                "mime_type,byte_size,sha256) "
+                "VALUES(:file,:company,:sale,'external-sales/fix01.pdf',"
+                "'original.pdf','application/pdf',10,:sha); "
+                "INSERT INTO external_sale_posting(id,company_id,external_sale_id,"
+                "version,snapshot) "
+                "VALUES(:posting,:company,:sale,2,"
+                "jsonb_build_object('document_kind',CAST(:kind AS text)))",
+                params,
+                company_id=company_id,
+            )
+            query = (
+                "SELECT s.*,t.net_amount,t.vat_amount,f.sha256,p.snapshot "
+                "FROM external_sale s JOIN external_sale_tax t ON t.external_sale_id=s.id "
+                "JOIN external_sale_file f ON f.external_sale_id=s.id "
+                "JOIN external_sale_posting p ON p.external_sale_id=s.id WHERE s.id=:sale"
+            )
+            before = _query(_runtime_url(isolated_url), query, params, company_id=company_id)
+            assert len(before) == 1
+            assert _query(isolated_url, "SELECT count(*) AS count FROM external_sale") == [
+                {"count": 0}
+            ]
+            assert _query(_runtime_url(isolated_url), query, params, company_id=other_company) == []
+            assert _query(
+                _runtime_url(isolated_url),
+                "SELECT count(*) AS count FROM external_sale_revision",
+                company_id=company_id,
+            ) == [{"count": 0}]
+            refused = _run_alembic("downgrade", "0048", url=isolated_url)
+            assert refused.returncode != 0
+            assert "Refusing to discard retained external sale" in refused.stderr
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": "0049"}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('external_sale','external_sale_revision') ORDER BY relname",
+            ) == [
+                {"relrowsecurity": True, "relforcerowsecurity": True},
+                {"relrowsecurity": True, "relforcerowsecurity": True},
+            ]
+            assert (
+                _query(_runtime_url(isolated_url), query, params, company_id=company_id) == before
+            )
+            assert _query(_runtime_url(isolated_url), query, params, company_id=other_company) == []
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0049_empty_downgrade_and_reupgrade_restore_rls_guards(self) -> None:
+        """An empty 0049 downgrade is safe, and re-upgrade restores forced RLS."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_m16_roundtrip_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        try:
+            upgraded = _run_alembic("upgrade", "0049", url=isolated_url)
+            assert upgraded.returncode == 0, upgraded.stderr
+            assert _query(
+                isolated_url,
+                "SELECT relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname='external_sale_revision'",
+            ) == [{"relrowsecurity": True, "relforcerowsecurity": True}]
+            downgraded = _run_alembic("downgrade", "0048", url=isolated_url)
+            assert downgraded.returncode == 0, downgraded.stderr
+            assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+                {"version_num": "0048"}
+            ]
+            assert _query(
+                isolated_url,
+                "SELECT to_regclass('external_sale_revision') AS revision_table",
+            ) == [{"revision_table": None}]
+            reupgraded = _run_alembic("upgrade", "0049", url=isolated_url)
+            assert reupgraded.returncode == 0, reupgraded.stderr
+            assert _query(
+                isolated_url,
+                "SELECT relrowsecurity,relforcerowsecurity FROM pg_class "
+                "WHERE relname IN ('external_sale','external_sale_revision') "
+                "ORDER BY relname",
+            ) == [
+                {"relrowsecurity": True, "relforcerowsecurity": True},
+                {"relrowsecurity": True, "relforcerowsecurity": True},
+            ]
+        finally:
+            _drop_database(isolated_url)
+
+    def test_0044_sent_copy_preserves_historical_logs(self) -> None:
+        assert _run_alembic("upgrade", "head", url=self.url).returncode == 0
+        assert _run_alembic("downgrade", "0043", url=self.url).returncode == 0
+        company_id, log_id, related_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        params = {"company": company_id, "id": log_id, "related": related_id}
+        _query(
+            self.url,
+            "INSERT INTO company (id,name,base_currency) "
+            "VALUES (:company,'SI1 historical','EUR'); "
+            "INSERT INTO email_log (id,company_id,related_type,related_id,to_email,"
+            "subject,body_snapshot,status,sent_at) VALUES (:id,:company,'INVOICE',"
+            ":related,'to@example.com','old subject','old body','SENT',now())",
+            params,
+            company_id=company_id,
+        )
+        before = _query(
+            self.url,
+            "SELECT status,sent_at,body_snapshot FROM email_log WHERE id=:id",
+            params,
+            company_id=company_id,
+        )
+        result = _run_alembic("upgrade", "head", url=self.url)
+        assert result.returncode == 0, result.stderr
+        assert (
+            _query(
+                self.url,
+                "SELECT status,sent_at,body_snapshot FROM email_log WHERE id=:id",
+                params,
+                company_id=company_id,
+            )
+            == before
+        )
+        assert _query(
+            self.url,
+            "SELECT sent_copy_status,sent_copy_error_code,sent_copy_saved_at "
+            "FROM email_log WHERE id=:id",
+            params,
+            company_id=company_id,
+        ) == [
+            {
+                "sent_copy_status": "NOT_ATTEMPTED",
+                "sent_copy_error_code": None,
+                "sent_copy_saved_at": None,
+            }
+        ]
+        error = _expect_integrity_error(
+            self.url,
+            "UPDATE email_log SET sent_copy_status='INVALID' WHERE id=:id",
+            params,
+            company_id=company_id,
+        )
+        assert "ck_email_log_sent_copy_status" in error
+        assert _run_alembic("downgrade", "0043", url=self.url).returncode == 0
+        assert (
+            _query(
+                self.url,
+                "SELECT status,sent_at,body_snapshot FROM email_log WHERE id=:id",
+                params,
+                company_id=company_id,
+            )
+            == before
+        )
+        assert _run_alembic("upgrade", "head", url=self.url).returncode == 0
+
+    def test_0045_revision_storage_downgrade_upgrade_preserves_business_rows(self) -> None:
+        """SI2 storage is additive and its isolated downgrade does not rewrite invoices."""
+        isolated_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=get_settings().postgres_migration_user,
+            password=get_settings().postgres_migration_password,
+            host=get_settings().postgres_host,
+            port=get_settings().postgres_port,
+            database=f"jai_test_si2_revision_{uuid.uuid4().hex[:12]}",
+        ).render_as_string(hide_password=False)
+        _ensure_database(isolated_url)
+        try:
+            assert _run_alembic("upgrade", "head", url=isolated_url).returncode == 0
+            to_0044 = _run_alembic("downgrade", "0044", url=isolated_url)
+            assert to_0044.returncode == 0, to_0044.stderr
+            sentinel = _insert_0028_downgrade_sentinel(
+                isolated_url, quote_provenance=False, payment_tax=True
+            )
+            before = _query(
+                isolated_url,
+                "SELECT invoice_number, sequence_number, total_incl_vat, due_amount "
+                "FROM invoice WHERE id=:invoice_id",
+                {"invoice_id": sentinel["invoice_id"]},
+                company_id=sentinel["company_id"],
+            )
+            production_upgrade = _run_alembic("upgrade", "head", url=isolated_url)
+            assert production_upgrade.returncode == 0, production_upgrade.stderr
+            assert _query(
+                isolated_url,
+                "SELECT to_regclass('public.invoice_revision') AS table_name",
+            ) == [{"table_name": "invoice_revision"}]
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT invoice_number, sequence_number, total_incl_vat, due_amount "
+                    "FROM invoice WHERE id=:invoice_id",
+                    {"invoice_id": sentinel["invoice_id"]},
+                    company_id=sentinel["company_id"],
+                )
+                == before
+            )
+            downgrade = _run_alembic("downgrade", "0044", url=isolated_url)
+            assert downgrade.returncode == 0, downgrade.stderr
+            assert _query(
+                isolated_url,
+                "SELECT to_regclass('public.invoice_revision') AS table_name",
+            ) == [{"table_name": None}]
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT invoice_number, sequence_number, total_incl_vat, due_amount "
+                    "FROM invoice WHERE id=:invoice_id",
+                    {"invoice_id": sentinel["invoice_id"]},
+                    company_id=sentinel["company_id"],
+                )
+                == before
+            )
+            upgrade = _run_alembic("upgrade", "head", url=isolated_url)
+            assert upgrade.returncode == 0, upgrade.stderr
+            assert _query(
+                isolated_url,
+                "SELECT to_regclass('public.invoice_revision') AS table_name",
+            ) == [{"table_name": "invoice_revision"}]
+            assert (
+                _query(
+                    isolated_url,
+                    "SELECT invoice_number, sequence_number, total_incl_vat, due_amount "
+                    "FROM invoice WHERE id=:invoice_id",
+                    {"invoice_id": sentinel["invoice_id"]},
+                    company_id=sentinel["company_id"],
+                )
+                == before
+            )
+        finally:
+            _drop_database(isolated_url)
+        assert _run_alembic("upgrade", "head", url=self.url).returncode == 0
+
     def test_0042_upload_enum_upgrade_and_non_destructive_downgrade_posture(self) -> None:
         """UPLOAD is additive, and downgrade deliberately keeps the enum label."""
         assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
@@ -421,11 +1578,14 @@ class TestMigrations:
 
         upgraded = _run_alembic("upgrade", "head", url=self.url)
         assert upgraded.returncode == 0, upgraded.stderr
-        assert _query(
-            self.url,
-            "SELECT net_amount, vat_amount, gross_amount FROM expense WHERE id=:expense_id",
-            {"expense_id": ids["expense_id"]},
-        ) == before
+        assert (
+            _query(
+                self.url,
+                "SELECT net_amount, vat_amount, gross_amount FROM expense WHERE id=:expense_id",
+                {"expense_id": ids["expense_id"]},
+            )
+            == before
+        )
         assert _query(
             self.url,
             "SELECT company_id, expense_id, storage_key, filename, byte_size, receipt_inbox_id "
@@ -490,11 +1650,14 @@ class TestMigrations:
             {"id": inbox_id},
             company_id=ids["company_id"],
         )
-        assert _query(
-            self.url,
-            "SELECT id FROM expense_attachment WHERE id=:id",
-            {"id": inbox_file_id},
-        ) == []
+        assert (
+            _query(
+                self.url,
+                "SELECT id FROM expense_attachment WHERE id=:id",
+                {"id": inbox_file_id},
+            )
+            == []
+        )
 
         # A confirmed item has already transferred its file to Expense. Its
         # attachment no longer prevents SET NOT NULL, so the explicit guard
@@ -531,11 +1694,14 @@ class TestMigrations:
         downgrade = _run_alembic("downgrade", "0042", url=self.url)
         assert downgrade.returncode != 0
         assert "cannot downgrade receipt inbox while inbox rows exist" in downgrade.stderr
-        assert _query(
-            self.url,
-            "SELECT id FROM receipt_inbox WHERE id=:id",
-            {"id": confirmed_id},
-        ) == []
+        assert (
+            _query(
+                self.url,
+                "SELECT id FROM receipt_inbox WHERE id=:id",
+                {"id": confirmed_id},
+            )
+            == []
+        )
         assert _query(
             self.url,
             "SELECT id FROM receipt_inbox WHERE id=:id",
@@ -1302,9 +2468,7 @@ class TestMigrations:
         """A quote-only deposit independently blocks downgrade before any DDL."""
         assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
         assert _run_alembic("upgrade", "0028", url=self.url).returncode == 0
-        ids = _insert_0028_downgrade_sentinel(
-            self.url, quote_provenance=True, payment_tax=False
-        )
+        ids = _insert_0028_downgrade_sentinel(self.url, quote_provenance=True, payment_tax=False)
 
         result = _run_alembic("downgrade", "0027", url=self.url)
         assert result.returncode != 0
@@ -1332,9 +2496,7 @@ class TestMigrations:
         """A VAT snapshot independently blocks downgrade before any DDL."""
         assert _run_alembic("downgrade", "base", url=self.url).returncode == 0
         assert _run_alembic("upgrade", "0028", url=self.url).returncode == 0
-        ids = _insert_0028_downgrade_sentinel(
-            self.url, quote_provenance=False, payment_tax=True
-        )
+        ids = _insert_0028_downgrade_sentinel(self.url, quote_provenance=False, payment_tax=True)
 
         result = _run_alembic("downgrade", "0027", url=self.url)
         assert result.returncode != 0

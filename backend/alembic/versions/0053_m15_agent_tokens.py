@@ -1,7 +1,7 @@
 """Add RLS-protected Agent tokens.
 
-Revision ID: 0044
-Revises: 0043
+Revision ID: 0053
+Revises: 0052
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from sqlalchemy.dialects.postgresql import dialect
 from alembic import op
 from jai.config import get_settings
 
-revision: str = "0044"
-down_revision: str | None = "0043"
+revision: str = "0053"
+down_revision: str | None = "0052"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
