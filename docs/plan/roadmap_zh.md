@@ -341,6 +341,19 @@ docs/                # insight(分析) + plan(本路线图 + 里程碑)
 
 ---
 
+## 4.ab 路线图之外 · 共用地址搜索／自动填充与里程路线距离（待计划）
+
+> **状态**：作者于 **2026-11-02** 确认方向，尚未排期。之后再决定作为小改进或里程碑实施；现在不预留 SI／里程碑编号、schema，也不开始实现。正式开发前，可以先一起通过命令行人工试用 API。
+
+- **共用交互**：输入部分地址，或荷兰邮编＋门牌号 → 候选中显示城市／邮编／国家，区分同名街道 → 用户明确选择地址。供应商返回的是数量有限的相关候选，不保证列出所有城市的匹配地址。
+- **添加／编辑客户**：在现有账单／收货地址字段上方增加搜索框；选中后自动填入街名、门牌号、邮编、城市和国家，以及可获取的省份／门牌附加信息。各字段继续允许手动修改；缺失的公寓号或荷兰 `A`／`bis` 等附加信息可手填。复用现有结构化地址表单，承接 [M3](milestones/M3_zh.md) 已顺延的地址补全想法。
+- **里程**：Origin／Destination 复用地址搜索，保留选中地址的显示文本，并取得坐标查询道路路线。两端选好后，提供可修改的单程路线距离建议；任一端地址变化时，旧建议失效。未配置 key 或查询失败时仍可手填，用户确认的公里数按 [M11](milestones/M11_zh.md) D18 作为记账依据；供应商数据后续变化不能导致历史行程漂移。初期沿用现有「单程距离＋往返勾选」，无需地图展示。
+- **候选供应商，尚未最终选型**：[Geoapify](https://apidocs.geoapify.com/docs/geocoding/address-autocomplete/) 地址补全＋[Routing](https://apidocs.geoapify.com/docs/routing/) 作为优先试用候选，一个 key 覆盖两个用途；[Google Places Autocomplete](https://developers.google.com/maps/documentation/places/web-service/place-autocomplete)＋Place Details＋Routes 作为另一方案，对应作者熟悉的购物／填表体验。其他候选包括 [TomTom](https://docs.tomtom.com/pricing)，或荷兰 [PDOK](https://www.pdok.nl/pdok-locatieserver) 地址搜索搭配 [openrouteservice](https://giscience.github.io/openrouteservice/frequently-asked-questions) 路线服务。优先免费／低频免费、用户自带 key；选型时重新核对额度、计费前提、署名及地址／距离数据的长期保存权限，包括 Google 的 EEA 条款。
+- **接入方向**：两个页面共用地址搜索与结构化结果映射，路线查询作为里程的额外能力。用户自带凭证走类型化设置与后端代理；具体契约及可能的 additive 存储变更留待之后的实施计划细化。
+- **人工试用锚点**：需要 key 时使用作者自己的 key，通过命令行查询一小组共同选定的示例地址：邮编＋门牌号、不同城市的同名街道、门牌附加信息及国际地址。检查结构化字段与缺失值，再查询两点驾车路线，与人工核对的路线比较距离，并记录路线选项，不要求与 Google Maps 数值完全一致。重新核对价格／用量及保存条款；试用结果不写入真实客户／里程记录。目前尚未进行带 key 的准确率或路线实测。
+
+---
+
 ## 5. 每个原子步骤的模板 + Definition of Done
 
 > 细化里程碑时，每个原子步骤都按这个模板拆（见 `milestones/_TEMPLATE.md`）。**单人开发不强制 PR**：自测 + CI 绿即可合 `main`；想做人工 review 时再开分支/PR。
