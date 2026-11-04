@@ -99,11 +99,11 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 路线图
 
-M0–M14 已完成。**M15 仍在开发中，作者于 2026-10-24 决定暂缓，优先开展其他工作**；尚未验收。实现与走查修复保存在 `wip/m15-agent-accounting-paused` 分支，不属于 `main` 的功能。M15 范围为具备 scope 的 Agent/MCP 收据接入及客户、报价、普通发票草稿工具；现有 M14 收件箱与 AI 提取保持独立。当前没有活动里程碑，后续工作由作者指定，不自动恢复 M15。详见 [M15 状态与恢复检查点](docs/plan/milestones/M15_zh.md)、[路线图](docs/plan/roadmap_zh.md)及 [M14](docs/plan/milestones/M14_zh.md)。
+M0–M14 已完成。**M15 仍在开发中，作者于 2026-10-24 决定暂缓，优先开展其他工作**；尚未验收。实现与走查修复保存在 `wip/m15-agent-accounting-paused` 分支，不属于 `main` 的功能。M15 范围为具备 scope 的 Agent/MCP 收据接入及客户、报价、普通发票草稿工具；现有 M14 收件箱与 AI 提取保持独立。M17 实施按下述状态继续，不自动恢复 M15。详见 [M15 状态与恢复检查点](docs/plan/milestones/M15_zh.md)、[路线图](docs/plan/roadmap_zh.md)及 [M14](docs/plan/milestones/M14_zh.md)。
 
 作者已于 2026-11-01 按记录的代表性走查范围验收 [M16](docs/plan/milestones/M16_zh.md)，外部销售凭证记账、VAT／P&L 分离、储能年度私用调整及并入的 SI3 里程利润拆分已交付；跳过／未重测路径及已知遗留仍明确记录。
 
-作者于 2026-11-04 确认并记录 [M17 报价 PDF 附录设计](docs/plan/milestones/M17_zh.md)：共享资料库和报价专用上传、人工选择排序、预览／下载／邮件统一合并输出。六张原子任务卡尚未开始；这是计划能力，不是已交付功能，也不恢复 M15。
+作者于 2026-11-04 确认并记录 [M17 报价 PDF 附录设计](docs/plan/milestones/M17_zh.md)：共享资料库和报价专用上传、人工选择排序、预览／下载／邮件统一合并输出。Step 1–5 已通过自动化门禁与独立审查；Step 6 进行中，作者走查待进行。M17 尚未记录为已验收，M15 保持暂停。
 
 SI1（单据排序、Quote 复制和服务器侧 Sent 副本）已于2026-10-25按代表性走查范围验收；未实际执行的邮件类型和失败分支明确记录为自动化覆盖。参见 [SI1 计划与验收](docs/plan/improvements/SI1_zh.md)。
 
