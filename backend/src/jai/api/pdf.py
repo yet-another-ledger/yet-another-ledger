@@ -28,6 +28,7 @@ GET /api/v1/payments/{id}/receipt-pdf?locale=en|zh
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any, Literal, Never
 
@@ -51,6 +52,13 @@ from jai.schemas.artifact import (
     DocumentArtifactValidationFailedErrorResponse,
     DocumentArtifactValidationRead,
 )
+from jai.schemas.pdf_appendix import (
+    PdfAppendixErrorResponse,
+    PdfAppendixFileListResponse,
+    PdfAppendixFileRead,
+    PdfAppendixLimitsRead,
+    PdfLibraryFileUpdate,
+)
 from jai.services.artifact_validation import (
     ArtifactAIConfigurationError,
     ArtifactAIValidationError,
@@ -65,6 +73,336 @@ from jai.services.artifacts import (
 from .invoices import _owner_only, _require_company_id
 
 router = APIRouter(prefix="/api/v1", tags=["pdf"])
+_PDF_APPENDIX_MULTIPART_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["file"],
+    "properties": {
+        "file": {"type": "string", "format": "binary"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 500},
+    },
+    "additionalProperties": False,
+}
+_PDF_APPENDIX_ERRORS = {
+    404: {"model": PdfAppendixErrorResponse, "description": "PDF material not found."},
+    413: {
+        "model": PdfAppendixErrorResponse,
+        "description": "PDF material exceeds a configured limit.",
+    },
+    422: {"model": PdfAppendixErrorResponse, "description": "Invalid PDF material request."},
+    500: {"model": PdfAppendixErrorResponse, "description": "PDF material could not be saved."},
+}
+
+
+class _PdfAppendixTooLargeError(ValueError):
+    """Private control flow for the upload byte-limit response."""
+
+
+async def _read_pdf_appendix_multipart(
+    request: Request, *, max_bytes: int
+) -> tuple[bytes, str, str, str | None]:
+    """Read one bounded file and optional title without UploadFile spooling."""
+    try:
+        media_type, options = parse_options_header(request.headers.get("content-type"))
+        boundary = options.get(b"boundary")
+        if media_type.lower() != b"multipart/form-data" or not boundary or len(boundary) > 200:
+            raise _ArtifactMultipartError
+        current_name = bytearray()
+        current_value = bytearray()
+        headers: dict[bytes, bytes] = {}
+        fields: set[bytes] = set()
+        body = bytearray()
+        title_body = bytearray()
+        part_name = b""
+        filename = ""
+        mime_type = "application/octet-stream"
+        complete = False
+
+        def on_part_begin() -> None:
+            nonlocal headers
+            headers = {}
+
+        def on_header_begin() -> None:
+            current_name.clear()
+            current_value.clear()
+
+        def on_header_field(data: bytes, start: int, end: int) -> None:
+            current_name.extend(data[start:end])
+            if len(current_name) > _ARTIFACT_MULTIPART_MAX_HEADER_BYTES:
+                raise _ArtifactMultipartError
+
+        def on_header_value(data: bytes, start: int, end: int) -> None:
+            current_value.extend(data[start:end])
+            if len(current_value) > _ARTIFACT_MULTIPART_MAX_HEADER_BYTES:
+                raise _ArtifactMultipartError
+
+        def on_header_end() -> None:
+            name = bytes(current_name).lower()
+            if not name or name in headers or len(headers) >= _ARTIFACT_MULTIPART_MAX_HEADERS:
+                raise _ArtifactMultipartError
+            headers[name] = bytes(current_value)
+
+        def on_headers_finished() -> None:
+            nonlocal part_name, filename, mime_type
+            disposition, params = parse_options_header(headers.get(b"content-disposition"))
+            part_name = params.get(b"name", b"")
+            if (
+                disposition.lower() != b"form-data"
+                or part_name not in {b"file", b"title"}
+                or part_name in fields
+            ):
+                raise _ArtifactMultipartError
+            fields.add(part_name)
+            if part_name == b"file":
+                if b"filename" not in params:
+                    raise _ArtifactMultipartError
+                filename = params[b"filename"].decode("utf-8", "replace")
+                mime_type = headers.get(b"content-type", b"application/octet-stream").decode(
+                    "latin-1"
+                )
+
+        def on_part_data(data: bytes, start: int, end: int) -> None:
+            content = body if part_name == b"file" else title_body
+            cap = max_bytes if part_name == b"file" else 2000
+            size = end - start
+            remaining = cap - len(content)
+            if size > remaining:
+                if remaining >= 0:
+                    content.extend(data[start : start + remaining + 1])
+                if part_name == b"file":
+                    raise _PdfAppendixTooLargeError
+                raise _ArtifactMultipartError
+            content.extend(data[start:end])
+
+        def on_end() -> None:
+            nonlocal complete
+            complete = True
+
+        parser = MultipartParser(
+            boundary,
+            {
+                "on_part_begin": on_part_begin,
+                "on_header_begin": on_header_begin,
+                "on_header_field": on_header_field,
+                "on_header_value": on_header_value,
+                "on_header_end": on_header_end,
+                "on_headers_finished": on_headers_finished,
+                "on_part_data": on_part_data,
+                "on_end": on_end,
+            },
+        )
+        received = 0
+        envelope_limit = max_bytes + 16 * 1024 + 2000
+        async for chunk in request.stream():
+            allowed = envelope_limit - received
+            if allowed <= 0:
+                raise _ArtifactMultipartError
+            parser_chunk = chunk[:allowed]
+            parser.write(parser_chunk)
+            received += len(parser_chunk)
+            if complete:
+                break
+            if len(parser_chunk) != len(chunk):
+                raise _ArtifactMultipartError
+        parser.finalize()
+        if not complete or b"file" not in fields or len(fields) > 2:
+            raise _ArtifactMultipartError
+        title = title_body.decode("utf-8").strip() if b"title" in fields else None
+        if b"title" in fields and not title:
+            raise _ArtifactMultipartError
+        return bytes(body), mime_type, filename, title
+    except Exception as exc:
+        if isinstance(exc, _PdfAppendixTooLargeError):
+            raise
+        if isinstance(exc, _ArtifactMultipartError):
+            raise
+        raise _ArtifactMultipartError from exc
+
+
+def _appendix_error(code: str, message: str, status_code: int = 422) -> HTTPException:
+    return HTTPException(status_code=status_code, detail={"code": code, "message": message})
+
+
+@router.get("/pdf-library/limits", response_model=PdfAppendixLimitsRead)
+async def pdf_appendix_limits(user: User = Depends(current_mfa_user)) -> PdfAppendixLimitsRead:
+    _owner_only(user)
+    cfg = get_settings()
+    return PdfAppendixLimitsRead(
+        max_appendix_file_bytes=cfg.max_appendix_file_bytes,
+        max_quote_appendices=cfg.max_quote_appendices,
+        max_quote_appendix_input_bytes=cfg.max_quote_appendix_input_bytes,
+        max_quote_pdf_bytes=cfg.max_quote_pdf_bytes,
+        max_quote_pdf_pages=cfg.max_quote_pdf_pages,
+    )
+
+
+@router.get(
+    "/pdf-library",
+    response_model=PdfAppendixFileListResponse,
+    responses={422: _PDF_APPENDIX_ERRORS[422]},
+)
+async def list_pdf_library(
+    search: str | None = Query(default=None),
+    include_archived: bool = Query(default=False),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> PdfAppendixFileListResponse:
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    from jai.services.pdf_appendix import list_library_files
+
+    return await list_library_files(
+        session,
+        company_id=company_id,
+        search=search,
+        include_archived=include_archived,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post(
+    "/pdf-library",
+    status_code=201,
+    response_model=PdfAppendixFileRead,
+    responses={
+        413: _PDF_APPENDIX_ERRORS[413],
+        422: _PDF_APPENDIX_ERRORS[422],
+        500: _PDF_APPENDIX_ERRORS[500],
+    },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {"multipart/form-data": {"schema": _PDF_APPENDIX_MULTIPART_SCHEMA}},
+        }
+    },
+)
+async def upload_pdf_library_file(
+    request: Request,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> PdfAppendixFileRead:
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    from jai.db import set_rls_company
+    from jai.services.pdf_appendix import (
+        PdfAppendixValidationError,
+        new_file_values,
+        normalized_filename,
+        save_library_file,
+        validate_pdf,
+    )
+
+    await set_rls_company(session, company_id)
+    try:
+        content, mime_type, original_filename, title = await _read_pdf_appendix_multipart(
+            request, max_bytes=get_settings().max_appendix_file_bytes
+        )
+        filename = normalized_filename(original_filename)
+        if title is not None and (len(title) > 500 or not title.strip()):
+            raise _ArtifactMultipartError
+        validated = await validate_pdf(
+            content,
+            mime_type,
+            max_bytes=get_settings().max_appendix_file_bytes,
+            max_pages=get_settings().max_quote_pdf_pages,
+        )
+    except _PdfAppendixTooLargeError:
+        raise _appendix_error(
+            "PDF_APPENDIX_FILE_TOO_LARGE", "The PDF exceeds the configured file size limit.", 413
+        ) from None
+    except (_ArtifactMultipartError, PdfAppendixValidationError):
+        raise _appendix_error(
+            "PDF_APPENDIX_INVALID", "Upload a supported, static PDF within the configured limits."
+        ) from None
+    row = await save_library_file(
+        session,
+        company_id=company_id,
+        values=new_file_values(
+            company_id=company_id,
+            title=title or filename,
+            filename=filename,
+            content=content,
+            validated=validated,
+        ),
+    )
+    try:
+        await session.flush()
+        response = PdfAppendixFileRead.model_validate(row)
+        await session.commit()
+    except Exception as exc:
+        logging.getLogger("jai").error(
+            "PDF appendix database insert failed (%s)", type(exc).__name__
+        )
+        await session.rollback()
+        raise _appendix_error(
+            "PDF_APPENDIX_SAVE_FAILED", "The PDF could not be saved.", 500
+        ) from None
+    return response
+
+
+@router.patch(
+    "/pdf-library/{file_id}",
+    response_model=PdfAppendixFileRead,
+    responses={404: _PDF_APPENDIX_ERRORS[404], 422: _PDF_APPENDIX_ERRORS[422]},
+)
+async def update_pdf_library_file(
+    file_id: uuid.UUID,
+    payload: PdfLibraryFileUpdate,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> PdfAppendixFileRead:
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    from jai.services.pdf_appendix import read_file_metadata, update_library_file
+
+    row = await update_library_file(session, company_id=company_id, file_id=file_id, data=payload)
+    if row is None:
+        raise _appendix_error("PDF_APPENDIX_NOT_FOUND", "PDF material was not found.", 404)
+    await session.flush()
+    response = await read_file_metadata(session, company_id=company_id, file_id=file_id)
+    assert response is not None
+    await session.commit()
+    return response
+
+
+@router.get(
+    "/pdf-files/{file_id}/content",
+    response_class=Response,
+    responses={
+        200: {"content": {"application/pdf": {}}, "description": "Original PDF file."},
+        404: _PDF_APPENDIX_ERRORS[404],
+        422: _PDF_APPENDIX_ERRORS[422],
+    },
+)
+async def get_pdf_appendix_content(
+    file_id: uuid.UUID,
+    disposition: Literal["inline", "attachment"] = Query(default="attachment"),
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    from jai.services.pdf import build_content_disposition
+    from jai.services.pdf_appendix import get_file_content
+
+    result = await get_file_content(session, company_id=company_id, file_id=file_id)
+    if result is None:
+        raise _appendix_error("PDF_APPENDIX_NOT_FOUND", "PDF material was not found.", 404)
+    content, filename = result
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": build_content_disposition(filename).replace(
+                "attachment;", f"{disposition};", 1
+            ),
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
+        },
+    )
+
 
 def _artifact_422_response(description: str) -> dict[str, Any]:
     """Describe both raw-file and stable parameter-validation failures."""
@@ -390,6 +728,7 @@ async def list_invoice_artifacts_endpoint(
 ) -> DocumentArtifactListResponse:
     _owner_only(user)
     from jai.services.artifacts import list_invoice_artifacts
+
     rows = await list_invoice_artifacts(session, invoice_id=invoice_id, company_id=_require_company_id(user))
     return DocumentArtifactListResponse(items=[DocumentArtifactRead.model_validate(row) for row in rows])
 
@@ -401,6 +740,7 @@ async def download_invoice_artifact_endpoint(
     _owner_only(user)
     from jai.services.artifacts import get_invoice_artifact
     from jai.services.pdf import build_content_disposition
+
     artifact = await get_invoice_artifact(session, invoice_id=invoice_id, artifact_id=artifact_id, company_id=_require_company_id(user))
     return Response(
         content=artifact.pdf_bytes,

@@ -88,6 +88,25 @@ def _m13_artifact_upload_validation_request(request: Request) -> bool:
     )
 
 
+def _m17_pdf_library_validation_request(request: Request) -> bool:
+    """Recognize parameter/body validation on the Step 1 PDF library API."""
+    parts = request.url.path.strip("/").split("/")
+    return (
+        (request.method in {"GET", "POST"} and parts == ["api", "v1", "pdf-library"])
+        or (
+            request.method == "PATCH"
+            and len(parts) == 4
+            and parts[:3] == ["api", "v1", "pdf-library"]
+        )
+        or (
+            request.method == "GET"
+            and len(parts) == 5
+            and parts[:3] == ["api", "v1", "pdf-files"]
+            and parts[4] == "content"
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # APScheduler jobs
 # ---------------------------------------------------------------------------
@@ -229,6 +248,16 @@ def create_app() -> FastAPI:
                     "detail": {
                         "code": "INVALID_ARTIFACT_UPLOAD_REQUEST",
                         "message": "The artifact upload request is invalid.",
+                    }
+                },
+            )
+        if _m17_pdf_library_validation_request(request):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": {
+                        "code": "PDF_APPENDIX_INVALID",
+                        "message": "The PDF library request is invalid.",
                     }
                 },
             )

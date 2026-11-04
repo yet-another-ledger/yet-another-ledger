@@ -117,6 +117,12 @@ class Settings(BaseSettings):
     # Formal historical PDFs are retained in PostgreSQL, independently of
     # receipt storage.  Do not couple this policy to max_receipt_bytes.
     max_artifact_bytes: int = 10 * 1024 * 1024
+    # Quote PDF appendix policies are independent from receipt/artifact limits.
+    max_appendix_file_bytes: int = 10 * 1024 * 1024
+    max_quote_appendices: int = 10
+    max_quote_appendix_input_bytes: int = 15 * 1024 * 1024
+    max_quote_pdf_bytes: int = 15 * 1024 * 1024
+    max_quote_pdf_pages: int = 200
 
     # -- SMTP env fallback (step 4) -----------------------------------------
     # These are used as fallback when no SMTP settings exist in the DB.

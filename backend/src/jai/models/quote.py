@@ -42,7 +42,7 @@ from jai.db import Base
 from jai.models._enums import DiscountType, InvoiceTaxMode, QuoteSettlementMode, QuoteStatus
 
 if TYPE_CHECKING:
-    pass
+    from jai.models.pdf_appendix import PdfAppendixFile, QuoteAppendix
 
 _MONEY = Numeric(18, 3)
 _RATE = Numeric(6, 3)
@@ -188,10 +188,25 @@ class Quote(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    appendix_memberships: Mapped[list[QuoteAppendix]] = relationship(
+        "QuoteAppendix",
+        back_populates="quote",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        foreign_keys="QuoteAppendix.quote_id",
+    )
+    own_appendix_files: Mapped[list[PdfAppendixFile]] = relationship(
+        "PdfAppendixFile",
+        back_populates="owner_quote",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        foreign_keys="PdfAppendixFile.owner_quote_id",
+    )
 
     # -- Table constraints ----------------------------------------------------
     __table_args__ = (
         UniqueConstraint("company_id", "quote_number", name="uq_quote_company_number"),
+        UniqueConstraint("company_id", "id", name="uq_quote_company_id"),
     )
 
 

@@ -50,6 +50,7 @@ from jai.models.mileage import (  # noqa: F401
 )
 from jai.models.number_sequence import NumberSequence  # noqa: F401
 from jai.models.payment import Payment, PaymentTax  # noqa: F401
+from jai.models.pdf_appendix import PdfAppendixFile, QuoteAppendix  # noqa: F401
 from jai.models.product import Product, ProductCategory  # noqa: F401
 from jai.models.quote import Quote, QuoteLine, QuoteLineTax, QuoteTax  # noqa: F401
 from jai.models.receipt_inbox import ReceiptInbox  # noqa: F401
