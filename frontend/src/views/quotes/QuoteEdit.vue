@@ -20,6 +20,7 @@ import DocumentWorkflowPanel from '../../components/DocumentWorkflowPanel.vue'
 import { useQuotesStore } from '../../stores/quotes'
 import { useInvoicesStore } from '../../stores/invoices'
 import { get, downloadBlob } from '../../api/http'
+import { quotePdfErrorMessage } from '../../utils/quotePdfErrors'
 import {
   createDocumentChainPaymentChangeHandler,
   useDocumentChainRefresh,
@@ -749,15 +750,16 @@ const pdfLocaleOptions = computed(() => [
 
 async function handleDownloadPdf(locale?: 'en' | 'zh') {
   if (!existingQuote.value) return
+  const quoteId = existingQuote.value.id
+  const quoteNumber = existingQuote.value.quote_number
   downloadingPdf.value = true
   try {
-    const id = existingQuote.value.id
     const url = locale
-      ? `/api/v1/quotes/${id}/pdf?locale=${locale}`
-      : `/api/v1/quotes/${id}/pdf`
-    await downloadBlob(url, `${existingQuote.value.quote_number}.pdf`)
+      ? `/api/v1/quotes/${quoteId}/pdf?locale=${locale}`
+      : `/api/v1/quotes/${quoteId}/pdf`
+    await downloadBlob(url, `${quoteNumber}.pdf`)
   } catch (e: unknown) {
-    message.error(e instanceof Error ? e.message : t('pdf.downloadFailed'))
+    message.error(await quotePdfErrorMessage(e, quoteId, t) ?? (e instanceof Error ? e.message : t('pdf.downloadFailed')))
   } finally {
     downloadingPdf.value = false
   }
@@ -1505,6 +1507,7 @@ function handleReceiptSent(log: EmailLogRead) {
       v-model:show="previewShow"
       :src="previewSrc"
       :fallback-filename="previewFallback"
+      :quote-id="existingQuote?.id"
     />
   </div>
 </template>

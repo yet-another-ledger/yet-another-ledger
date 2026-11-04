@@ -515,10 +515,15 @@ async def reactivate_quote_endpoint(
     response_model=EmailLogRead,
     status_code=status.HTTP_200_OK,
     responses={
-        409: {
+        413: {"model": PdfAppendixErrorResponse, "description": "Quote PDF exceeds a byte limit."},
+        422: {
             "model": PdfAppendixErrorResponse,
-            "description": "Quote PDF output is temporarily unavailable.",
-        }
+            "description": "Quote PDF exceeds a page/count limit.",
+        },
+        500: {
+            "model": PdfAppendixErrorResponse,
+            "description": "Quote PDF could not be composed safely.",
+        },
     },
 )
 async def send_quote_email_endpoint(
@@ -553,6 +558,8 @@ async def send_quote_email_endpoint(
         select(Quote)
         .where(Quote.id == quote_id, Quote.company_id == company_id)
         .options(selectinload(Quote.lines), selectinload(Quote.taxes))
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     quote = result.scalar_one_or_none()

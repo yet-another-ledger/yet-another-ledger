@@ -23,6 +23,7 @@ import {
   NAlert, NSpin,
 } from 'naive-ui'
 import { get, post } from '../api/http'
+import { quotePdfErrorMessage } from '../utils/quotePdfErrors'
 import type { components } from '../api/schema'
 import { useDocumentSendContext } from '../composables/useDocumentSendContext'
 import {
@@ -207,7 +208,10 @@ async function handleSend() {
       message.success(t('sendDialog.sendSuccess'))
     }
   } catch (e: unknown) {
-    sendError.value = e instanceof Error ? e.message : String(e)
+    const quoteMessage = frozen.context.docType === 'quote'
+      ? await quotePdfErrorMessage(e, frozen.context.docId, t)
+      : null
+    sendError.value = quoteMessage ?? (e instanceof Error ? e.message : String(e))
   } finally {
     // A stale completion must not close a replacement document context.
     if (dialogContext.finishSend(frozen) && closeCurrentContext) {

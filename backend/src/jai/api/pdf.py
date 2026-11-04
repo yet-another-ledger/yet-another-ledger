@@ -963,10 +963,9 @@ async def validate_invoice_artifact_upload_endpoint(
             "content": {"application/pdf": {}},
             "description": "Quote PDF download.",
         },
-        409: {
-            "model": PdfAppendixErrorResponse,
-            "description": "Quote appendix output is temporarily unavailable.",
-        },
+        413: {"model": PdfAppendixErrorResponse, "description": "Quote PDF exceeds a byte limit."},
+        422: {"model": PdfAppendixErrorResponse, "description": "Quote PDF exceeds a page/count limit."},
+        500: {"model": PdfAppendixErrorResponse, "description": "Quote PDF could not be composed safely."},
     },
 )
 async def download_quote_pdf(

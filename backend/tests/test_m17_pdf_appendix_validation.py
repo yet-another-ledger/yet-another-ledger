@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
+import uuid
 
 import pytest
 from pypdf import PdfReader, PdfWriter
@@ -25,7 +27,9 @@ from jai.api.pdf import (
 )
 from jai.services.pdf_appendix import (
     PdfAppendixValidationError,
+    QuotePdfCompositionError,
     _BoundedPdfBuffer,
+    _compose_quote_pdf,
     _reject_signed_or_interactive_objects,
     _validate_and_copy,
 )
@@ -88,6 +92,130 @@ def _pdf(
     output = io.BytesIO()
     writer.write(output)
     return output.getvalue()
+
+
+def _one_page_pdf(
+    width: int, height: int, *, rotation: int = 0, text: str | None = None
+) -> bytes:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=width, height=height)
+    if rotation:
+        page.rotate(rotation)
+    if text:
+        font = writer._add_object(
+            DictionaryObject(
+                {
+                    NameObject("/Type"): NameObject("/Font"),
+                    NameObject("/Subtype"): NameObject("/Type1"),
+                    NameObject("/BaseFont"): NameObject("/Helvetica"),
+                }
+            )
+        )
+        page[NameObject("/Resources")] = DictionaryObject(
+            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})}
+        )
+        content = DecodedStreamObject()
+        content.set_data(f"BT /F1 12 Tf 10 20 Td ({text}) Tj ET".encode())
+        page[NameObject("/Contents")] = writer._add_object(content)
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def test_quote_pdf_composition_keeps_body_order_dimensions_and_rotation() -> None:
+    body = _one_page_pdf(612, 792)
+    first = _one_page_pdf(400, 700, rotation=90, text="Brochure text retained")
+    second = _one_page_pdf(900, 600)
+    assembled = _compose_quote_pdf(
+        body,
+        [
+            (uuid.uuid4(), first, hashlib.sha256(first).hexdigest(), 1),
+            (uuid.uuid4(), second, hashlib.sha256(second).hexdigest(), 1),
+        ],
+        max_input_bytes=100_000,
+        max_output_bytes=100_000,
+        max_pages=3,
+    )
+    result = PdfReader(io.BytesIO(assembled))
+    assert [float(page.mediabox.width) for page in result.pages] == [612, 400, 900]
+    assert [float(page.mediabox.height) for page in result.pages] == [792, 700, 600]
+    assert [page.rotation for page in result.pages] == [0, 90, 0]
+    assert "Brochure text retained" in result.pages[1].extract_text()
+
+
+@pytest.mark.parametrize(
+    ("limits", "expected_code"),
+    [
+        ({"max_input_bytes": 1}, "PDF_APPENDIX_INPUT_LIMIT"),
+        ({"max_output_bytes": 10}, "QUOTE_PDF_OUTPUT_LIMIT"),
+        ({"max_pages": 1}, "QUOTE_PDF_PAGE_LIMIT"),
+    ],
+)
+def test_quote_pdf_composition_enforces_limits(
+    limits: dict[str, int], expected_code: str
+) -> None:
+    appendix = _one_page_pdf(100, 100)
+    configured = {"max_input_bytes": 100_000, "max_output_bytes": 100_000, "max_pages": 2}
+    configured.update(limits)
+    with pytest.raises(QuotePdfCompositionError, match=expected_code):
+        _compose_quote_pdf(
+            _one_page_pdf(612, 792),
+            [(uuid.uuid4(), appendix, hashlib.sha256(appendix).hexdigest(), 1)],
+            **configured,
+        )
+
+
+def test_quote_pdf_composition_hash_failure_identifies_original() -> None:
+    file_id = uuid.uuid4()
+    with pytest.raises(QuotePdfCompositionError) as error:
+        _compose_quote_pdf(
+            _one_page_pdf(612, 792),
+            [(file_id, _one_page_pdf(100, 100), "0" * 64, 1)],
+            max_input_bytes=100_000,
+            max_output_bytes=100_000,
+            max_pages=2,
+        )
+    assert error.value.code == "QUOTE_PDF_COMPOSITION_FAILED"
+    assert error.value.file_id == file_id
+
+
+def test_quote_pdf_composition_limits_final_serialized_output_size() -> None:
+    body = _one_page_pdf(612, 792)
+    appendix = _one_page_pdf(400, 700)
+    originals = [(uuid.uuid4(), appendix, hashlib.sha256(appendix).hexdigest(), 1)]
+    complete = _compose_quote_pdf(
+        body,
+        originals,
+        max_input_bytes=100_000,
+        max_output_bytes=100_000,
+        max_pages=2,
+    )
+    assert len(body) < len(complete) and len(appendix) < len(complete)
+    with pytest.raises(QuotePdfCompositionError, match="QUOTE_PDF_OUTPUT_LIMIT"):
+        _compose_quote_pdf(
+            body,
+            originals,
+            max_input_bytes=100_000,
+            max_output_bytes=len(complete) - 1,
+            max_pages=2,
+        )
+
+
+@pytest.mark.parametrize("content", [b"%PDF- damaged", _pdf(dangerous_action=True)])
+def test_quote_pdf_composition_rejects_corrupt_or_active_page_content_with_id(
+    content: bytes,
+) -> None:
+    file_id = uuid.uuid4()
+    with pytest.raises(QuotePdfCompositionError) as error:
+        _compose_quote_pdf(
+            _one_page_pdf(612, 792),
+            [(file_id, content, hashlib.sha256(content).hexdigest(), 1)],
+            max_input_bytes=100_000,
+            max_output_bytes=100_000,
+            max_pages=10,
+        )
+    assert error.value.code == "QUOTE_PDF_COMPOSITION_FAILED"
+    assert error.value.file_id == file_id
 
 
 def _pdf_with_custom_info_metadata(*, key: str) -> bytes:

@@ -1605,7 +1605,13 @@
     "localeEn": "英文",
     "localeZh": "中文",
     "preview": "预览",
-    "previewFailed": "加载预览失败。"
+    "previewFailed": "加载预览失败。",
+    "appendixInputLimit": "已保存的 PDF 附录总大小超过输入上限。",
+    "appendixCountLimit": "此报价单的 PDF 附录数量超过当前上限。",
+    "appendixOutputLimit": "完整报价单 PDF 超过输出大小上限。邮件编码还会增加附件大小。",
+    "appendixPageLimit": "完整报价单 PDF 超过页数上限。",
+    "appendixCompositionFailed": "无法组合完整报价单 PDF。请检查已保存的附录文件后重试。",
+    "appendixFileCompositionFailed": "无法加入 PDF 资料“{title}”。请检查该文件后重试。"
   },
   "sendDialog": {
     "title": "发送邮件",

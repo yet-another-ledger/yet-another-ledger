@@ -1605,7 +1605,13 @@
     "localeEn": "English",
     "localeZh": "Chinese",
     "preview": "Preview",
-    "previewFailed": "Failed to load preview."
+    "previewFailed": "Failed to load preview.",
+    "appendixInputLimit": "The saved PDF appendices exceed the combined input size limit.",
+    "appendixCountLimit": "This Quote has more PDF appendices than the current limit allows.",
+    "appendixOutputLimit": "The complete Quote PDF exceeds the output size limit. Email encoding may increase its size further.",
+    "appendixPageLimit": "The complete Quote PDF exceeds the page limit.",
+    "appendixCompositionFailed": "The complete Quote PDF could not be assembled. Check the saved appendix files and try again.",
+    "appendixFileCompositionFailed": "The saved PDF material “{title}” could not be included. Check the file and try again."
   },
   "sendDialog": {
     "title": "Send Email",

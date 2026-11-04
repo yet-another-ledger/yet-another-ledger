@@ -25,6 +25,7 @@ class PdfAppendixLimitsRead(BaseModel):
 class PdfAppendixErrorDetail(BaseModel):
     code: str
     message: str
+    file_id: uuid.UUID | None = None
 
 
 class PdfAppendixErrorResponse(BaseModel):

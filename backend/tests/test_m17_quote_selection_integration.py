@@ -7,11 +7,13 @@ import io
 import logging
 import uuid
 from datetime import UTC, datetime
+from email import message_from_bytes
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pyotp
 import pytest
 from httpx import AsyncClient
-from pypdf import PdfWriter
+from pypdf import PdfReader, PdfWriter
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -24,6 +26,7 @@ from test_quote_payment_integration import _create_customer, _create_quote, _set
 from jai.models.company import Company
 from jai.models.pdf_appendix import PdfAppendixFile
 from jai.models.user import User
+from jai.schemas.setting import SentCopySettings, SmtpSettings
 
 pytestmark = pytest.mark.integration
 
@@ -189,7 +192,7 @@ async def _login(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_quote_selection_versions_snapshot_and_output_guard(
+async def test_quote_selection_versions_snapshot_and_complete_output(
     db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await _login(db_client)
@@ -288,24 +291,70 @@ async def test_quote_selection_versions_snapshot_and_output_guard(
     assert read.json()["appendices"][0]["title_snapshot"] == "First title"
 
     pdf = await db_client.get(f"/api/v1/quotes/{quote_id}/pdf")
-    assert pdf.status_code == 409
-    assert pdf.json()["detail"]["code"] == "QUOTE_APPENDIX_OUTPUT_UNAVAILABLE"
-    sent = await db_client.post(
-        f"/api/v1/quotes/{quote_id}/send",
-        json={"to": "buyer@example.com", "subject": "Quote", "body": "Please review."},
+    assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf"
+    from pypdf import PdfReader
+
+    composed = PdfReader(io.BytesIO(pdf.content))
+    assert len(composed.pages) == 2
+    cfg = SmtpSettings(
+        host="smtp.test",
+        username="imap-user",
+        password="imap-password",
+        from_email="sender@example.com",
+        sent_copy=SentCopySettings(enabled=True, host="imap.test"),
     )
-    assert sent.status_code == 409
-    assert sent.json()["detail"]["code"] == "QUOTE_APPENDIX_OUTPUT_UNAVAILABLE"
+    imap = MagicMock()
+    imap.login.return_value = ("OK", [])
+    imap.capability.return_value = ("OK", [b"IMAP4rev1"])
+    imap.list.return_value = ("OK", [b'(\\Sent) "/" Sent'])
+    imap.starttls.return_value = ("OK", [])
+    imap.append.return_value = ("OK", [])
+    with (
+        patch("jai.services.email._get_smtp_config", return_value=cfg),
+        patch("aiosmtplib.send", new_callable=AsyncMock) as smtp,
+        patch("jai.services.sent_copy.imaplib.IMAP4_SSL", return_value=imap),
+    ):
+        sent = await db_client.post(
+            f"/api/v1/quotes/{quote_id}/send",
+            json={"to": "buyer@example.com", "subject": "Quote", "body": "Please review."},
+        )
+    assert sent.status_code == 200, sent.text
+    assert sent.json()["status"] == "SENT"
+    assert sent.json()["sent_copy_status"] == "SAVED"
+    raw_smtp = smtp.call_args.args[0]
+    assert raw_smtp == imap.append.call_args.args[3]
+    mime = message_from_bytes(raw_smtp)
+    attachment = next(part for part in mime.walk() if part.get_content_type() == "application/pdf")
+    assert len(PdfReader(io.BytesIO(attachment.get_payload(decode=True))).pages) == 2
     email_logs = await db_client.get(f"/api/v1/quotes/{quote_id}/emails")
+    assert email_logs.status_code == 200 and email_logs.json()["total"] == 1
+
+    from jai.config import get_settings
+
+    two_appendix_quote_id = new_quote.json()["id"]
+    monkeypatch.setattr(get_settings(), "max_quote_appendices", 1)
+    over_count = await db_client.get(f"/api/v1/quotes/{two_appendix_quote_id}/pdf")
+    assert over_count.status_code == 422
+    assert over_count.json()["detail"]["code"] == "PDF_APPENDIX_COUNT_LIMIT"
+    with (
+        patch("jai.services.email._get_smtp_config", return_value=cfg),
+        patch("jai.services.email._send_mail", new_callable=AsyncMock) as no_send,
+    ):
+        blocked_send = await db_client.post(
+            f"/api/v1/quotes/{two_appendix_quote_id}/send",
+            json={"to": "buyer@example.com"},
+        )
+    assert blocked_send.status_code == 422
+    no_send.assert_not_called()
+    email_logs = await db_client.get(f"/api/v1/quotes/{two_appendix_quote_id}/emails")
     assert email_logs.status_code == 200 and email_logs.json()["total"] == 0
+    monkeypatch.setattr(get_settings(), "max_quote_appendices", 10)
 
     no_op = await db_client.put(
         f"/api/v1/quotes/{quote_id}",
         json={**payload, "appendix_file_ids": [file_id], "expected_appendix_version": 1},
     )
     assert no_op.status_code == 200 and no_op.json()["appendix_version"] == 1
-    from jai.config import get_settings
-
     monkeypatch.setattr(get_settings(), "max_quote_appendix_input_bytes", 1)
     no_op_over_new_limit = await db_client.put(
         f"/api/v1/quotes/{quote_id}",
@@ -600,6 +649,160 @@ async def test_quote_send_releases_snapshot_lock_and_writes_log_under_rls(
         assert logs.json()["items"][0]["status"] == "SENT"
     finally:
         await alternate_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_quote_pdf_holds_one_selection_snapshot_during_composition(
+    db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jai.services.pdf_appendix as appendix_service
+
+    await _login(db_client)
+    seeds = await _setup_company(db_client)
+    customer_id = await _create_customer(db_client)
+    rate_id = seeds["rates"]["NL standard (21%)"]["id"]
+    first = await db_client.post(
+        "/api/v1/pdf-library", files={"file": ("first.pdf", _pdf(), "application/pdf")}
+    )
+    second = await db_client.post(
+        "/api/v1/pdf-library", files={"file": ("second.pdf", _pdf(), "application/pdf")}
+    )
+    quote = await _create_quote(db_client, customer_id, rate_id)
+    quote_id = quote["id"]
+    payload = {
+        "customer_id": customer_id,
+        "quote_date": "2026-01-10",
+        "tax_mode": "LINE",
+        "amounts_include_vat": False,
+        "lines": [
+            {
+                "name": "Snapshot service",
+                "quantity": "1",
+                "unit_price": "100",
+                "vat_rate_id": rate_id,
+            }
+        ],
+        "appendix_file_ids": [first.json()["id"]],
+        "expected_appendix_version": 0,
+    }
+    saved = await db_client.put(f"/api/v1/quotes/{quote_id}", json=payload)
+    assert saved.status_code == 200, saved.text
+
+    entered_composition = asyncio.Event()
+    release_composition = asyncio.Event()
+    captured_file_ids: list[uuid.UUID] = []
+    compose = appendix_service.compose_quote_pdf
+
+    async def block_after_snapshot(
+        body: bytes,
+        originals: list[tuple[uuid.UUID, bytes, str, int]],
+        **limits: int,
+    ) -> bytes:
+        captured_file_ids.extend(item[0] for item in originals)
+        entered_composition.set()
+        await release_composition.wait()
+        return await compose(body, originals, **limits)
+
+    monkeypatch.setattr(appendix_service, "compose_quote_pdf", block_after_snapshot)
+    output_task = asyncio.create_task(db_client.get(f"/api/v1/quotes/{quote_id}/pdf"))
+    await asyncio.wait_for(entered_composition.wait(), timeout=5)
+
+    update_started = asyncio.Event()
+
+    async def update_selection() -> object:
+        update_started.set()
+        return await db_client.put(
+            f"/api/v1/quotes/{quote_id}",
+            json={
+                **{
+                    key: value
+                    for key, value in payload.items()
+                    if key not in {"appendix_file_ids", "expected_appendix_version"}
+                },
+                "appendix_file_ids": [second.json()["id"]],
+                "expected_appendix_version": 1,
+            },
+        )
+
+    update_task = asyncio.create_task(update_selection())
+    await asyncio.wait_for(update_started.wait(), timeout=5)
+    await asyncio.sleep(0.05)
+    assert not update_task.done(), "selection writer bypassed the output snapshot lock"
+    release_composition.set()
+    output = await asyncio.wait_for(output_task, timeout=10)
+    update = await asyncio.wait_for(update_task, timeout=10)
+    assert output.status_code == 200
+    assert len(PdfReader(io.BytesIO(output.content)).pages) == 2
+    assert captured_file_ids == [uuid.UUID(first.json()["id"])]
+    assert update.status_code == 200
+    current = await db_client.get(f"/api/v1/quotes/{quote_id}")
+    assert current.json()["appendices"][0]["file_id"] == second.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_quote_appendix_composition_failure_never_attempts_smtp_or_logs_success(
+    db_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import patch
+
+    from jai.services.pdf_appendix import QuotePdfCompositionError
+
+    await _login(db_client)
+    seeds = await _setup_company(db_client)
+    customer_id = await _create_customer(db_client)
+    quote = await _create_quote(
+        db_client, customer_id, seeds["rates"]["NL standard (21%)"]["id"]
+    )
+    upload = await db_client.post(
+        "/api/v1/pdf-library",
+        files={"file": ("broken.pdf", _pdf(), "application/pdf")},
+    )
+    assert upload.status_code == 201
+    selected = await db_client.put(
+        f"/api/v1/quotes/{quote['id']}",
+        json={
+            "customer_id": customer_id,
+            "quote_date": "2026-01-10",
+            "tax_mode": "LINE",
+            "amounts_include_vat": False,
+            "lines": [
+                {
+                    "name": "Service",
+                    "quantity": "1",
+                    "unit_price": "100.000",
+                    "vat_rate_id": seeds["rates"]["NL standard (21%)"]["id"],
+                }
+            ],
+            "appendix_file_ids": [upload.json()["id"]],
+            "expected_appendix_version": 0,
+        },
+    )
+    assert selected.status_code == 200
+    async def fail_composition(*args: object, **kwargs: object) -> bytes:
+        raise QuotePdfCompositionError(
+            "QUOTE_PDF_COMPOSITION_FAILED", uuid.UUID(upload.json()["id"])
+        )
+
+    monkeypatch.setattr("jai.services.pdf_appendix.compose_quote_pdf", fail_composition)
+
+    pdf = await db_client.get(f"/api/v1/quotes/{quote['id']}/pdf")
+    assert pdf.status_code == 500
+    assert pdf.json()["detail"]["code"] == "QUOTE_PDF_COMPOSITION_FAILED"
+    assert pdf.json()["detail"]["file_id"] == upload.json()["id"]
+    smtp_config = SmtpSettings(host="smtp.test", from_email="sender@example.com")
+    with (
+        patch("jai.services.email._get_smtp_config", return_value=smtp_config),
+        patch("aiosmtplib.send", new_callable=AsyncMock) as smtp,
+    ):
+        send = await db_client.post(
+            f"/api/v1/quotes/{quote['id']}/send",
+            json={"to": "buyer@example.com"},
+        )
+    assert send.status_code == 500
+    assert send.json()["detail"]["file_id"] == upload.json()["id"]
+    smtp.assert_not_called()
+    logs = await db_client.get(f"/api/v1/quotes/{quote['id']}/emails")
+    assert logs.status_code == 200 and logs.json()["total"] == 0
 
 
 @pytest.mark.asyncio

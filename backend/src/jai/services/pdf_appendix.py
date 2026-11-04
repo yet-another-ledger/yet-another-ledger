@@ -28,6 +28,134 @@ from jai.schemas.pdf_appendix import (
 )
 
 
+class QuotePdfCompositionError(ValueError):
+    """Safe, stable failure while assembling a complete Quote PDF."""
+
+    def __init__(self, code: str, file_id: uuid.UUID | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.file_id = file_id
+
+
+def _compose_quote_pdf(
+    body: bytes,
+    originals: list[tuple[uuid.UUID, bytes, str, int]],
+    *,
+    max_input_bytes: int,
+    max_output_bytes: int,
+    max_pages: int,
+) -> bytes:
+    """Append verified originals to the rendered body with a fresh PDF catalog."""
+    readers: list[tuple[PdfReader, uuid.UUID | None]] = []
+    streams: list[io.BytesIO] = []
+    writer: PdfWriter | None = None
+    output: _BoundedPdfBuffer | None = None
+    try:
+        if not originals:
+            return body
+        if sum(len(content) for _, content, _, _ in originals) > max_input_bytes:
+            raise QuotePdfCompositionError("PDF_APPENDIX_INPUT_LIMIT")
+        if not body or len(body) > max_output_bytes:
+            raise QuotePdfCompositionError("QUOTE_PDF_OUTPUT_LIMIT")
+        streams.append(io.BytesIO(body))
+        body_reader = PdfReader(streams[-1], strict=True)
+        readers.append((body_reader, None))
+        total_pages = len(body_reader.pages)
+        for file_id, content, expected_hash, expected_pages in originals:
+            try:
+                if hashlib.sha256(content).hexdigest() != expected_hash:
+                    raise QuotePdfCompositionError("QUOTE_PDF_COMPOSITION_FAILED", file_id)
+                stream = io.BytesIO(content)
+                streams.append(stream)
+                reader = PdfReader(stream, strict=True)
+                readers.append((reader, file_id))
+                if reader.is_encrypted or len(reader.pages) != expected_pages:
+                    raise QuotePdfCompositionError("QUOTE_PDF_COMPOSITION_FAILED", file_id)
+            except QuotePdfCompositionError:
+                raise
+            except Exception as exc:
+                raise QuotePdfCompositionError("QUOTE_PDF_COMPOSITION_FAILED", file_id) from exc
+            total_pages += len(reader.pages)
+        if total_pages > max_pages:
+            raise QuotePdfCompositionError("QUOTE_PDF_PAGE_LIMIT")
+        writer = PdfWriter()
+        for reader, source_file_id in readers:
+            try:
+                for page in reader.pages:
+                    if source_file_id is not None:
+                        _reject_embedded_page_objects(page, set())
+                    writer.add_page(page)
+            except Exception as exc:
+                if isinstance(exc, QuotePdfCompositionError):
+                    raise
+                raise QuotePdfCompositionError(
+                    "QUOTE_PDF_COMPOSITION_FAILED", source_file_id
+                ) from exc
+        output = _BoundedPdfBuffer(max_output_bytes)
+        try:
+            writer.write(output)
+        except PdfAppendixValidationError as exc:
+            raise QuotePdfCompositionError("QUOTE_PDF_OUTPUT_LIMIT") from exc
+        result = output.getvalue()
+        if not result.startswith(b"%PDF-"):
+            raise QuotePdfCompositionError("QUOTE_PDF_COMPOSITION_FAILED")
+        return result
+    except QuotePdfCompositionError:
+        raise
+    except Exception as exc:
+        raise QuotePdfCompositionError("QUOTE_PDF_COMPOSITION_FAILED") from exc
+    finally:
+        if output is not None:
+            output.close()
+        if writer is not None:
+            writer.close()
+        for reader, _ in readers:
+            reader.close()
+        for stream in streams:
+            stream.close()
+
+
+async def compose_quote_pdf(
+    body: bytes,
+    originals: list[tuple[uuid.UUID, bytes, str, int]],
+    *,
+    max_input_bytes: int,
+    max_output_bytes: int,
+    max_pages: int,
+) -> bytes:
+    """Compose in bounded worker threads, keeping pypdf off the event loop."""
+    await _pdf_semaphore.acquire()
+    worker = asyncio.create_task(
+        asyncio.to_thread(
+            _compose_quote_pdf,
+            body,
+            originals,
+            max_input_bytes=max_input_bytes,
+            max_output_bytes=max_output_bytes,
+            max_pages=max_pages,
+        )
+    )
+    handed_to_worker = False
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        handed_to_worker = True
+
+        def release_when_done(completed: asyncio.Task[bytes]) -> None:
+            try:
+                completed.exception()
+            except asyncio.CancelledError:
+                pass
+            finally:
+                _pdf_semaphore.release()
+
+        worker.add_done_callback(release_when_done)
+        raise
+    finally:
+        if not handed_to_worker:
+            _pdf_semaphore.release()
+
+
 class PdfAppendixValidationError(ValueError):
     """A stable, public-safe PDF validation failure."""
 

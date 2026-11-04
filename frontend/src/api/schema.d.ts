@@ -9455,6 +9455,8 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            /** File Id */
+            file_id?: string | null;
         };
         /** PdfAppendixErrorResponse */
         PdfAppendixErrorResponse: {
@@ -15537,8 +15539,8 @@ export interface operations {
                     "application/pdf": unknown;
                 };
             };
-            /** @description Quote appendix output is temporarily unavailable. */
-            409: {
+            /** @description Quote PDF exceeds a byte limit. */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15546,13 +15548,22 @@ export interface operations {
                     "application/json": components["schemas"]["PdfAppendixErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Quote PDF exceeds a page/count limit. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Quote PDF could not be composed safely. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
                 };
             };
         };
@@ -16102,8 +16113,8 @@ export interface operations {
                     "application/json": components["schemas"]["EmailLogRead"];
                 };
             };
-            /** @description Quote PDF output is temporarily unavailable. */
-            409: {
+            /** @description Quote PDF exceeds a byte limit. */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16111,13 +16122,22 @@ export interface operations {
                     "application/json": components["schemas"]["PdfAppendixErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Quote PDF exceeds a page/count limit. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Quote PDF could not be composed safely. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
                 };
             };
         };

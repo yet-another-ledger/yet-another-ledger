@@ -4,6 +4,7 @@ import { NModal, NSpin, NAlert, NButton, NSpace, NIcon } from 'naive-ui'
 import { DownloadOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { ApiError, fetchBlob, saveBlob } from '../api/http'
+import { quotePdfErrorMessage } from '../utils/quotePdfErrors'
 
 /**
  * In-app PDF preview dialog.
@@ -21,6 +22,8 @@ const props = defineProps<{
   src: string | null
   /** Fallback filename if the backend does not advertise one. */
   fallbackFilename?: string
+  /** Quote context enables localized appendix-specific composition errors. */
+  quoteId?: string
 }>()
 
 const emit = defineEmits<{
@@ -57,8 +60,13 @@ async function load(src: string) {
     objectUrl.value = URL.createObjectURL(blob)
   } catch (e: unknown) {
     if (generation !== requestGeneration) return
-    error.value =
+    const quoteMessage = props.quoteId
+      ? await quotePdfErrorMessage(e, props.quoteId, t)
+      : null
+    if (generation !== requestGeneration) return
+    error.value = quoteMessage ?? (
       e instanceof ApiError || e instanceof Error ? e.message : t('pdf.previewFailed')
+    )
   } finally {
     if (generation === requestGeneration) loading.value = false
   }
