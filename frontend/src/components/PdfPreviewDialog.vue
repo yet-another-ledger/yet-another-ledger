@@ -34,6 +34,7 @@ const error = ref<string | null>(null)
 const objectUrl = ref<string | null>(null)
 let currentBlob: Blob | null = null
 let currentFilename = 'document.pdf'
+let requestGeneration = 0
 
 function cleanup() {
   if (objectUrl.value) {
@@ -45,18 +46,21 @@ function cleanup() {
 }
 
 async function load(src: string) {
+  const generation = ++requestGeneration
   cleanup()
   loading.value = true
   try {
     const { blob, filename } = await fetchBlob(src, props.fallbackFilename ?? 'document.pdf')
+    if (generation !== requestGeneration) return
     currentBlob = blob
     currentFilename = filename
     objectUrl.value = URL.createObjectURL(blob)
   } catch (e: unknown) {
+    if (generation !== requestGeneration) return
     error.value =
       e instanceof ApiError || e instanceof Error ? e.message : t('pdf.previewFailed')
   } finally {
-    loading.value = false
+    if (generation === requestGeneration) loading.value = false
   }
 }
 
@@ -66,9 +70,16 @@ watch(
     if (show && src) {
       load(src)
     } else if (!show) {
+      requestGeneration += 1
+      loading.value = false
+      cleanup()
+    } else {
+      requestGeneration += 1
+      loading.value = false
       cleanup()
     }
   },
+  { immediate: true },
 )
 
 function handleClose() {
@@ -79,7 +90,11 @@ function handleDownload() {
   if (currentBlob) saveBlob(currentBlob, currentFilename)
 }
 
-onBeforeUnmount(cleanup)
+onBeforeUnmount(() => {
+  requestGeneration += 1
+  loading.value = false
+  cleanup()
+})
 </script>
 
 <template>
@@ -95,7 +110,10 @@ onBeforeUnmount(cleanup)
       <div v-if="loading" class="pdf-preview-status">
         <n-spin :show="true" />
       </div>
-      <n-alert v-else-if="error" type="error">{{ error }}</n-alert>
+      <div v-else-if="error" class="pdf-preview-error">
+        <n-alert type="error">{{ error }}</n-alert>
+        <n-button :disabled="!src" @click="src && load(src)">{{ t('common.retry') }}</n-button>
+      </div>
       <iframe
         v-else-if="objectUrl"
         :src="objectUrl"
@@ -127,6 +145,11 @@ onBeforeUnmount(cleanup)
   align-items: center;
   justify-content: center;
   height: 100%;
+}
+
+.pdf-preview-error {
+  display: grid;
+  gap: 12px;
 }
 
 .pdf-preview-frame {
