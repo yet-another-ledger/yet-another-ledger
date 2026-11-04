@@ -17,7 +17,7 @@
 - 新舍入算法、独立排序 API、分离显示顺序与计算顺序。
 - Quote 版本链、版本比较、自动替换旧报价。
 - Sent 副本重试队列、自动重试、手动仅补存副本、历史邮件回填。
-- 产品手册 PDF 上传／存储及报价额外附件不属于 SI1。**后续计划（2026-11-04）**：[M17 报价 PDF 附录](../milestones/M17_zh.md) 承接手动选择、共享资料库／专用上传及合并输出；Step 1–5 已通过自动化门禁与独立审查；Step 6 进行中，作者走查待进行。SI1 验收范围不变。
+- 产品手册 PDF 上传／存储及报价额外附件不属于 SI1。[M17 报价 PDF 附录](../milestones/M17_zh.md) 承接手动选择、共享资料库／专用上传及合并输出；实现完成：6/6 步已通过本地自动化门禁与独立审查；待作者走查及验收。SI1 验收范围不变。
 
 **相关文档 / 已有基础**：[路线图](../roadmap_zh.md)、[M5](../milestones/M5_zh.md) 定价与 Invoice CRUD、[M6](../milestones/M6_zh.md) Quote CRUD 与编号、[M6.5](../milestones/M6.5_zh.md) Estimate 分组、[M7.5](../milestones/M7.5_zh.md) 舍入、[M9](../milestones/M9_zh.md) PDF／邮件，以及 [M12](../milestones/M12_zh.md)／[M13](../milestones/M13_zh.md) 正式单据留存。
 
@@ -163,7 +163,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 - 走查诊断补充：服务端新增固定且脱敏的 SMTP 测试失败分类日志，保留原通用 API 错误与独立 SMTP／IMAP 结果。Ruff、strict mypy（122 文件）、隔离默认 pytest（1388 项，含新增18项诊断用例）及 Docker build 通过；本次仅日志变更，未重复全量集成。该补充按普通走查流程处理，未再开盲审循环，作者已接受并授权将该补充随收尾提交。作者更新凭据后真实测试成功，先前通用失败无法追溯分类。代理未发送真实邮件或读取邮箱内容。
 - 发布候选验证：main 提交 `5815bb7` 于2026-10-25通过全部远端 CI，包括全量 PostgreSQL 集成、后端质量、生成类型新鲜度、前端构建及 Docker 构建。该验证包含走查诊断补充，前述未在本地重复集成的限制属于当时记录。v0.8.0 标签指向此已验证提交。
 - 运维说明：参见 [README SMTP 与服务器端 Sent 副本](../../../README_zh.md#smtp-与服务器端-sent-副本)，涵盖实际共享 SMTP 凭据／环境回退、TLS／端口、已有目录发现、独立结果与安全排障。
-- 已知顺延／后续：产品手册 PDF 管理和手动选择由 [M17](../milestones/M17_zh.md) 承接；Step 1–5 已通过自动化门禁与独立审查；Step 6 进行中，作者走查待进行。Sent 重试／回填及 Quote 版本管理仍不在范围内。SI1 历史验收不变，M15 保持暂停。
+- 已知顺延／后续：产品手册 PDF 管理和手动选择由 [M17](../milestones/M17_zh.md) 承接；实现完成：6/6 步已通过本地自动化门禁与独立审查；待作者走查及验收。Sent 重试／回填及 Quote 版本管理仍不在范围内。SI1 历史验收不变，M15 保持暂停。
 
 ## 协议参考
 

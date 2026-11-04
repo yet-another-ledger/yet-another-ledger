@@ -195,7 +195,10 @@ class Quote(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         foreign_keys="QuoteAppendix.quote_id",
-        lazy="selectin",
+        # Appendix collections are loaded only by Quote read/output paths that
+        # explicitly request them; ordinary Quote projections must not pay
+        # extra queries for appendix metadata.
+        lazy="raise",
     )
     own_appendix_files: Mapped[list[PdfAppendixFile]] = relationship(
         "PdfAppendixFile",
@@ -203,7 +206,7 @@ class Quote(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         foreign_keys="PdfAppendixFile.owner_quote_id",
-        lazy="selectin",
+        lazy="raise",
     )
 
     # -- Table constraints ----------------------------------------------------

@@ -12,6 +12,7 @@ Built with **FastAPI + Vue 3 + PostgreSQL**.
 
 - **Invoices** — Standard, Advance, Final and source-bound Credit Notes; backend pricing, concurrency-safe numbering, independent lifecycle/settlement/credit states, and an auditable document chain.
 - **Quotes** — reusable content blocks/templates, auto-expiry, and an immutable choice between direct invoicing, receipt-only deposits, or formal staged Advance/Final invoicing.
+- **Quote PDF appendices (M17)** — keep reusable static PDFs in the Content Library or upload files to one saved Quote, choose and order them manually, and preview, download or email a single combined PDF. Implementation and independent review are complete; the author walkthrough and acceptance are pending. This is not a release claim.
 - **Editing and reuse** — audited revisions for eligible undelivered, unpaid Standard Invoices, retaining SENT, the original number, unchanged tax/identity snapshots and historical PDFs; drag-to-reorder lines in Invoice, Quote and Estimate editors; duplicate a Quote into an independent draft with a fresh number and dates.
 - **Cost estimation → quote** — internal margin-based costing that never leaks cost/margin to the customer.
 - **Payments & refunds** — partial payments, Quote deposits, automatic settlement states, Credit-linked Refunds, and Refund Confirmations.
@@ -88,6 +89,16 @@ For a copy failure, check the stable error code: `IMAP_CONFIGURATION_FAILED` mea
 
 SMTP test failures keep the generic `SMTP_SEND_FAILED` API response. Server logs add fixed categories such as `SMTP_AUTH_FAILED`, `SMTP_SENDER_REJECTED`, `SMTP_RECIPIENT_REJECTED`, `SMTP_TIMEOUT`, `SMTP_TLS_FAILED` and `SMTP_CONNECTION_FAILED`, without logging provider text or credentials. Use the category to check the corresponding configuration before another manual test.
 
+### Quote PDF appendices (M17)
+
+In the M17 implementation, open **Content Library → PDF Materials** to upload company-private reusable static PDFs, search by title, preview/download originals, edit titles, and archive or restore library entries. In a saved Quote, use **PDF appendices** to select shared files or upload Quote-specific files, reorder the list, and save it with the Quote. New Quotes must first use **Save and continue** to create the Quote before a Quote-specific upload is available. A Quote-specific upload is retained for that Quote even if its pending selection is later abandoned; reopen the Quote and select it from that Quote's own-file list if needed. Removing an item from the saved selection does not delete its original.
+
+Quote preview, download, and email use the same assembled PDF: the quotation first, followed by selected originals in saved order. Original static page content, dimensions, and orientation are retained; originals are not translated, rasterized, or rewritten. Replacing a library file means uploading another record; archive/restore and title changes do not rewrite existing Quote selections. Accepted Quotes remain viewable and downloadable, but their selection is read-only. Duplicated Quotes start without appendices, and conversion does not copy appendices to an Invoice.
+
+The default typed server limits are 10 MiB per upload, 10 files per Quote, 15 MiB combined selected inputs, 15 MiB assembled output, and 200 total pages including the quotation. Deployments can override the corresponding typed settings (`MAX_APPENDIX_FILE_BYTES`, `MAX_QUOTE_APPENDICES`, `MAX_QUOTE_APPENDIX_INPUT_BYTES`, `MAX_QUOTE_PDF_BYTES`, `MAX_QUOTE_PDF_PAGES`). Only static, unencrypted PDFs without signatures or fillable forms are accepted. Unsupported active content and unsafe links are rejected or removed. A successful response is newly serialized, so combined PDFs need not be byte-identical between separate requests. Email encoding increases attachment size, and a mail provider may impose a smaller limit.
+
+Appendix originals and their metadata are stored transactionally in PostgreSQL (`BYTEA`), not in `STORAGE_DIR`. Include the database in backup and restore procedures; a storage-volume-only backup does not cover them. The existing formal Invoice/Refund `DocumentArtifact` history is unchanged: M17 does not retain exact historical outgoing Quote PDFs or freeze the quotation body. M17 implementation and independent review are complete; author walkthrough and acceptance remain pending.
+
 ## Development
 
 Run the full dev stack (app + Postgres, with the dev override) from source:
@@ -104,7 +115,7 @@ M0–M14 are complete. **M15 remains in development and was paused by the author
 
 The author accepted [M16](docs/plan/milestones/M16.md) on 2026-11-01 on its recorded representative walkthrough scope. External sales bookkeeping, VAT/P&L separation, annual battery private-use adjustment and the incorporated SI3 mileage/profit breakdown are delivered; skipped/unretested paths and known carryovers remain explicitly recorded.
 
-The [M17 Quote PDF appendices design](docs/plan/milestones/M17.md) was agreed and recorded on 2026-11-04: a shared library and Quote-specific uploads, manual ordered selection, and one merged output for preview/download/email. Steps 1–5 passed automated gates and independent review; Step 6 is in progress; author walkthrough pending. M17 is not recorded as accepted, and M15 stays paused.
+The [M17 Quote PDF appendices design](docs/plan/milestones/M17.md) was agreed and recorded on 2026-11-04: a shared library and Quote-specific uploads, manual ordered selection, and one merged output for preview/download/email. Implementation complete: all 6/6 steps passed local automated gates and independent review; author walkthrough and acceptance pending. M17 is not recorded as accepted or released, and M15 stays paused.
 
 SI1 (document ordering, Quote duplication and server-side Sent copies) was accepted on 2026-10-25 on a representative walkthrough scope; unperformed mail variants and failure paths remain explicitly recorded with automated coverage. See the [SI1 plan and acceptance](docs/plan/improvements/SI1.md).
 
