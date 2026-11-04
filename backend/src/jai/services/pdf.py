@@ -1472,7 +1472,10 @@ async def render_quote_pdf(
         .options(
             selectinload(Quote.lines).selectinload(QuoteLine.line_taxes),
             selectinload(Quote.taxes),
+            selectinload(Quote.appendix_memberships),
         )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     quote = result.scalar_one_or_none()
@@ -1480,6 +1483,15 @@ async def render_quote_pdf(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Quote not found.",
+        )
+    if quote.appendix_memberships:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "QUOTE_APPENDIX_OUTPUT_UNAVAILABLE",
+                "message": "Quote appendix output is not available yet.",
+            },
         )
 
     # -- Load company ---------------------------------------------------------
@@ -1547,4 +1559,6 @@ async def render_quote_pdf(
     pdf_bytes = html_to_pdf(html)
 
     filename = f"{quote.quote_number}.pdf"
+    # Release the coherent Quote snapshot lock before any caller can start SMTP.
+    await session.commit()
     return pdf_bytes, filename

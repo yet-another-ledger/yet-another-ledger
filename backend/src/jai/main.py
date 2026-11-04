@@ -107,6 +107,34 @@ def _m17_pdf_library_validation_request(request: Request) -> bool:
     )
 
 
+def _m17_quote_appendix_validation_request(
+    request: Request, exc: RequestValidationError
+) -> bool:
+    """Recognize malformed own-file picker and Quote appendix fields."""
+    parts = request.url.path.strip("/").split("/")
+    if (
+        request.method in {"GET", "POST"}
+        and len(parts) == 5
+        and parts[:3] == ["api", "v1", "quotes"]
+    ):
+        return parts[4] == "appendix-files"
+    if request.method == "POST" and parts == ["api", "v1", "quotes"]:
+        return any(
+            len(error.get("loc", ())) > 1
+            and error["loc"][0] == "body"
+            and error["loc"][1] in {"appendix_file_ids", "expected_appendix_version"}
+            for error in exc.errors()
+        )
+    if request.method == "PUT" and len(parts) == 4 and parts[:3] == ["api", "v1", "quotes"]:
+        return any(
+            len(error.get("loc", ())) > 1
+            and error["loc"][0] == "body"
+            and error["loc"][1] in {"appendix_file_ids", "expected_appendix_version"}
+            for error in exc.errors()
+        )
+    return False
+
+
 # ---------------------------------------------------------------------------
 # APScheduler jobs
 # ---------------------------------------------------------------------------
@@ -258,6 +286,16 @@ def create_app() -> FastAPI:
                     "detail": {
                         "code": "PDF_APPENDIX_INVALID",
                         "message": "The PDF library request is invalid.",
+                    }
+                },
+            )
+        if _m17_quote_appendix_validation_request(request, exc):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": {
+                        "code": "PDF_APPENDIX_INVALID",
+                        "message": "The Quote appendix request is invalid.",
                     }
                 },
             )

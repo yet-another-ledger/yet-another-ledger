@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import logging
 import re
 import uuid
 from collections.abc import Buffer
@@ -18,6 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.db import set_rls_company
+from jai.models._enums import QuoteStatus
 from jai.models.pdf_appendix import PdfAppendixFile
 from jai.schemas.pdf_appendix import (
     PdfAppendixFileListResponse,
@@ -458,3 +460,97 @@ async def read_file_metadata(
     )
     row = result.mappings().one_or_none()
     return PdfAppendixFileRead.model_validate(dict(row)) if row is not None else None
+
+
+class PdfAppendixSaveError(RuntimeError):
+    """A public-safe marker for transactional persistence failure."""
+
+
+async def list_quote_files(
+    session: AsyncSession,
+    *,
+    company_id: uuid.UUID,
+    quote_id: uuid.UUID,
+    limit: int,
+    offset: int,
+) -> PdfAppendixFileListResponse | None:
+    """List all originals owned by a persisted Quote, without loading blobs."""
+    from jai.services.quote import resolve_quote_parent
+
+    if await resolve_quote_parent(session, quote_id, company_id) is None:
+        return None
+    filters = (PdfAppendixFile.owner_quote_id == quote_id,)
+    total = (
+        await session.scalar(
+            select(func.count()).select_from(PdfAppendixFile).where(*filters)
+        )
+        or 0
+    )
+    rows = (
+        (
+            await session.execute(
+                select(PdfAppendixFile)
+                .where(*filters)
+                .order_by(PdfAppendixFile.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return PdfAppendixFileListResponse(
+        items=[PdfAppendixFileRead.model_validate(row) for row in rows], total=total
+    )
+
+
+async def quote_upload_state(
+    session: AsyncSession, *, company_id: uuid.UUID, quote_id: uuid.UUID
+) -> QuoteStatus | None:
+    """Resolve a Quote before an upload request consumes multipart bytes."""
+    from jai.services.quote import resolve_quote_parent
+
+    quote = await resolve_quote_parent(session, quote_id, company_id)
+    return QuoteStatus(quote.status) if quote is not None else None
+
+
+async def save_quote_file(
+    session: AsyncSession,
+    *,
+    company_id: uuid.UUID,
+    quote_id: uuid.UUID,
+    title: str,
+    filename: str,
+    content: bytes,
+    validated: ValidatedPdf,
+) -> PdfAppendixFileRead:
+    """Lock and recheck Quote lifecycle before persisting an unselected own file."""
+    from jai.services.quote import resolve_quote_parent
+
+    quote = await resolve_quote_parent(session, quote_id, company_id, lock=True)
+    if quote is None:
+        await session.rollback()
+        raise ValueError("PDF_APPENDIX_NOT_FOUND")
+    if QuoteStatus(quote.status) == QuoteStatus.ACCEPTED:
+        await session.rollback()
+        raise ValueError("QUOTE_APPENDICES_READ_ONLY")
+    row = PdfAppendixFile(
+        owner_quote_id=quote_id,
+        **new_file_values(
+            company_id=company_id,
+            title=title,
+            filename=filename,
+            content=content,
+            validated=validated,
+        ),
+    )
+    try:
+        session.add(row)
+        await session.flush()
+        response = PdfAppendixFileRead.model_validate(row)
+        await session.commit()
+        return response
+    except Exception:
+        await session.rollback()
+        logging.getLogger("jai").error("PDF appendix own-file persistence failed")
+        raise PdfAppendixSaveError from None

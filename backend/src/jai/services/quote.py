@@ -31,6 +31,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
+from sqlalchemy.orm.attributes import set_committed_value
 
 from jai.db import set_rls_company
 from jai.models._enums import (
@@ -48,6 +49,7 @@ from jai.models.customer import Customer
 from jai.models.dictionary import Unit
 from jai.models.invoice import Invoice
 from jai.models.payment import Payment
+from jai.models.pdf_appendix import PdfAppendixFile, QuoteAppendix
 from jai.models.product import Product
 from jai.models.quote import Quote, QuoteLine, QuoteLineTax, QuoteTax
 from jai.models.vat import VatRate, VatTreatment
@@ -57,6 +59,7 @@ from jai.schemas.invoice import (
     InvoiceRead,
     VatTreatmentSnapshot,
 )
+from jai.schemas.pdf_appendix import PdfAppendixSource, QuoteAppendixRead
 from jai.schemas.quote import (
     DocumentChainTotals,
     QuoteLineRead,
@@ -285,6 +288,7 @@ def _quote_to_read(
         incoming_payment_total=incoming_payment_total,
         base_incoming_payment_total=base_incoming_payment_total,
     )
+
     treatment_snapshot = VatTreatmentSnapshot(
         id=q.vat_treatment_id,
         code=q.vat_treatment_code,
@@ -343,6 +347,28 @@ def _quote_to_read(
         bank_text=q.bank_text,
         payment_terms_text=q.payment_terms_text,
         creator_id=q.creator_id,
+        appendices=[
+            QuoteAppendixRead(
+                id=member.id,
+                file_id=member.file_id,
+                owner_quote_id=member.file.owner_quote_id,
+                source=(
+                    PdfAppendixSource.QUOTE
+                    if member.file.owner_quote_id
+                    else PdfAppendixSource.LIBRARY
+                ),
+                sort_order=member.sort_order,
+                title_snapshot=member.title_snapshot,
+                title=member.file.title,
+                original_filename=member.file.original_filename,
+                sha256=member.file.sha256,
+                size_bytes=member.file.size_bytes,
+                page_count=member.file.page_count,
+                is_archived=member.file.is_archived,
+            )
+            for member in sorted(q.appendix_memberships, key=lambda item: item.sort_order)
+        ],
+        appendix_version=q.appendix_version,
         lines=[_line_to_read(line) for line in q.lines],
         taxes=[
             QuoteTaxRowRead(
@@ -359,6 +385,47 @@ def _quote_to_read(
         created_at=q.created_at,
         updated_at=q.updated_at,
     )
+
+
+async def _reload_quote_appendices(
+    session: AsyncSession, quote_id: uuid.UUID, company_id: uuid.UUID
+) -> Quote:
+    """Refresh the complete metadata membership independently of identity-map state."""
+    await set_rls_company(session, company_id)
+    quote = await resolve_quote_parent(session, quote_id, company_id)
+    assert quote is not None
+    members = list(
+        (
+            await session.scalars(
+                select(QuoteAppendix)
+                .where(QuoteAppendix.quote_id == quote_id)
+                .options(joinedload(QuoteAppendix.file))
+                .order_by(QuoteAppendix.sort_order)
+            )
+        ).all()
+    )
+    set_committed_value(quote, "appendix_memberships", members)
+    return quote
+
+
+async def resolve_quote_parent(
+    session: AsyncSession,
+    quote_id: uuid.UUID,
+    company_id: uuid.UUID,
+    *,
+    lock: bool = False,
+) -> Quote | None:
+    """Resolve a Quote through the existing company ownership boundary.
+
+    New Quote-owned resources reuse this resolver instead of looking up a parent
+    by ID alone. Callers that mutate Quote-owned state request the parent lock.
+    """
+    await set_rls_company(session, company_id)
+    stmt = select(Quote).where(Quote.id == quote_id, Quote.company_id == company_id)
+    if lock:
+        stmt = stmt.with_for_update()
+    result = await session.execute(stmt.execution_options(populate_existing=True))
+    return result.scalar_one_or_none()
 
 
 async def _quote_chain_totals(session: AsyncSession, quote: Quote) -> DocumentChainTotals:
@@ -630,6 +697,95 @@ async def _build_and_persist_quote(
     return q
 
 
+async def _save_quote_appendices(
+    session: AsyncSession,
+    *,
+    quote: Quote,
+    company_id: uuid.UUID,
+    requested_ids: list[uuid.UUID] | None,
+    expected_version: int | None,
+    creating: bool,
+) -> None:
+    """Validate and atomically replace an explicitly supplied Quote selection."""
+    if requested_ids is None:
+        return
+    if len(set(requested_ids)) != len(requested_ids):
+        raise ValueError("PDF_APPENDIX_DUPLICATE_IDS")
+    if (not creating and expected_version is None) or (
+        expected_version is not None and expected_version != quote.appendix_version
+    ):
+        raise ValueError("QUOTE_APPENDIX_VERSION_CONFLICT")
+    from jai.config import get_settings
+
+    cfg = get_settings()
+    if len(requested_ids) > cfg.max_quote_appendices:
+        raise ValueError("PDF_APPENDIX_COUNT_LIMIT")
+
+    current_rows = list(
+        (
+            await session.scalars(
+                select(QuoteAppendix)
+                .where(QuoteAppendix.quote_id == quote.id)
+                .order_by(QuoteAppendix.sort_order)
+            )
+        ).all()
+    )
+    old_ids = [row.file_id for row in current_rows]
+    if creating and requested_ids and expected_version not in (None, 0):
+        raise ValueError("QUOTE_APPENDIX_VERSION_CONFLICT")
+    file_rows = list(
+        (
+            await session.scalars(
+                select(PdfAppendixFile)
+                .where(
+                    PdfAppendixFile.id.in_(set(old_ids) | set(requested_ids)),
+                )
+                .order_by(PdfAppendixFile.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+    )
+    by_id = {row.id: row for row in file_rows}
+    if any(file_id not in by_id for file_id in requested_ids):
+        raise ValueError("PDF_APPENDIX_NOT_FOUND")
+    old_members = set(old_ids)
+    input_bytes = 0
+    total_pages = 0
+    for file_id in requested_ids:
+        file = by_id[file_id]
+        if file.owner_quote_id not in (None, quote.id):
+            raise ValueError("PDF_APPENDIX_NOT_FOUND")
+        if file_id not in old_members and file.is_archived:
+            raise ValueError("PDF_LIBRARY_FILE_ARCHIVED")
+        input_bytes += file.size_bytes
+        total_pages += file.page_count
+    if input_bytes > cfg.max_quote_appendix_input_bytes:
+        raise ValueError("PDF_APPENDIX_INPUT_LIMIT")
+    if total_pages > cfg.max_quote_pdf_pages:
+        raise ValueError("PDF_APPENDIX_PAGE_LIMIT")
+    if old_ids == requested_ids:
+        return
+
+    old_by_id = {row.file_id: row for row in current_rows}
+    await session.execute(delete(QuoteAppendix).where(QuoteAppendix.quote_id == quote.id))
+    for index, file_id in enumerate(requested_ids):
+        file = by_id[file_id]
+        session.add(
+            QuoteAppendix(
+                company_id=company_id,
+                quote_id=quote.id,
+                file_id=file_id,
+                sort_order=index,
+                title_snapshot=(
+                    old_by_id[file_id].title_snapshot if file_id in old_by_id else file.title
+                ),
+            )
+        )
+    quote.appendix_version = (quote.appendix_version or 0) + 1
+    await session.flush()
+
+
 # ---------------------------------------------------------------------------
 # Expiry helpers
 # ---------------------------------------------------------------------------
@@ -676,6 +832,7 @@ async def create_quote(
     creator_id: uuid.UUID | None,
 ) -> QuoteRead:
     """Create a new quote: allocate number, calculate, persist."""
+    await set_rls_company(session, company_id)
     cust_stmt = select(Customer).where(
         Customer.id == body.customer_id,
         Customer.company_id == company_id,
@@ -706,6 +863,18 @@ async def create_quote(
         vat_rates=vat_rates,
         valid_until_default=valid_until_default,
     )
+    try:
+        await _save_quote_appendices(
+            session,
+            quote=q,
+            company_id=company_id,
+            requested_ids=body.appendix_file_ids,
+            expected_version=body.expected_appendix_version,
+            creating=True,
+        )
+    except ValueError:
+        await session.rollback()
+        raise
 
     try:
         await session.commit()
@@ -713,7 +882,7 @@ async def create_quote(
         await session.rollback()
         raise ValueError("Quote number already exists (concurrent creation).") from exc
 
-    await session.refresh(q)
+    q = await _reload_quote_appendices(session, q.id, company_id)
     return _quote_to_read(q)
 
 
@@ -806,10 +975,12 @@ async def get_quote(
     if _apply_expiry_in_memory(q):
         q.status = QuoteStatus.EXPIRED
         # Build read model before commit (avoids post-commit attribute expiry)
+        q = await _reload_quote_appendices(session, q.id, company_id)
         read = _quote_to_read(q, chain_totals=chain_totals)
         await session.flush()
         await session.commit()
         return read
+    q = await _reload_quote_appendices(session, q.id, company_id)
     return _quote_to_read(q, chain_totals=chain_totals)
 
 
@@ -824,9 +995,15 @@ async def update_quote(
 
     ACCEPTED quotes cannot be edited (409 raised as ValueError).
     """
-    stmt = select(Quote).where(
-        Quote.id == quote_id,
-        Quote.company_id == company_id,
+    await set_rls_company(session, company_id)
+    stmt = (
+        select(Quote)
+        .where(
+            Quote.id == quote_id,
+            Quote.company_id == company_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     q = result.scalar_one_or_none()
@@ -834,9 +1011,13 @@ async def update_quote(
         return None
 
     if q.status == QuoteStatus.ACCEPTED:
-        raise ValueError(
-            "Cannot edit an ACCEPTED quote. "
-            "Reactivate it first or edit the converted invoice directly."
+        raise (
+            ValueError("QUOTE_APPENDICES_READ_ONLY")
+            if body.appendix_file_ids is not None
+            else ValueError(
+                "Cannot edit an ACCEPTED quote. "
+                "Reactivate it first or edit the converted invoice directly."
+            )
         )
 
     cust_stmt = select(Customer).where(
@@ -852,23 +1033,35 @@ async def update_quote(
     vat_rates = await _load_vat_rates(session, company_id, body)
     await _validate_line_fks(session, company_id, body)
 
-    updated = await _build_and_persist_quote(
-        session,
-        company_id=company_id,
-        company_currency=company_currency,
-        creator_id=q.creator_id,
-        body=body,
-        customer=customer,
-        treatment=treatment,
-        vat_rates=vat_rates,
-        quote_number=q.quote_number,
-        sequence_number=q.sequence_number,
-        customer_sequence_number=q.customer_sequence_number,
-        existing_quote=q,
-    )
+    try:
+        updated = await _build_and_persist_quote(
+            session,
+            company_id=company_id,
+            company_currency=company_currency,
+            creator_id=q.creator_id,
+            body=body,
+            customer=customer,
+            treatment=treatment,
+            vat_rates=vat_rates,
+            quote_number=q.quote_number,
+            sequence_number=q.sequence_number,
+            customer_sequence_number=q.customer_sequence_number,
+            existing_quote=q,
+        )
+        await _save_quote_appendices(
+            session,
+            quote=updated,
+            company_id=company_id,
+            requested_ids=body.appendix_file_ids,
+            expected_version=body.expected_appendix_version,
+            creating=False,
+        )
+    except ValueError:
+        await session.rollback()
+        raise
 
     await session.commit()
-    await session.refresh(updated)
+    updated = await _reload_quote_appendices(session, updated.id, company_id)
     return _quote_to_read(updated)
 
 
@@ -881,9 +1074,15 @@ async def delete_quote(
 
     Numbers are never recycled (red-line 4).
     """
-    stmt = select(Quote).where(
-        Quote.id == quote_id,
-        Quote.company_id == company_id,
+    await set_rls_company(session, company_id)
+    stmt = (
+        select(Quote)
+        .where(
+            Quote.id == quote_id,
+            Quote.company_id == company_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     q = result.scalar_one_or_none()
@@ -1125,9 +1324,15 @@ async def reactivate(
     If ``body.valid_until`` is not provided, extends by the company default
     number of days from today.  Returns None if the quote is not found.
     """
-    stmt = select(Quote).where(
-        Quote.id == quote_id,
-        Quote.company_id == company_id,
+    await set_rls_company(session, company_id)
+    stmt = (
+        select(Quote)
+        .where(
+            Quote.id == quote_id,
+            Quote.company_id == company_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     q = result.scalar_one_or_none()
@@ -1149,6 +1354,7 @@ async def reactivate(
 
     await session.commit()
     await session.refresh(q)
+    q = await _reload_quote_appendices(session, q.id, company_id)
     return _quote_to_read(q)
 
 
@@ -1189,9 +1395,15 @@ async def transition_status(
 
     EXPIRED cannot be set manually; it is driven by date check / APScheduler.
     """
-    stmt = select(Quote).where(
-        Quote.id == quote_id,
-        Quote.company_id == company_id,
+    await set_rls_company(session, company_id)
+    stmt = (
+        select(Quote)
+        .where(
+            Quote.id == quote_id,
+            Quote.company_id == company_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     q = result.scalar_one_or_none()
@@ -1220,4 +1432,5 @@ async def transition_status(
     q.status = new_status
     await session.commit()
     await session.refresh(q)
+    q = await _reload_quote_appendices(session, q.id, company_id)
     return _quote_to_read(q)

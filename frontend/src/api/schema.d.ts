@@ -1448,6 +1448,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/quotes/{quote_id}/appendix-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Quote Appendix Files */
+        get: operations["list_quote_appendix_files_api_v1_quotes__quote_id__appendix_files_get"];
+        put?: never;
+        /** Upload Quote Appendix File */
+        post: operations["upload_quote_appendix_file_api_v1_quotes__quote_id__appendix_files_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices/{invoice_id}/pdf": {
         parameters: {
             query?: never;
@@ -8652,6 +8670,14 @@ export interface components {
             lines: components["schemas"]["InvoiceLineInput"][];
         };
         /**
+         * LegacyDetailErrorResponse
+         * @description Existing Quote routes return plain string details for legacy errors.
+         */
+        LegacyDetailErrorResponse: {
+            /** Detail */
+            detail: string;
+        };
+        /**
          * LoginRequest
          * @description Body for ``POST /auth/login``.
          */
@@ -9955,6 +9981,38 @@ export interface components {
             /** Remaining Base Gross Amount */
             remaining_base_gross_amount: string;
         };
+        /** QuoteAppendixRead */
+        QuoteAppendixRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * File Id
+             * Format: uuid
+             */
+            file_id: string;
+            /** Owner Quote Id */
+            owner_quote_id: string | null;
+            source: components["schemas"]["PdfAppendixSource"];
+            /** Sort Order */
+            sort_order: number;
+            /** Title Snapshot */
+            title_snapshot: string;
+            /** Title */
+            title: string;
+            /** Original Filename */
+            original_filename: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Page Count */
+            page_count: number;
+            /** Is Archived */
+            is_archived: boolean;
+        };
         /**
          * QuoteCalculationRead
          * @description Quote pricing preview result.
@@ -10424,6 +10482,13 @@ export interface components {
             payment_terms_text?: string | null;
             /** Creator Id */
             creator_id?: string | null;
+            /** Appendices */
+            appendices?: components["schemas"]["QuoteAppendixRead"][];
+            /**
+             * Appendix Version
+             * @default 0
+             */
+            appendix_version?: number;
             /**
              * Lines
              * @default []
@@ -10546,6 +10611,10 @@ export interface components {
              * @description At least 1 line required.
              */
             lines: components["schemas"]["InvoiceLineInput"][];
+            /** Appendix File Ids */
+            appendix_file_ids?: string[];
+            /** Expected Appendix Version */
+            expected_appendix_version?: number;
         };
         /**
          * ReceiptInboxAIState
@@ -15100,6 +15169,124 @@ export interface operations {
             };
         };
     };
+    list_quote_appendix_files_api_v1_quotes__quote_id__appendix_files_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixFileListResponse"];
+                };
+            };
+            /** @description PDF material not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Invalid Quote appendix picker request. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_quote_appendix_file_api_v1_quotes__quote_id__appendix_files_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                    title?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixFileRead"];
+                };
+            };
+            /** @description PDF material not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Accepted Quote is read only. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description PDF material exceeds a configured limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Invalid PDF material request. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description PDF material could not be saved. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+        };
+    };
     download_invoice_pdf_api_v1_invoices__invoice_id__pdf_get: {
         parameters: {
             query?: {
@@ -15350,6 +15537,15 @@ export interface operations {
                     "application/pdf": unknown;
                 };
             };
+            /** @description Quote appendix output is temporarily unavailable. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -15489,13 +15685,40 @@ export interface operations {
                     "application/json": components["schemas"]["QuoteRead"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid Quote or appendix request. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["LegacyDetailErrorResponse"];
+                };
+            };
+            /** @description Invalid Quote or appendix request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["LegacyDetailErrorResponse"];
+                };
+            };
+            /** @description Appendix input limit exceeded. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Invalid Quote or appendix request. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["LegacyDetailErrorResponse"] | components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -15586,13 +15809,40 @@ export interface operations {
                     "application/json": components["schemas"]["QuoteRead"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid Quote or appendix request. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["LegacyDetailErrorResponse"];
+                };
+            };
+            /** @description Invalid Quote or appendix request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["LegacyDetailErrorResponse"];
+                };
+            };
+            /** @description Appendix input limit exceeded. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Invalid Quote or appendix request. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["LegacyDetailErrorResponse"] | components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -15850,6 +16100,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EmailLogRead"];
+                };
+            };
+            /** @description Quote PDF output is temporarily unavailable. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
                 };
             };
             /** @description Validation Error */

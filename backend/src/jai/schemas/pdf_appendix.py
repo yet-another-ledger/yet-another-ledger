@@ -31,6 +31,12 @@ class PdfAppendixErrorResponse(BaseModel):
     detail: PdfAppendixErrorDetail
 
 
+class LegacyDetailErrorResponse(BaseModel):
+    """Existing Quote routes return plain string details for legacy errors."""
+
+    detail: str
+
+
 class PdfAppendixFileRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -73,6 +79,21 @@ class PdfAppendixFileRead(BaseModel):
 class PdfAppendixFileListResponse(BaseModel):
     items: list[PdfAppendixFileRead]
     total: int
+
+
+class QuoteAppendixRead(BaseModel):
+    id: uuid.UUID
+    file_id: uuid.UUID
+    owner_quote_id: uuid.UUID | None
+    source: PdfAppendixSource
+    sort_order: int
+    title_snapshot: str
+    title: str
+    original_filename: str
+    sha256: str
+    size_bytes: int
+    page_count: int
+    is_archived: bool
 
 
 class PdfLibraryFileUpdate(BaseModel):

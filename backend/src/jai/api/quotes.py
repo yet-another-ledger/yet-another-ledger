@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +35,7 @@ from jai.schemas.invoice import (
     ProjectCancellationRequest,
     ProjectCancellationResult,
 )
+from jai.schemas.pdf_appendix import LegacyDetailErrorResponse, PdfAppendixErrorResponse
 from jai.schemas.quote import (
     QuoteCalculationRead,
     QuoteCalculationRequest,
@@ -70,8 +71,59 @@ from jai.services.quote import (
 router = APIRouter(prefix="/api/v1", tags=["quotes"])
 
 
+def _quote_error_responses(
+    *, description: str, stable_statuses: tuple[int, ...]
+) -> dict[int | str, dict[str, Any]]:
+    """Describe stable appendix, legacy string-detail, and validation errors."""
+    responses: dict[int | str, dict[str, Any]] = {}
+    for status_code in stable_statuses:
+        responses[status_code] = {
+            "model": PdfAppendixErrorResponse | LegacyDetailErrorResponse,
+            "description": description,
+        }
+    responses[422] = {
+        "content": {
+            "application/json": {
+                "schema": {
+                    "anyOf": [
+                        {"$ref": "#/components/schemas/PdfAppendixErrorResponse"},
+                        {"$ref": "#/components/schemas/LegacyDetailErrorResponse"},
+                        {"$ref": "#/components/schemas/HTTPValidationError"},
+                    ]
+                }
+            }
+        },
+        "description": description,
+    }
+    return responses
+
+
 def _correction_error(status_code: int, code: str, exc: Exception) -> HTTPException:
     return HTTPException(status_code=status_code, detail={"code": code, "message": str(exc)})
+
+
+_QUOTE_APPENDIX_CODES: dict[str, int] = {
+    "QUOTE_APPENDIX_VERSION_CONFLICT": 409,
+    "QUOTE_APPENDICES_READ_ONLY": 409,
+    "PDF_LIBRARY_FILE_ARCHIVED": 409,
+    "PDF_APPENDIX_NOT_FOUND": 404,
+    "PDF_APPENDIX_DUPLICATE_IDS": 422,
+    "PDF_APPENDIX_COUNT_LIMIT": 422,
+    "PDF_APPENDIX_INPUT_LIMIT": 413,
+    "PDF_APPENDIX_PAGE_LIMIT": 422,
+}
+
+
+def _quote_write_exception(exc: ValueError) -> HTTPException:
+    code = str(exc)
+    if code in _QUOTE_APPENDIX_CODES:
+        return HTTPException(
+            status_code=_QUOTE_APPENDIX_CODES[code],
+            detail={"code": code, "message": code},
+        )
+    if "ACCEPTED" in code:
+        return HTTPException(status_code=409, detail=code)
+    return HTTPException(status_code=422, detail=code)
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +221,17 @@ async def list_quotes_endpoint(
     )
 
 
-@router.post("/quotes", response_model=QuoteRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/quotes",
+    response_model=QuoteRead,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        **_quote_error_responses(
+            description="Invalid Quote or appendix request.", stable_statuses=(404, 409)
+        ),
+        413: {"model": PdfAppendixErrorResponse, "description": "Appendix input limit exceeded."},
+    },
+)
 async def create_quote_endpoint(
     body: QuoteWrite,
     user: User = Depends(current_mfa_user),
@@ -188,10 +250,7 @@ async def create_quote_endpoint(
             creator_id=user.id,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
+        raise _quote_write_exception(exc) from exc
 
 
 @router.post(
@@ -304,7 +363,16 @@ async def create_project_cancellation_drafts_endpoint(
         raise _correction_error(422, exc.code, exc) from exc
 
 
-@router.put("/quotes/{quote_id}", response_model=QuoteRead)
+@router.put(
+    "/quotes/{quote_id}",
+    response_model=QuoteRead,
+    responses={
+        **_quote_error_responses(
+            description="Invalid Quote or appendix request.", stable_statuses=(404, 409)
+        ),
+        413: {"model": PdfAppendixErrorResponse, "description": "Appendix input limit exceeded."},
+    },
+)
 async def update_quote_endpoint(
     quote_id: uuid.UUID,
     body: QuoteWrite,
@@ -325,14 +393,7 @@ async def update_quote_endpoint(
         )
     except ValueError as exc:
         # ACCEPTED-block raises ValueError; surface it as 409 to match spec
-        msg = str(exc)
-        if "ACCEPTED" in msg:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail=msg
-            ) from exc
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=msg
-        ) from exc
+        raise _quote_write_exception(exc) from exc
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found.")
     return result
@@ -453,6 +514,12 @@ async def reactivate_quote_endpoint(
     "/quotes/{quote_id}/send",
     response_model=EmailLogRead,
     status_code=status.HTTP_200_OK,
+    responses={
+        409: {
+            "model": PdfAppendixErrorResponse,
+            "description": "Quote PDF output is temporarily unavailable.",
+        }
+    },
 )
 async def send_quote_email_endpoint(
     quote_id: uuid.UUID,
@@ -539,6 +606,10 @@ async def send_quote_email_endpoint(
     pdf_bytes, filename = await render_quote_pdf(
         session, quote_id, company_id, locale=resolved_locale
     )
+
+    # render_quote_pdf ends its locked snapshot transaction before returning;
+    # restore tenant context for the email_log insert in the new transaction.
+    await set_rls_company(session, company_id)
 
     # -- Normalise CC ---------------------------------------------------------
     cc_list: list[str] | None = None

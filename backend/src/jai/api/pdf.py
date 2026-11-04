@@ -404,6 +404,127 @@ async def get_pdf_appendix_content(
     )
 
 
+@router.get(
+    "/quotes/{quote_id}/appendix-files",
+    response_model=PdfAppendixFileListResponse,
+    responses={
+        404: _PDF_APPENDIX_ERRORS[404],
+        422: {
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "anyOf": [
+                            {"$ref": "#/components/schemas/PdfAppendixErrorResponse"},
+                            {"$ref": "#/components/schemas/HTTPValidationError"},
+                        ]
+                    }
+                }
+            },
+            "description": "Invalid Quote appendix picker request.",
+        },
+    },
+)
+async def list_quote_appendix_files(
+    quote_id: uuid.UUID,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> PdfAppendixFileListResponse:
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    from jai.services.pdf_appendix import list_quote_files
+
+    result = await list_quote_files(
+        session, company_id=company_id, quote_id=quote_id, limit=limit, offset=offset
+    )
+    if result is None:
+        raise _appendix_error("PDF_APPENDIX_NOT_FOUND", "Quote was not found.", 404)
+    return result
+
+
+@router.post(
+    "/quotes/{quote_id}/appendix-files",
+    status_code=201,
+    response_model=PdfAppendixFileRead,
+    responses={
+        404: _PDF_APPENDIX_ERRORS[404],
+        409: {"model": PdfAppendixErrorResponse, "description": "Accepted Quote is read only."},
+        413: _PDF_APPENDIX_ERRORS[413],
+        422: _PDF_APPENDIX_ERRORS[422],
+        500: _PDF_APPENDIX_ERRORS[500],
+    },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {"multipart/form-data": {"schema": _PDF_APPENDIX_MULTIPART_SCHEMA}},
+        }
+    },
+)
+async def upload_quote_appendix_file(
+    quote_id: uuid.UUID,
+    request: Request,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> PdfAppendixFileRead:
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    from jai.services.pdf_appendix import (
+        PdfAppendixSaveError,
+        PdfAppendixValidationError,
+        normalized_filename,
+        quote_upload_state,
+        save_quote_file,
+        validate_pdf,
+    )
+
+    initial_status = await quote_upload_state(session, company_id=company_id, quote_id=quote_id)
+    if initial_status is None:
+        raise _appendix_error("PDF_APPENDIX_NOT_FOUND", "Quote was not found.", 404)
+    if initial_status.value == "ACCEPTED":
+        raise _appendix_error("QUOTE_APPENDICES_READ_ONLY", "Accepted Quotes are read only.", 409)
+    try:
+        content, mime_type, raw_filename, title = await _read_pdf_appendix_multipart(
+            request, max_bytes=get_settings().max_appendix_file_bytes
+        )
+        filename = normalized_filename(raw_filename)
+        if title is not None and (len(title) > 500 or not title.strip()):
+            raise _ArtifactMultipartError
+        validated = await validate_pdf(
+            content,
+            mime_type,
+            max_bytes=get_settings().max_appendix_file_bytes,
+            max_pages=get_settings().max_quote_pdf_pages,
+        )
+    except _PdfAppendixTooLargeError:
+        raise _appendix_error(
+            "PDF_APPENDIX_FILE_TOO_LARGE", "The PDF exceeds the configured file size limit.", 413
+        ) from None
+    except (_ArtifactMultipartError, PdfAppendixValidationError):
+        raise _appendix_error(
+            "PDF_APPENDIX_INVALID", "Upload a supported, static PDF within the configured limits."
+        ) from None
+
+    try:
+        return await save_quote_file(
+            session,
+            company_id=company_id,
+            quote_id=quote_id,
+            title=title or filename,
+            filename=filename,
+            content=content,
+            validated=validated,
+        )
+    except ValueError as exc:
+        if str(exc) == "QUOTE_APPENDICES_READ_ONLY":
+            raise _appendix_error(str(exc), "Accepted Quotes are read only.", 409) from None
+        raise _appendix_error("PDF_APPENDIX_NOT_FOUND", "Quote was not found.", 404) from None
+    except PdfAppendixSaveError:
+        raise _appendix_error(
+            "PDF_APPENDIX_SAVE_FAILED", "The PDF could not be saved.", 500
+        ) from None
+
+
 def _artifact_422_response(description: str) -> dict[str, Any]:
     """Describe both raw-file and stable parameter-validation failures."""
     return {
@@ -841,7 +962,11 @@ async def validate_invoice_artifact_upload_endpoint(
         200: {
             "content": {"application/pdf": {}},
             "description": "Quote PDF download.",
-        }
+        },
+        409: {
+            "model": PdfAppendixErrorResponse,
+            "description": "Quote appendix output is temporarily unavailable.",
+        },
     },
 )
 async def download_quote_pdf(

@@ -88,6 +88,7 @@ class Quote(Base):
     status: Mapped[QuoteStatus] = mapped_column(
         nullable=False, server_default="DRAFT"
     )
+    appendix_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     settlement_mode: Mapped[QuoteSettlementMode] = mapped_column(
         nullable=False, server_default="UNSET"
     )
@@ -194,6 +195,7 @@ class Quote(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         foreign_keys="QuoteAppendix.quote_id",
+        lazy="selectin",
     )
     own_appendix_files: Mapped[list[PdfAppendixFile]] = relationship(
         "PdfAppendixFile",
@@ -201,6 +203,7 @@ class Quote(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         foreign_keys="PdfAppendixFile.owner_quote_id",
+        lazy="selectin",
     )
 
     # -- Table constraints ----------------------------------------------------

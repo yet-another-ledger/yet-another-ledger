@@ -99,4 +99,6 @@ class QuoteAppendix(Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
     title_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
     quote: Mapped[Quote] = relationship("Quote", back_populates="appendix_memberships")
-    file: Mapped[PdfAppendixFile] = relationship("PdfAppendixFile", foreign_keys=[file_id])
+    file: Mapped[PdfAppendixFile] = relationship(
+        "PdfAppendixFile", foreign_keys=[file_id], lazy="joined"
+    )
