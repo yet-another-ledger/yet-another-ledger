@@ -17,7 +17,7 @@
 - A new rounding algorithm, a dedicated ordering API, or separate display/calculation orders.
 - Quote revision chains, version comparisons or automatic replacement of older quotes.
 - Sent-copy retry queues, automatic retries, manual copy-only retry and historical email backfill.
-- Product-manual PDF upload/storage and checkboxes for choosing additional quote attachments. Keep this as a candidate for a separately designed future milestone; reserve no schema or milestone number now.
+- Product-manual PDF upload/storage and additional Quote attachments are outside SI1. **Follow-on plan (2026-11-04)**: [M17 Quote PDF appendices](../milestones/M17.md) now covers manual Quote selection, shared/own uploads and merged output; its six steps are not implemented and do not change SI1 acceptance.
 
 **Related docs / existing foundations**: [roadmap](../roadmap.md), [M5](../milestones/M5.md) pricing and Invoice CRUD, [M6](../milestones/M6.md) Quote CRUD and numbering, [M6.5](../milestones/M6.5.md) Estimate grouping, [M7.5](../milestones/M7.5.md) rounding, [M9](../milestones/M9.md) PDF/email, and [M12](../milestones/M12.md)/[M13](../milestones/M13.md) formal document artifacts.
 
@@ -163,7 +163,7 @@ The final report must state which mail types were manually exercised and which r
 - Walkthrough diagnostic follow-up: Added fixed, redacted SMTP test-failure categories to server logs while keeping the existing generic API error and independent SMTP/IMAP outcomes. Ruff, strict mypy (122 files), isolated default pytest (1388 tests, including 18 new diagnostics tests) and Docker build passed; full integration was not repeated for this logging-only change. The follow-up used the ordinary walkthrough workflow without another blind-review run; the author accepted and authorized committing this follow-up with closeout. The author updated credentials and the next real test succeeded; the earlier generic failure cannot be retrospectively classified. No agent sent real mail or accessed mailbox contents.
 - Release-candidate verification: main commit `5815bb7` passed all remote CI jobs on 2026-10-25, including full PostgreSQL integration, backend quality, generated-type freshness, frontend build and Docker build. This includes the walkthrough diagnostic follow-up; its earlier local-only integration limitation is historical. The v0.8.0 tag points to this verified commit.
 - Operator guidance: See [README SMTP and server-side Sent copies](../../../README.md#smtp-and-server-side-sent-copies) for effective shared SMTP credentials/environment fallback, TLS/ports, existing-folder discovery, independent outcomes and safe troubleshooting.
-- Known carryover / deferred items: product-manual PDF management and attachment selection need a future separate milestone; Sent-copy retries/backfill and Quote version management remain out of scope. M15 stays paused.
+- Known carryover / follow-on: product-manual PDF management and manual selection are now planned as [M17](../milestones/M17.md) (design agreed 2026-11-04, not implemented); Sent-copy retries/backfill and Quote version management remain out of scope. SI1 historical acceptance is unchanged; M15 stays paused.
 
 ## Protocol References
 

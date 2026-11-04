@@ -2,9 +2,9 @@
 
 > 🌐 **English** · [中文](roadmap_zh.md)
 
-> **Current scheduling (2026-11-01)**: M15 remains in development but is paused, with its work preserved on `wip/m15-agent-accounting-paused`, outside `main`. M16 is accepted on its recorded representative scope; no subsequent milestone has started. SI1 was accepted on the recorded representative walkthrough scope on 2026-10-25. The author agreed the [SI2 implementation plan](improvements/SI2.md) on 2026-10-26: five atomic steps for audited revision of undelivered, unpaid Standard Invoices; all five implementation steps, full local gates and independent blind reviews are complete as of 2026-10-27; the author accepted the recorded representative walkthrough scope on 2026-10-28, with skipped/unretested paths explicitly retained. Walkthrough UI follow-ups were validated separately without a new independent review. Release CI results are tracked in GitHub Actions. Small improvements are separately numbered and do not resume M15. The author agreed the [M16 design](milestones/M16.md) on 2026-10-30: external sales bookkeeping, VAT/P&L separation and annual battery private-use adjustment in nine atomic steps; Steps 1–9 of 9 completed local automated gates and independent review on 2026-10-31. The author accepted the recorded representative walkthrough scope on 2026-11-01. External sales, Expense/receipt inbox, battery 45%→0% revisions and in-service-date reconfirmation were checked with read-only report/original/history verification. Step 7 reporting reconciles; the author accepted a brief page check. Step 8 was accepted on the author’s confirmation of prior testing, without repeating pending deletion in this round. Recurring-expense walkthrough was explicitly skipped; untested provider, concurrency and second-account UI paths remain distinguished from automated evidence. Prior orchestrated UI refinements passed independent review; the later upload-state/error-display fix passed separate automated checks and author confirmation without another blind review. Known carryovers remain documented. SI3 is incorporated into M16 with no independent schedule.
+> **Current scheduling (2026-11-04)**: M15 remains in development but is paused, with its work preserved on `wip/m15-agent-accounting-paused`, outside `main`. M16 is accepted on its recorded representative scope. The author agreed and recorded the [M17 Quote PDF appendices design](milestones/M17.md) on 2026-11-04, with six atomic task cards; implementation has not started and no implementation milestone is active. SI1 was accepted on the recorded representative walkthrough scope on 2026-10-25. The author agreed the [SI2 implementation plan](improvements/SI2.md) on 2026-10-26: five atomic steps for audited revision of undelivered, unpaid Standard Invoices; all five implementation steps, full local gates and independent blind reviews are complete as of 2026-10-27; the author accepted the recorded representative walkthrough scope on 2026-10-28, with skipped/unretested paths explicitly retained. Walkthrough UI follow-ups were validated separately without a new independent review. Release CI results are tracked in GitHub Actions. Small improvements are separately numbered and do not resume M15. The author agreed the [M16 design](milestones/M16.md) on 2026-10-30: external sales bookkeeping, VAT/P&L separation and annual battery private-use adjustment in nine atomic steps; Steps 1–9 of 9 completed local automated gates and independent review on 2026-10-31. The author accepted the recorded representative walkthrough scope on 2026-11-01. External sales, Expense/receipt inbox, battery 45%→0% revisions and in-service-date reconfirmation were checked with read-only report/original/history verification. Step 7 reporting reconciles; the author accepted a brief page check. Step 8 was accepted on the author’s confirmation of prior testing, without repeating pending deletion in this round. Recurring-expense walkthrough was explicitly skipped; untested provider, concurrency and second-account UI paths remain distinguished from automated evidence. Prior orchestrated UI refinements passed independent review; the later upload-state/error-display fix passed separate automated checks and author confirmation without another blind review. Known carryovers remain documented. SI3 is incorporated into M16 with no independent schedule.
 
-> **What this is**: A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the receipt-inbox, agent-accounting and external-bookkeeping/VAT–P&L follow-ons **M14–M16**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
+> **What this is**: A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the receipt-inbox, agent-accounting, external-bookkeeping/VAT–P&L and Quote PDF appendix follow-ons **M14–M17**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
 >
 > **What this is not**: A line-by-line construction guide. This document stays at the level of "milestones + methodology + constraints"; the **atomic step list** for each milestone is written out JIT in `docs/plan/milestones/M<x>.md` (template: `milestones/_TEMPLATE.md`).
 >
@@ -111,11 +111,12 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4. Milestone Map M0–M16 (including inserted M2.5 · Settings UX refactor / M6.5 · Cost accounting / M11.5 · Quote deposits)
+## 4. Milestone Map M0–M17 (including inserted M2.5 · Settings UX refactor / M6.5 · Cost accounting / M11.5 · Quote deposits)
 
 > Dependencies: **M0 → M1 → M2 → (M2.5) → {M3, M4}**, then two parallelisable tracks:
 > ① **Document track**: M5 → M6 → **M6.5** → M7; ② **Expense track**: M8 (depends only on M2 base currency + M4 dictionaries, optionally M3 customers, **independent of invoices/quotes/payments**). The two tracks converge at M9 → M10, then continue through **M11 (private-transport business mileage) → M11.5 (quote deposits and final-invoice settlement) → M12 (advance/final invoices and credit notes) → M13 (Document Artifact backfill) → M14 (receipt inbox and review) → M15 (agent receipt intake and business drafts)**.
 > **M16 branch dependency**: builds on completed Expense/report/receipt foundations and incorporates SI3; it neither depends on nor resumes paused M15.
+> **M17 branch dependency**: reuses completed M6 Quotes/content library, M9 PDF/email and SI1 ordering/mail-copy foundations; design agreed, implementation not started, independent of paused M15.
 > Parallelisable: M3‖M4; document track‖expense track (M8 can run alongside M5/M6/M7). **M2.5 is a pure frontend UX fix, non-blocking** — it slots after M2 and can run in parallel with M3/M4; it blocks nothing. The "🟢 deployment smoke test" at the end of each entry is that milestone's acceptance signal.
 
 ### M0 · Foundation skeleton (walking skeleton) | corresponds to P0
@@ -283,6 +284,15 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **Atomic delivery**: nine steps cover Expense basis, pending external originals, posting/reports, revision/correction, AI, annual battery rules, battery audit, SI3 and cross-module acceptance. Contract-first, full DoD/review per step and one final author walkthrough.
 - **🟢 Deployment smoke test**: platform sales affect VAT/P&L, electricity sales VAT only, original numbers/bytes retained; €12,100 battery at 45% private use produces €900/€189 in Q4 1d, missing input is not zero and year six stops that acquisition adjustment; mileage/profit reconciliation. Full acceptance matrix in M16.
 
+### M17 · Quote PDF appendices | completed Quote/PDF/email foundations
+
+- **Status**: ⬜ [Full design and atomic task cards](milestones/M17.md) agreed and recorded on 2026-11-04; all six steps are pending. This is not a shipped application feature and does not resume M15.
+- **Goal**: manually choose and order library or Quote-specific PDFs at the final quotation stage, producing one complete quotation-plus-appendices file.
+- **Key content**: a company-private PDF Materials tab in Content Library; saved-Quote prerequisite for own uploads; atomic persisted selection with expected versions and accepted-Quote read-only guards; shared preview/download/email composition retaining originals and page sizes/orientation. Library replacement/archive does not rewrite existing selections; duplication clears all appendices and Invoice conversion carries none.
+- **Frozen boundary**: no product binding, separate brochure email attachments, dividers/global numbering, exact historical outgoing Quote PDFs, physical deletion, interactive/signed PDFs or address/routing integration. M17 defines limits, contracts, RLS, cascades and failures.
+- **Atomic delivery**: six steps for file/library APIs, Content Library UI, Quote association/lifecycle, complete PDF/email, Quote editor and regression/documentation/report closure. Implementation mode follows the author's subsequent authorization.
+- **🟢 Deployment smoke test**: two differently formatted shared PDFs plus one own file; order persists and preview/download/test email agree; archived files remain usable in old Quotes, duplication starts empty, acceptance is read-only, version conflicts cannot overwrite, and deletion preserves shared files/other Quotes. All checks await implementation and acceptance.
+
 ---
 
 ## 4.si Small improvements (separate from milestone numbering)
@@ -290,11 +300,11 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **SI1 · Document ordering, Quote duplication and Sent copies**: design agreed on 2026-10-25; all four implementation steps, automated gates and independent blind reviews are complete, and the author accepted the recorded representative walkthrough scope on 2026-10-25. The [implementation plan](improvements/SI1.md) follows the milestone format with four atomic steps, contracts, migration notes, review points and acceptance checks. Reuse existing line-order persistence and rounding; duplicate Quotes into new independently numbered drafts; optionally save all new outgoing messages and attachments to the provider's Sent mailbox through IMAP. M15 remains paused.
 - **SI2 · Revising undelivered Standard Invoices**: design agreed on 2026-10-26; all five implementation steps, full local gates and independent blind reviews are complete as of 2026-10-27; the author accepted the recorded representative walkthrough scope on 2026-10-28, with skipped/unretested paths explicitly retained. Walkthrough UI follow-ups were validated separately without a new independent review. Release CI results are tracked in GitHub Actions. The [implementation plan](improvements/SI2.md) defines five atomic steps covering audit/eligibility, snapshot-preserving preview, transactional save, editor/history and regression closure. Retain SENT and the original number; allow revision only before delivery/payment and without dependent correction/settlement chains. This is a narrowly scoped exception to issued-document immutability: only the locked, version-checked revision command may update an eligible Invoice, with immutable before/after audit; ordinary PUT remains draft-only. Preserve first-issue/party/FX snapshots and all historical PDF/email records. Delivered financial changes use existing correction workflows. Reuse existing T&C content blocks; no new Dictionary template feature. M15 remains paused.
 - **SI3 · P/L mileage breakdown**: incorporated into [M16](milestones/M16.md) D10 / Step 8 on 2026-10-30, with no independent implementation schedule. Retain the [original request](improvements/SI3.md) for traceability; expose same-period mileage and profit before/after it, preserve existing `profit` semantics, and provide no unverified income-tax field guidance. M15 remains paused.
-- **Deferred**: product-manual PDF management and checkboxes for choosing extra quote attachments need a separately designed future milestone. SI1 reserves no schema or milestone number for it.
+- **Promoted to a separate plan (2026-11-04)**: the former product-manual/additional Quote attachment backlog is now [M17 Quote PDF appendices](milestones/M17.md), with Quote ownership, manual selection and merged output. All six steps are pending; SI1's accepted scope is unchanged.
 
 ---
 
-## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M16)
+## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M17)
 
 > **Status**: Explicitly **not doing** in the current roadmap through M16; this note is kept here so it's easy to pick up later. **No DB schema is reserved now** — any future columns/tables are additive migrations, existing data is unaffected, cost is acceptable, no need to pre-allocate.
 
@@ -310,7 +320,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4.y Beyond the roadmap (vNext) · PDF document/letterhead template customisation (memo only, not in M0–M16)
+## 4.y Beyond the roadmap (vNext) · PDF document/letterhead template customisation (memo only, not in M0–M17)
 
 > **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**. Elaborates on M9's OUT item "custom / multiple PDF template sets → deferred (one template family + CSS interface)". **No schema reserved now** — everything will be additive.
 >
@@ -321,7 +331,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **The big concern is security (guardrail 7)**: User input entering PDF = XSS/SSRF surface; reuse / strengthen sanitisation — reference the two bugs fixed 2026-06-14: `{{ css | safe }}` font escaping and SVG `<style>` inline class sanitisation; body uses "plain text + explicit placeholders + escaping" rather than arbitrary HTML/CSS. Plus template editor UI + preview + built-in defaults when values are absent.
 - **Granularity**: Configured per document type (invoice / quote) × language (EN / ZH), following the email template structure.
 
-## 4.z Beyond the roadmap (vNext) · Customer address free-text block (memo only, not in M0–M16)
+## 4.z Beyond the roadmap (vNext) · Customer address free-text block (memo only, not in M0–M17)
 
 > **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**.
 
@@ -392,7 +402,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 docs/
   insight/btw-aangifte-2026-guide.md # Dutch VAT/BTW filing conventions (authoritative, structured guide to official Tax Authority instructions)
   plan/
-    roadmap.md                       # This document: overview + methodology + constraints + M0–M16
+    roadmap.md                       # This document: overview + methodology + constraints + M0–M17
     milestones/
       _TEMPLATE.md                   # Milestone refinement template
       M0.md, M1.md, ...              # Produced JIT before starting work (atomic step lists)
@@ -436,6 +446,7 @@ Small improvements use the same implementation-plan structure and quality gates,
 | M14 | Receipt inbox and review | 🟢 Done (2026-09-29; author PDF walkthrough accepted; browser concurrency and images accepted on automated evidence; non-blocking carryovers in `milestones/M14.md`) |
 | M15 | Agent receipt intake and business drafts (MCP; Hermes/Telegram first) | ⏸️ In development, paused by the author on 2026-10-24; implementation preserved on `wip/m15-agent-accounting-paused`, outside main; walkthrough stopped at 3/6 preparation, not accepted; see `milestones/M15.md` |
 | M16 | External sales bookkeeping and VAT / P&L separation (including SI3) | 🟢 Steps 1–9 of 9 completed local automated gates and independent review on 2026-10-31. The author accepted the recorded representative walkthrough scope on 2026-11-01. External sales, Expense/receipt inbox, battery 45%→0% revisions and in-service-date reconfirmation were checked with read-only report/original/history verification. Step 7 reporting reconciles; the author accepted a brief page check. Step 8 was accepted on the author’s confirmation of prior testing, without repeating pending deletion in this round. Recurring-expense walkthrough was explicitly skipped; untested provider, concurrency and second-account UI paths remain distinguished from automated evidence. Prior orchestrated UI refinements passed independent review; the later upload-state/error-display fix passed separate automated checks and author confirmation without another blind review. Known carryovers remain documented. See [M16](milestones/M16.md); M15 remains paused. Post-acceptance follow-up: a USER-level Battery Assets navigation preference defaults off; stored data and calculations are unaffected. Local checks and the author UI check passed; release preparation resumed for the same v0.10.0. |
+| M17 | Quote PDF appendices (shared library + Quote-specific uploads) | ⬜ Design agreed/recorded 2026-11-04, 0/6 steps; [contract, atomic task cards and acceptance](milestones/M17.md) ready, implementation not started; M15 stays paused |
 
 Separately numbered improvements:
 
