@@ -415,7 +415,6 @@ const pdfFiles = ref<PdfAppendixFileRead[]>([])
 const pdfTotal = ref(0)
 const pdfOffset = ref(0)
 const pdfPageSize = 20
-const pdfSearchInput = ref('')
 const pdfSearch = ref('')
 const pdfIncludeArchived = ref(false)
 const pdfLoading = ref(false)
@@ -436,9 +435,11 @@ const pdfPreviewFile = ref<PdfAppendixFileRead | null>(null)
 let pdfListGeneration = 0
 let pdfLimitsGeneration = 0
 let pdfMounted = true
+let pdfSearchTimer: ReturnType<typeof setTimeout> | undefined
 
 const pdfPage = computed(() => Math.floor(pdfOffset.value / pdfPageSize) + 1)
 const pdfPageCount = computed(() => Math.max(1, Math.ceil(pdfTotal.value / pdfPageSize)))
+const pdfSearchTerm = computed(() => pdfSearch.value.trim())
 const pdfUploadTooLarge = computed(() => Boolean(
   pdfSelectedFile.value && pdfLimits.value && pdfSelectedFile.value.size > pdfLimits.value.max_appendix_file_bytes,
 ))
@@ -449,11 +450,13 @@ function pdfListUrl() {
     offset: String(pdfOffset.value),
     include_archived: String(pdfIncludeArchived.value),
   })
-  if (pdfSearch.value) params.set('search', pdfSearch.value)
+  if (pdfSearchTerm.value) params.set('search', pdfSearchTerm.value)
   return `/api/v1/pdf-library?${params.toString()}`
 }
 
 async function loadPdfFiles() {
+  clearTimeout(pdfSearchTimer)
+  pdfSearchTimer = undefined
   const generation = ++pdfListGeneration
   pdfLoading.value = true
   pdfLoadError.value = null
@@ -494,10 +497,23 @@ async function loadPdfLimits() {
   }
 }
 
-function searchPdfFiles() {
+function changePdfSearch(value: string) {
+  const previousTerm = pdfSearchTerm.value
+  pdfSearch.value = value
+  if (pdfSearchTerm.value === previousTerm) return
+
   pdfOffset.value = 0
-  pdfSearch.value = pdfSearchInput.value.trim()
-  void loadPdfFiles()
+  if (!pdfSearchTerm.value) {
+    void loadPdfFiles()
+    return
+  }
+
+  clearTimeout(pdfSearchTimer)
+  // An in-flight result belongs to the old search, even during the debounce.
+  pdfListGeneration += 1
+  pdfLoading.value = true
+  pdfLoadError.value = null
+  pdfSearchTimer = setTimeout(loadPdfFiles, 300)
 }
 
 function changePdfArchiveFilter(value: boolean) {
@@ -662,6 +678,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearTimeout(pdfSearchTimer)
   pdfMounted = false
   pdfListGeneration += 1
   pdfLimitsGeneration += 1
@@ -736,12 +753,21 @@ const appliesToOptions = computed(() => [
               </n-card>
 
               <div class="pdf-library-toolbar">
-                <n-input v-model:value="pdfSearchInput" clearable :placeholder="t('contentLibrary.pdfMaterials.search')" @keyup.enter="searchPdfFiles" />
-                <n-button :disabled="pdfLoading" @click="searchPdfFiles">{{ t('contentLibrary.pdfMaterials.searchAction') }}</n-button>
-                <n-switch :value="pdfIncludeArchived" @update:value="changePdfArchiveFilter">
-                  <template #checked>{{ t('contentLibrary.pdfMaterials.showArchived') }}</template>
-                  <template #unchecked>{{ t('contentLibrary.pdfMaterials.activeOnly') }}</template>
-                </n-switch>
+                <n-input
+                  :value="pdfSearch"
+                  clearable
+                  :placeholder="t('contentLibrary.pdfMaterials.search')"
+                  @update:value="changePdfSearch"
+                  @keyup.enter="loadPdfFiles"
+                />
+                <div class="pdf-archive-filter">
+                  <n-switch
+                    :value="pdfIncludeArchived"
+                    :aria-label="t('contentLibrary.pdfMaterials.showArchived')"
+                    @update:value="changePdfArchiveFilter"
+                  />
+                  <span>{{ t('contentLibrary.pdfMaterials.showArchived') }}</span>
+                </div>
                 <n-button quaternary :loading="pdfLoading" @click="loadPdfFiles">
                   <template #icon><n-icon><RefreshOutline /></n-icon></template>
                   {{ t('contentLibrary.pdfMaterials.refresh') }}
@@ -762,7 +788,7 @@ const appliesToOptions = computed(() => [
                   striped
                 />
                 <n-text v-if="!pdfLoading && !pdfLoadError && pdfFiles.length === 0" depth="3" class="pdf-library-empty">
-                  {{ pdfSearch ? t('contentLibrary.pdfMaterials.noResults') : t('contentLibrary.pdfMaterials.empty') }}
+                  {{ pdfSearchTerm ? t('contentLibrary.pdfMaterials.noResults') : t('contentLibrary.pdfMaterials.empty') }}
                 </n-text>
               </n-spin>
               <div v-if="pdfTotal > pdfPageSize" class="pdf-library-pagination">
@@ -1086,6 +1112,12 @@ const appliesToOptions = computed(() => [
 
 .pdf-library-toolbar .n-input {
   max-width: 320px;
+}
+
+.pdf-archive-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .pdf-library-empty {

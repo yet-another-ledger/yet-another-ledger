@@ -65,7 +65,7 @@ describe('Content Library PDF Materials', () => {
     api.patch.mockResolvedValue(material())
   })
 
-  it('loads typed limits and metadata, keeps the default list active-only, and searches with paging filters', async () => {
+  it('debounces live title search, clears it immediately, and keeps paging and archive filters', async () => {
     const wrapper = mountLibrary()
     await flushPromises()
     expect(api.get).toHaveBeenCalledWith('/api/v1/pdf-library/limits')
@@ -76,14 +76,27 @@ describe('Content Library PDF Materials', () => {
     expect(wrapper.text()).toContain('产品资料.pdf')
     expect(wrapper.text()).toContain('3')
     const search = wrapper.find('input[placeholder="contentLibrary.pdfMaterials.search"]')
-    await search.setValue('  datasheet  ')
-    await search.trigger('keyup', { key: 'Enter' })
-    await flushPromises()
+    const beforeSearch = api.get.mock.calls.length
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await search.setValue('data')
+      await vi.advanceTimersByTimeAsync(200)
+      await search.setValue('  datasheet  ')
+      await vi.advanceTimersByTimeAsync(299)
+      expect(api.get).toHaveBeenCalledTimes(beforeSearch)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(api.get).toHaveBeenCalledTimes(beforeSearch + 1)
+    } finally {
+      vi.useRealTimers()
+    }
     expect(api.get).toHaveBeenLastCalledWith(expect.stringContaining('search=datasheet'))
     await wrapper.findAll('button').find(b => b.text() === 'contentLibrary.pdfMaterials.next')!.trigger('click')
     await flushPromises()
     expect(api.get).toHaveBeenLastCalledWith(expect.stringContaining('offset=20'))
-    await wrapper.findAll('button').find(b => b.text().includes('contentLibrary.pdfMaterials.activeOnly'))!.trigger('click')
+    await search.setValue('')
+    await flushPromises()
+    expect(api.get).toHaveBeenLastCalledWith('/api/v1/pdf-library?limit=20&offset=0&include_archived=false')
+    await wrapper.get('button[aria-label="contentLibrary.pdfMaterials.showArchived"]').trigger('click')
     await flushPromises()
     expect(api.get).toHaveBeenLastCalledWith(expect.stringContaining('include_archived=true'))
     wrapper.unmount()
@@ -196,7 +209,7 @@ describe('Content Library PDF Materials', () => {
     wrapper.unmount()
   })
 
-  it('ignores an older title search result when the newer request finishes first', async () => {
+  it('ignores an older title search result during the debounce for newer input', async () => {
     let finishOld!: (value: unknown) => void
     api.get.mockImplementation((url: string) => {
       if (url === '/api/v1/pdf-library/limits') return Promise.resolve(limits)
@@ -212,13 +225,18 @@ describe('Content Library PDF Materials', () => {
     const search = wrapper.find('input[placeholder="contentLibrary.pdfMaterials.search"]')
     await search.setValue('old')
     await search.trigger('keyup', { key: 'Enter' })
-    await search.setValue('new')
-    await search.trigger('keyup', { key: 'Enter' })
-    await flushPromises()
-    finishOld({ items: [material({ id: 'old-file', title: 'Old result' })], total: 1 })
-    await flushPromises()
-    expect(wrapper.text()).toContain('New result')
-    expect(wrapper.text()).not.toContain('Old result')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await search.setValue('new')
+      finishOld({ items: [material({ id: 'old-file', title: 'Old result' })], total: 1 })
+      await flushPromises()
+      expect(wrapper.text()).not.toContain('Old result')
+      expect(api.get).not.toHaveBeenCalledWith(expect.stringContaining('search=new'))
+      await vi.advanceTimersByTimeAsync(300)
+      expect(wrapper.text()).toContain('New result')
+    } finally {
+      vi.useRealTimers()
+    }
     wrapper.unmount()
   })
 

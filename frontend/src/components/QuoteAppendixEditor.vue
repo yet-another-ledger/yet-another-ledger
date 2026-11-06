@@ -247,7 +247,7 @@ onBeforeUnmount(() => {
           <n-list>
             <n-list-item v-for="file in library.items" :key="file.id">
               <n-thing :title="file.title" :description="`${file.original_filename} · ${file.page_count} ${t('quotes.appendices.pages')} · ${formatBytes(file.size_bytes)}`" />
-              <div class="library-actions">
+              <div class="picker-file-actions">
                 <n-button size="small" @click="preview(file)">{{ t('pdf.preview') }}</n-button>
                 <n-button size="small" @click="download(file)">{{ t('pdf.download') }}</n-button>
                 <n-button size="small" :disabled="!canMutate || selectedIds.has(file.id) || !canChoose(file)" @click="choose(file)">{{ selectedIds.has(file.id) ? t('quotes.appendices.selected') : t('quotes.appendices.add') }}</n-button>
@@ -270,11 +270,11 @@ onBeforeUnmount(() => {
         <n-list>
           <n-list-item v-for="file in ownFilesQuoteId === quoteId ? ownFiles.items : []" :key="file.id">
             <n-thing :title="file.title" :description="`${file.original_filename} · ${file.page_count} ${t('quotes.appendices.pages')} · ${formatBytes(file.size_bytes)}`" />
-            <template #suffix>
-                <n-button size="small" @click="preview(file)">{{ t('pdf.preview') }}</n-button>
-                <n-button size="small" @click="download(file)">{{ t('pdf.download') }}</n-button>
+            <div class="picker-file-actions">
+              <n-button size="small" @click="preview(file)">{{ t('pdf.preview') }}</n-button>
+              <n-button size="small" @click="download(file)">{{ t('pdf.download') }}</n-button>
               <n-button size="small" :disabled="!canMutate || file.owner_quote_id !== quoteId || selectedIds.has(file.id) || !canChoose(file)" @click="choose(file)">{{ selectedIds.has(file.id) ? t('quotes.appendices.selected') : t('quotes.appendices.add') }}</n-button>
-            </template>
+            </div>
           </n-list-item>
         </n-list>
         <n-space v-if="ownFiles.total > pageSize" justify="space-between">
@@ -293,7 +293,7 @@ onBeforeUnmount(() => {
 .appendix-info { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .appendix-info > div { flex-basis: 100%; color: var(--n-text-color-3); font-size: 12px; }
 .appendix-drag-handle { cursor: grab; border: 0; background: transparent; color: inherit; font-size: 22px; }
-.library-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.picker-file-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .quote-upload { margin-bottom: 8px; }
 .quote-upload :deep(.n-upload-trigger) { display: block; width: 100%; }
 </style>
