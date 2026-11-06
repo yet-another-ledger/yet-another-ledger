@@ -112,6 +112,7 @@ it.each(['resolve', 'reject'] as const)('ignores stale new-Quote defaults after 
   const fileInput = wrapper.find('input[type="file"]')
   Object.defineProperty(fileInput.element, 'files', { configurable: true, value: [new File(['%PDF'], 'appendix.pdf', { type: 'application/pdf' })] })
   await fileInput.trigger('change')
+  await flushPromises()
   expect(api.postFile).toHaveBeenCalledTimes(1)
 
   if (outcome === 'resolve') defaults.resolve({ default_valid_days: 40 })

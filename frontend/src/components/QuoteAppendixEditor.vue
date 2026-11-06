@@ -5,6 +5,8 @@ import Draggable from 'vuedraggable'
 import { get, postFile, fetchBlob, saveBlob } from '../api/http'
 import PdfPreviewDialog from './PdfPreviewDialog.vue'
 import type { components } from '../api/schema'
+import { NUpload } from 'naive-ui'
+import type { UploadFileInfo } from 'naive-ui'
 
 type FileRead = components['schemas']['PdfAppendixFileRead']
 type FileList = components['schemas']['PdfAppendixFileListResponse']
@@ -136,16 +138,13 @@ function reorder(items: EditorItem[]): void {
   selected.value = items
   emit('change', selected.value)
 }
-function upload(event: Event): Promise<void> {
-  uploadTask = performUpload(event)
-  return uploadTask
-}
-async function performUpload(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
+function upload({ file: uploadFile }: { file: UploadFileInfo }): void {
+  const file = uploadFile.file
   const quoteId = props.quoteId
   if (!file || !quoteId || !canMutate.value || uploading.value) return
+  uploadTask = performUpload(file, quoteId)
+}
+async function performUpload(file: File, quoteId: string): Promise<void> {
   if (!limits.value) {
     error.value = t('quotes.appendices.limitsUnavailable')
     return
@@ -248,11 +247,11 @@ onBeforeUnmount(() => {
           <n-list>
             <n-list-item v-for="file in library.items" :key="file.id">
               <n-thing :title="file.title" :description="`${file.original_filename} · ${file.page_count} ${t('quotes.appendices.pages')} · ${formatBytes(file.size_bytes)}`" />
-              <template #suffix>
+              <div class="library-actions">
                 <n-button size="small" @click="preview(file)">{{ t('pdf.preview') }}</n-button>
                 <n-button size="small" @click="download(file)">{{ t('pdf.download') }}</n-button>
                 <n-button size="small" :disabled="!canMutate || selectedIds.has(file.id) || !canChoose(file)" @click="choose(file)">{{ selectedIds.has(file.id) ? t('quotes.appendices.selected') : t('quotes.appendices.add') }}</n-button>
-              </template>
+              </div>
             </n-list-item>
           </n-list>
         </n-spin>
@@ -264,10 +263,9 @@ onBeforeUnmount(() => {
       </n-gi>
       <n-gi>
         <h3>{{ t('quotes.appendices.ownFiles') }}</h3>
-        <label v-if="canMutate && quoteId" class="upload-label">
-          {{ uploading ? t('quotes.appendices.uploading') : t('quotes.appendices.upload') }}
-          <input type="file" accept="application/pdf,.pdf" :disabled="uploading || !limits" @change="upload" />
-        </label>
+        <n-upload v-if="canMutate && quoteId" class="quote-upload" :file-list="[]" :show-file-list="false" :default-upload="false" accept="application/pdf,.pdf" :disabled="!canMutate || uploading || !limits" @change="upload">
+          <n-button block :disabled="!canMutate || uploading || !limits">{{ uploading ? t('quotes.appendices.uploading') : t('quotes.appendices.upload') }}</n-button>
+        </n-upload>
         <n-empty v-if="ownFilesQuoteId !== quoteId || !ownFiles.items.length" :description="t('quotes.appendices.noOwnFiles')" size="small" />
         <n-list>
           <n-list-item v-for="file in ownFilesQuoteId === quoteId ? ownFiles.items : []" :key="file.id">
@@ -295,6 +293,7 @@ onBeforeUnmount(() => {
 .appendix-info { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .appendix-info > div { flex-basis: 100%; color: var(--n-text-color-3); font-size: 12px; }
 .appendix-drag-handle { cursor: grab; border: 0; background: transparent; color: inherit; font-size: 22px; }
-.upload-label { display: inline-block; cursor: pointer; padding: 6px 12px; margin-bottom: 8px; border: 1px solid var(--n-border-color); border-radius: 4px; }
-.upload-label input { display: block; max-width: 240px; }
+.library-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.quote-upload { margin-bottom: 8px; }
+.quote-upload :deep(.n-upload-trigger) { display: block; width: 100%; }
 </style>

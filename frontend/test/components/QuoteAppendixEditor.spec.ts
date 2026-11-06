@@ -15,12 +15,13 @@ vi.mock('vuedraggable', async () => {
 })
 vi.mock('naive-ui', async () => {
   const { defineComponent } = await import('vue')
+  const { NUpload } = await vi.importActual<typeof import('naive-ui')>('naive-ui')
   const box = defineComponent({ inheritAttrs: false, template: '<div v-bind="$attrs"><slot /></div>' })
   const button = defineComponent({ inheritAttrs: false, props: ['disabled', 'size', 'type'], emits: ['click'], template: '<button v-bind="$attrs" :disabled="disabled" @click="$emit(\'click\')"><slot /></button>' })
   const input = defineComponent({ inheritAttrs: false, props: ['value', 'disabled', 'placeholder'], emits: ['update:value'], template: '<input v-bind="$attrs" :value="value" :disabled="disabled" :placeholder="placeholder" @input="$emit(\'update:value\',$event.target.value)" />' })
   const listItem = defineComponent({ template: '<div><slot /><slot name="suffix" /></div>' })
   const thing = defineComponent({ props: ['title', 'description'], template: '<div><b>{{ title }}</b><span>{{ description }}</span></div>' })
-  return { NAlert: box, NButton: button, NCard: box, NDivider: box, NEmpty: box, NGi: box, NGrid: box, NInput: input, NList: box, NListItem: listItem, NSpace: box, NSpin: box, NTag: box, NThing: thing }
+  return { NAlert: box, NButton: button, NCard: box, NDivider: box, NEmpty: box, NGi: box, NGrid: box, NInput: input, NList: box, NListItem: listItem, NSpace: box, NSpin: box, NTag: box, NThing: thing, NUpload }
 })
 
 import QuoteAppendixEditor from '../../src/components/QuoteAppendixEditor.vue'
@@ -127,11 +128,51 @@ describe('Quote appendix editor', () => {
     })
     await flushPromises()
     expect(wrapper.text()).toContain('limits offline')
-    expect(wrapper.find('input[type="file"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('button').find(button => button.text() === 'quotes.appendices.upload')!.attributes('disabled')).toBeDefined()
     await wrapper.findAll('button').find(button => button.text() === 'quotes.appendices.retry')!.trigger('click')
     await flushPromises()
-    expect(wrapper.find('input[type="file"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.findAll('button').find(button => button.text() === 'quotes.appendices.upload')!.attributes('disabled')).toBeUndefined()
     expect(wrapper.text()).toContain('quotes.appendices.limits')
+    wrapper.unmount()
+  })
+
+  it('allows retrying the same file after an upload failure', async () => {
+    api.postFile.mockRejectedValueOnce(new Error('upload failed')).mockResolvedValueOnce(file('own', 'QUOTE'))
+    const wrapper = setup()
+    await flushPromises()
+    const input = wrapper.find('input[type="file"]')
+    const pdf = new File(['%PDF'], 'own.pdf', { type: 'application/pdf' })
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [pdf] })
+    await input.trigger('change')
+    await flushPromises()
+    expect(wrapper.text()).toContain('upload failed')
+    await input.trigger('change')
+    await flushPromises()
+    expect(api.postFile).toHaveBeenCalledTimes(2)
+    expect((wrapper.emitted('change')!.at(-1)![0] as { file_id: string }[])[0]?.file_id).toBe('own')
+    wrapper.unmount()
+  })
+
+  it('keeps waiting for an active upload when a concurrent selection is rejected', async () => {
+    let finishUpload!: (value: ReturnType<typeof file>) => void
+    api.postFile.mockReturnValue(new Promise(resolve => { finishUpload = resolve }))
+    const wrapper = setup()
+    await flushPromises()
+    const input = wrapper.find('input[type="file"]')
+    const pdf = new File(['%PDF'], 'own.pdf', { type: 'application/pdf' })
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [pdf] })
+    await input.trigger('change')
+    await flushPromises()
+    const upload = wrapper.findComponent({ name: 'Upload' })
+    upload.vm.$emit('change', { file: { file: pdf } })
+    let settled = false
+    const waiting = (wrapper.vm as unknown as { waitForUpload: () => Promise<void> }).waitForUpload().then(() => { settled = true })
+    await flushPromises()
+    expect(settled).toBe(false)
+    expect(api.postFile).toHaveBeenCalledTimes(1)
+    finishUpload(file('own', 'QUOTE'))
+    await waiting
+    expect(settled).toBe(true)
     wrapper.unmount()
   })
 
@@ -150,6 +191,7 @@ describe('Quote appendix editor', () => {
     const input = wrapper.find('input[type="file"]')
     Object.defineProperty(input.element, 'files', { configurable: true, value: [new File(['%PDF'], 'late.pdf', { type: 'application/pdf' })] })
     await input.trigger('change')
+    await flushPromises()
     await wrapper.setProps({ quoteId: 'quote-b' })
     await flushPromises()
     finishUpload(file('file-a-late', 'QUOTE'))

@@ -45,7 +45,7 @@ vi.mock('naive-ui', () => ({
   NForm: ui.box, NFormItem: ui.box, NGrid: ui.box, NGi: ui.box, NIcon: ui.box, NInput: ui.input, NInputNumber: ui.number, NSelect: ui.select,
   NList: ui.box, NListItem: ui.box, NModal: ui.modal, NSpace: ui.box, NSpin: ui.box, NSwitch: ui.box,
   NTag: ui.box, NText: ui.box, NThing: ui.box, NDescriptions: ui.box, NDescriptionsItem: ui.box,
-  NEmpty: ui.box,
+  NEmpty: ui.box, NUpload: ui.box,
 }))
 vi.mock('@vicons/ionicons5', () => ({ AddOutline: ui.box, TrashOutline: ui.box, DocumentTextOutline: ui.box, DownloadOutline: ui.box, MailOutline: ui.box, EyeOutline: ui.box }))
 
