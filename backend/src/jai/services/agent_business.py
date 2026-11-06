@@ -7,7 +7,7 @@ reusing the existing M3/M4 read and customer creation services.
 from __future__ import annotations
 
 import uuid
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -99,6 +99,15 @@ def _quote_calculation_request(body: QuoteWrite) -> QuoteCalculationRequest:
         discount=body.discount,
         lines=body.lines,
     )
+
+
+def _quote_mutation_arguments(body: QuoteWrite) -> dict[str, Any]:
+    """Preserve pre-M17 replay digests when appendix fields are omitted."""
+    arguments = body.model_dump(mode="python")
+    for field in ("appendix_file_ids", "expected_appendix_version"):
+        if arguments.get(field) is None:
+            arguments.pop(field, None)
+    return arguments
 
 
 async def preview_quote(
@@ -198,7 +207,7 @@ async def create_quote_draft(
                 principal,
                 request_id=str(request.request_id),
                 operation="create_quote_draft",
-                arguments={"quote": request.quote.model_dump(mode="python")},
+                arguments={"quote": _quote_mutation_arguments(request.quote)},
                 source=request.source.model_dump(mode="python") if request.source else None,
                 mutate=mutate,
             )
@@ -260,7 +269,7 @@ async def update_quote_draft(
                 operation="update_quote_draft",
                 arguments={
                     "quote_id": request.quote_id,
-                    "quote": request.quote.model_dump(mode="python"),
+                    "quote": _quote_mutation_arguments(request.quote),
                 },
                 source=request.source.model_dump(mode="python") if request.source else None,
                 mutate=mutate,

@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref, h, computed } from 'vue'
+import { onMounted, onBeforeUnmount, ref, h, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   useMessage, useDialog,
   NButton, NSpace, NInput, NSelect, NSwitch, NTabs, NTabPane,
   NDataTable, NSpin, NModal, NForm, NFormItem, NTag,
-  NText, NInputNumber,
+  NText, NInputNumber, NCard, NAlert, NUpload,
 } from 'naive-ui'
-import { AddOutline, CreateOutline, TrashOutline } from '@vicons/ionicons5'
+import { AddOutline, CreateOutline, TrashOutline, EyeOutline, DownloadOutline, ArchiveOutline, RefreshOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
-import { get, post, put, del } from '../../api/http'
+import { get, post, put, patch, del, http, downloadBlob } from '../../api/http'
+import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
+import type { UploadFileInfo } from 'naive-ui'
 import type { components } from '../../api/schema'
 
 type DocumentTemplateRead = components['schemas']['DocumentTemplateRead']
@@ -20,6 +22,9 @@ type ContentBlockWrite = components['schemas']['ContentBlockWrite']
 type NoteTemplateRead = components['schemas']['NoteTemplateRead']
 type NoteTemplateWrite = components['schemas']['NoteTemplateWrite']
 type VatRateRead = components['schemas']['VatRateRead']
+type PdfAppendixFileRead = components['schemas']['PdfAppendixFileRead']
+type PdfAppendixLimitsRead = components['schemas']['PdfAppendixLimitsRead']
+type PdfAppendixFileListResponse = components['schemas']['PdfAppendixFileListResponse']
 
 const { t } = useI18n()
 const message = useMessage()
@@ -404,6 +409,239 @@ const noteColumns = computed(() => [
   },
 ])
 
+// ------------------------------------------------------------------ PDF Materials
+
+const pdfFiles = ref<PdfAppendixFileRead[]>([])
+const pdfTotal = ref(0)
+const pdfOffset = ref(0)
+const pdfPageSize = 20
+const pdfSearch = ref('')
+const pdfIncludeArchived = ref(false)
+const pdfLoading = ref(false)
+const pdfLoadError = ref<string | null>(null)
+const pdfLimits = ref<PdfAppendixLimitsRead | null>(null)
+const pdfLimitsLoading = ref(false)
+const pdfLimitsError = ref(false)
+const pdfSelectedFile = ref<File | null>(null)
+const pdfUploadTitle = ref('')
+const pdfUploading = ref(false)
+const pdfUploadError = ref<string | null>(null)
+const pdfActionBusy = ref(new Set<string>())
+const pdfRenameTarget = ref<PdfAppendixFileRead | null>(null)
+const pdfRenameTitle = ref('')
+const pdfRenameSaving = ref(false)
+const pdfPreview = ref(false)
+const pdfPreviewFile = ref<PdfAppendixFileRead | null>(null)
+let pdfListGeneration = 0
+let pdfLimitsGeneration = 0
+let pdfMounted = true
+let pdfSearchTimer: ReturnType<typeof setTimeout> | undefined
+
+const pdfPage = computed(() => Math.floor(pdfOffset.value / pdfPageSize) + 1)
+const pdfPageCount = computed(() => Math.max(1, Math.ceil(pdfTotal.value / pdfPageSize)))
+const pdfSearchTerm = computed(() => pdfSearch.value.trim())
+const pdfUploadTooLarge = computed(() => Boolean(
+  pdfSelectedFile.value && pdfLimits.value && pdfSelectedFile.value.size > pdfLimits.value.max_appendix_file_bytes,
+))
+
+function pdfListUrl() {
+  const params = new URLSearchParams({
+    limit: String(pdfPageSize),
+    offset: String(pdfOffset.value),
+    include_archived: String(pdfIncludeArchived.value),
+  })
+  if (pdfSearchTerm.value) params.set('search', pdfSearchTerm.value)
+  return `/api/v1/pdf-library?${params.toString()}`
+}
+
+async function loadPdfFiles() {
+  clearTimeout(pdfSearchTimer)
+  pdfSearchTimer = undefined
+  const generation = ++pdfListGeneration
+  pdfLoading.value = true
+  pdfLoadError.value = null
+  try {
+    const result = await get<PdfAppendixFileListResponse>(pdfListUrl())
+    if (!pdfMounted || generation !== pdfListGeneration) return
+    const lastValidOffset = result.total === 0
+      ? 0
+      : Math.floor((result.total - 1) / pdfPageSize) * pdfPageSize
+    if (pdfOffset.value > lastValidOffset) {
+      pdfOffset.value = lastValidOffset
+      await loadPdfFiles()
+      return
+    }
+    pdfFiles.value = result.items
+    pdfTotal.value = result.total
+  } catch (e: unknown) {
+    if (!pdfMounted || generation !== pdfListGeneration) return
+    pdfLoadError.value = e instanceof Error ? e.message : t('contentLibrary.pdfMaterials.loadFailed')
+  } finally {
+    if (pdfMounted && generation === pdfListGeneration) pdfLoading.value = false
+  }
+}
+
+async function loadPdfLimits() {
+  const generation = ++pdfLimitsGeneration
+  pdfLimitsLoading.value = true
+  pdfLimitsError.value = false
+  try {
+    const limits = await get<PdfAppendixLimitsRead>('/api/v1/pdf-library/limits')
+    if (!pdfMounted || generation !== pdfLimitsGeneration) return
+    pdfLimits.value = limits
+  } catch {
+    if (!pdfMounted || generation !== pdfLimitsGeneration) return
+    pdfLimitsError.value = true
+  } finally {
+    if (pdfMounted && generation === pdfLimitsGeneration) pdfLimitsLoading.value = false
+  }
+}
+
+function changePdfSearch(value: string) {
+  const previousTerm = pdfSearchTerm.value
+  pdfSearch.value = value
+  if (pdfSearchTerm.value === previousTerm) return
+
+  pdfOffset.value = 0
+  if (!pdfSearchTerm.value) {
+    void loadPdfFiles()
+    return
+  }
+
+  clearTimeout(pdfSearchTimer)
+  // An in-flight result belongs to the old search, even during the debounce.
+  pdfListGeneration += 1
+  pdfLoading.value = true
+  pdfLoadError.value = null
+  pdfSearchTimer = setTimeout(loadPdfFiles, 300)
+}
+
+function changePdfArchiveFilter(value: boolean) {
+  pdfOffset.value = 0
+  pdfIncludeArchived.value = value
+  void loadPdfFiles()
+}
+
+function setPdfPage(page: number) {
+  pdfOffset.value = (page - 1) * pdfPageSize
+  void loadPdfFiles()
+}
+
+function choosePdfFile({ file }: { file: UploadFileInfo }) {
+  pdfSelectedFile.value = file.file ?? null
+  pdfUploadError.value = null
+}
+
+async function uploadPdfFile() {
+  const file = pdfSelectedFile.value
+  if (!file || pdfUploading.value || !pdfLimits.value || pdfUploadTooLarge.value) return
+  pdfUploading.value = true
+  pdfUploadError.value = null
+  const form = new FormData()
+  form.append('file', file)
+  const title = pdfUploadTitle.value.trim()
+  if (title) form.append('title', title)
+  try {
+    await http<PdfAppendixFileRead>('/api/v1/pdf-library', { method: 'POST', body: form })
+    pdfSelectedFile.value = null
+    pdfUploadTitle.value = ''
+    message.success(t('contentLibrary.pdfMaterials.uploadSuccess'))
+    await loadPdfFiles()
+  } catch (e: unknown) {
+    pdfUploadError.value = e instanceof Error ? e.message : t('contentLibrary.pdfMaterials.uploadFailed')
+  } finally {
+    pdfUploading.value = false
+  }
+}
+
+function openPdfRename(file: PdfAppendixFileRead) {
+  pdfRenameTarget.value = file
+  pdfRenameTitle.value = file.title
+}
+
+async function savePdfRename() {
+  const file = pdfRenameTarget.value
+  const title = pdfRenameTitle.value.trim()
+  if (!file || !title || pdfRenameSaving.value) return
+  pdfRenameSaving.value = true
+  try {
+    await patch<PdfAppendixFileRead>(`/api/v1/pdf-library/${file.id}`, { title })
+    pdfRenameTarget.value = null
+    await loadPdfFiles()
+  } catch (e: unknown) {
+    message.error(e instanceof Error ? e.message : t('contentLibrary.pdfMaterials.updateFailed'))
+  } finally {
+    pdfRenameSaving.value = false
+  }
+}
+
+async function togglePdfArchived(file: PdfAppendixFileRead) {
+  if (pdfActionBusy.value.has(file.id)) return
+  const busy = new Set(pdfActionBusy.value)
+  busy.add(file.id)
+  pdfActionBusy.value = busy
+  try {
+    await patch<PdfAppendixFileRead>(`/api/v1/pdf-library/${file.id}`, { is_archived: !file.is_archived })
+    await loadPdfFiles()
+  } catch (e: unknown) {
+    message.error(e instanceof Error ? e.message : t('contentLibrary.pdfMaterials.updateFailed'))
+  } finally {
+    const next = new Set(pdfActionBusy.value)
+    next.delete(file.id)
+    pdfActionBusy.value = next
+  }
+}
+
+function previewPdfFile(file: PdfAppendixFileRead) {
+  pdfPreviewFile.value = file
+  pdfPreview.value = true
+}
+
+async function downloadPdfFile(file: PdfAppendixFileRead) {
+  if (pdfActionBusy.value.has(file.id)) return
+  const busy = new Set(pdfActionBusy.value)
+  busy.add(file.id)
+  pdfActionBusy.value = busy
+  try {
+    await downloadBlob(`/api/v1/pdf-files/${file.id}/content?disposition=attachment`, file.original_filename)
+  } catch (e: unknown) {
+    message.error(e instanceof Error ? e.message : t('contentLibrary.pdfMaterials.downloadFailed'))
+  } finally {
+    const next = new Set(pdfActionBusy.value)
+    next.delete(file.id)
+    pdfActionBusy.value = next
+  }
+}
+
+const pdfColumns = computed(() => [
+  { title: t('contentLibrary.pdfMaterials.titleColumn'), key: 'title', ellipsis: { tooltip: true } },
+  { title: t('contentLibrary.pdfMaterials.source'), key: 'source', width: 130, render: () => t('contentLibrary.pdfMaterials.companyLibrary') },
+  { title: t('contentLibrary.pdfMaterials.filename'), key: 'original_filename', ellipsis: { tooltip: true } },
+  { title: t('contentLibrary.pdfMaterials.pages'), key: 'page_count', width: 72, align: 'center' as const },
+  { title: t('contentLibrary.pdfMaterials.size'), key: 'size_bytes', width: 100, render: (row: PdfAppendixFileRead) => formatPdfSize(row.size_bytes) },
+  {
+    title: t('contentLibrary.pdfMaterials.status'), key: 'is_archived', width: 100,
+    render: (row: PdfAppendixFileRead) => row.is_archived
+      ? h(NTag, { size: 'small', type: 'warning' }, () => t('contentLibrary.pdfMaterials.archived'))
+      : h(NTag, { size: 'small', type: 'success' }, () => t('contentLibrary.pdfMaterials.active')),
+  },
+  {
+    title: t('contentLibrary.actions'), key: 'actions', width: 168,
+    render: (row: PdfAppendixFileRead) => h(NSpace, { size: 4, wrap: false }, () => [
+      h(NButton, { size: 'small', quaternary: true, circle: true, title: t('contentLibrary.pdfMaterials.preview'), onClick: () => previewPdfFile(row) }, () => h(NIcon, null, { default: () => h(EyeOutline) })),
+      h(NButton, { size: 'small', quaternary: true, circle: true, title: t('contentLibrary.pdfMaterials.download'), loading: pdfActionBusy.value.has(row.id), onClick: () => downloadPdfFile(row) }, () => h(NIcon, null, { default: () => h(DownloadOutline) })),
+      h(NButton, { size: 'small', quaternary: true, circle: true, title: t('contentLibrary.pdfMaterials.rename'), onClick: () => openPdfRename(row) }, () => h(NIcon, null, { default: () => h(CreateOutline) })),
+      h(NButton, { size: 'small', quaternary: true, circle: true, title: row.is_archived ? t('contentLibrary.pdfMaterials.restore') : t('contentLibrary.pdfMaterials.archive'), loading: pdfActionBusy.value.has(row.id), onClick: () => togglePdfArchived(row) }, () => h(NIcon, null, { default: () => h(row.is_archived ? RefreshOutline : ArchiveOutline) })),
+    ]),
+  },
+])
+
+function formatPdfSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 // ------------------------------------------------------------------ VAT rates (for template line form)
 
 const vatRates = ref<VatRateRead[]>([])
@@ -435,6 +673,15 @@ onMounted(() => {
   loadBlocks()
   loadNoteTemplates()
   loadVatRates()
+  loadPdfFiles()
+  loadPdfLimits()
+})
+
+onBeforeUnmount(() => {
+  clearTimeout(pdfSearchTimer)
+  pdfMounted = false
+  pdfListGeneration += 1
+  pdfLimitsGeneration += 1
 })
 
 const appliesToOptions = computed(() => [
@@ -450,6 +697,106 @@ const appliesToOptions = computed(() => [
           <h2>{{ t('contentLibrary.title') }}</h2>
 
           <n-tabs type="line" animated>
+
+            <!-- Reusable company-private PDF originals -->
+            <n-tab-pane name="pdf-materials" :tab="t('contentLibrary.pdfMaterials.tabTitle')">
+              <div class="pdf-materials-intro">
+                <n-text depth="3">{{ t('contentLibrary.pdfMaterials.archiveHint') }}</n-text>
+                <n-alert v-if="pdfLimitsLoading" type="info" :show-icon="false">{{ t('contentLibrary.pdfMaterials.loadingLimits') }}</n-alert>
+                <n-alert v-else-if="pdfLimitsError" type="error">
+                  <div class="pdf-materials-error">
+                    <span>{{ t('contentLibrary.pdfMaterials.limitsFailed') }}</span>
+                    <n-button size="small" @click="loadPdfLimits">{{ t('common.retry') }}</n-button>
+                  </div>
+                </n-alert>
+                <n-alert v-else-if="pdfLimits" type="info" :show-icon="false">
+                  {{ t('contentLibrary.pdfMaterials.limits', {
+                    size: formatPdfSize(pdfLimits.max_appendix_file_bytes),
+                    files: pdfLimits.max_quote_appendices,
+                    inputSize: formatPdfSize(pdfLimits.max_quote_appendix_input_bytes),
+                    outputSize: formatPdfSize(pdfLimits.max_quote_pdf_bytes),
+                    pages: pdfLimits.max_quote_pdf_pages,
+                  }) }}
+                  {{ t('contentLibrary.pdfMaterials.emailLimitHint') }}
+                </n-alert>
+              </div>
+
+              <n-card size="small" class="pdf-upload-card">
+                <div class="pdf-upload-grid">
+                  <n-form-item :label="t('contentLibrary.pdfMaterials.file')" required>
+                    <div class="pdf-picker">
+                      <n-upload :file-list="[]" :show-file-list="false" :default-upload="false" accept="application/pdf,.pdf" :disabled="pdfUploading || !pdfLimits" @change="choosePdfFile">
+                        <n-button :disabled="pdfUploading || !pdfLimits">{{ t('contentLibrary.pdfMaterials.chooseFile') }}</n-button>
+                      </n-upload>
+                      <n-text v-if="pdfSelectedFile" depth="3" class="pdf-selected-file">{{ pdfSelectedFile.name }} · {{ formatPdfSize(pdfSelectedFile.size) }}</n-text>
+                    </div>
+                  </n-form-item>
+                  <n-form-item :label="t('contentLibrary.pdfMaterials.optionalTitle')">
+                    <n-input v-model:value="pdfUploadTitle" :disabled="pdfUploading || !pdfLimits" :placeholder="t('contentLibrary.pdfMaterials.titleFromFilename')" />
+                  </n-form-item>
+                </div>
+                <n-alert v-if="pdfUploadTooLarge && pdfLimits" type="warning" class="pdf-upload-error">
+                  {{ t('contentLibrary.pdfMaterials.fileTooLarge', { size: formatPdfSize(pdfLimits.max_appendix_file_bytes) }) }}
+                </n-alert>
+                <n-alert v-if="pdfUploadError" type="error" class="pdf-upload-error">
+                  <div class="pdf-materials-error">
+                    <span>{{ pdfUploadError }}</span>
+                    <n-button size="small" :disabled="!pdfSelectedFile || pdfUploading || !pdfLimits || pdfUploadTooLarge" :loading="pdfUploading" @click="uploadPdfFile">{{ t('common.retry') }}</n-button>
+                  </div>
+                </n-alert>
+                <div class="pdf-upload-actions">
+                  <n-button type="primary" :loading="pdfUploading" :disabled="!pdfSelectedFile || !pdfLimits || pdfUploadTooLarge" @click="uploadPdfFile">
+                    <template #icon><n-icon><AddOutline /></n-icon></template>
+                    {{ t('contentLibrary.pdfMaterials.upload') }}
+                  </n-button>
+                </div>
+              </n-card>
+
+              <div class="pdf-library-toolbar">
+                <n-input
+                  :value="pdfSearch"
+                  clearable
+                  :placeholder="t('contentLibrary.pdfMaterials.search')"
+                  @update:value="changePdfSearch"
+                  @keyup.enter="loadPdfFiles"
+                />
+                <div class="pdf-archive-filter">
+                  <n-switch
+                    :value="pdfIncludeArchived"
+                    :aria-label="t('contentLibrary.pdfMaterials.showArchived')"
+                    @update:value="changePdfArchiveFilter"
+                  />
+                  <span>{{ t('contentLibrary.pdfMaterials.showArchived') }}</span>
+                </div>
+                <n-button quaternary :loading="pdfLoading" @click="loadPdfFiles">
+                  <template #icon><n-icon><RefreshOutline /></n-icon></template>
+                  {{ t('contentLibrary.pdfMaterials.refresh') }}
+                </n-button>
+              </div>
+              <n-alert v-if="pdfLoadError" type="error" class="pdf-library-error">
+                <div class="pdf-materials-error">
+                  <span>{{ pdfLoadError }}</span>
+                  <n-button size="small" :loading="pdfLoading" @click="loadPdfFiles">{{ t('common.retry') }}</n-button>
+                </div>
+              </n-alert>
+              <n-spin :show="pdfLoading">
+                <n-data-table
+                  :columns="pdfColumns"
+                  :data="pdfFiles"
+                  :bordered="false"
+                  :row-key="(row: PdfAppendixFileRead) => row.id"
+                  striped
+                />
+                <n-text v-if="!pdfLoading && !pdfLoadError && pdfFiles.length === 0" depth="3" class="pdf-library-empty">
+                  {{ pdfSearchTerm ? t('contentLibrary.pdfMaterials.noResults') : t('contentLibrary.pdfMaterials.empty') }}
+                </n-text>
+              </n-spin>
+              <div v-if="pdfTotal > pdfPageSize" class="pdf-library-pagination">
+                <n-button size="small" :disabled="pdfPage <= 1 || pdfLoading" @click="setPdfPage(pdfPage - 1)">{{ t('contentLibrary.pdfMaterials.previous') }}</n-button>
+                <n-text depth="3">{{ t('contentLibrary.pdfMaterials.page', { page: pdfPage, pages: pdfPageCount, total: pdfTotal }) }}</n-text>
+                <n-button size="small" :disabled="pdfPage >= pdfPageCount || pdfLoading" @click="setPdfPage(pdfPage + 1)">{{ t('contentLibrary.pdfMaterials.next') }}</n-button>
+              </div>
+            </n-tab-pane>
 
             <!-- Document Templates -->
             <n-tab-pane name="templates" :tab="t('contentLibrary.template.tabTitle')">
@@ -679,6 +1026,24 @@ const appliesToOptions = computed(() => [
         </n-space>
       </template>
     </n-modal>
+
+    <n-modal :show="Boolean(pdfRenameTarget)" preset="card" :title="t('contentLibrary.pdfMaterials.rename')" style="max-width: 480px" @update:show="(show: boolean) => { if (!show) pdfRenameTarget = null }">
+      <n-form-item :label="t('contentLibrary.pdfMaterials.titleColumn')" required>
+        <n-input v-model:value="pdfRenameTitle" :disabled="pdfRenameSaving" @keyup.enter="savePdfRename" />
+      </n-form-item>
+      <template #footer>
+        <n-space justify="end">
+          <n-button :disabled="pdfRenameSaving" @click="pdfRenameTarget = null">{{ t('contentLibrary.cancel') }}</n-button>
+          <n-button type="primary" :loading="pdfRenameSaving" :disabled="!pdfRenameTitle.trim()" @click="savePdfRename">{{ t('contentLibrary.save') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <PdfPreviewDialog
+      v-model:show="pdfPreview"
+      :src="pdfPreviewFile ? `/api/v1/pdf-files/${pdfPreviewFile.id}/content?disposition=inline` : null"
+      :fallback-filename="pdfPreviewFile?.original_filename ?? 'material.pdf'"
+    />
   </div>
 </template>
 
@@ -697,5 +1062,81 @@ const appliesToOptions = computed(() => [
   display: flex;
   justify-content: flex-end;
   margin-bottom: 12px;
+}
+
+.pdf-materials-intro,
+.pdf-materials-error {
+  display: grid;
+  gap: 8px;
+}
+
+.pdf-upload-card {
+  margin: 16px 0;
+}
+
+.pdf-upload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.pdf-picker {
+  min-width: 0;
+}
+
+.pdf-selected-file {
+  overflow-wrap: anywhere;
+}
+
+.pdf-upload-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.pdf-selected-file,
+.pdf-upload-error,
+.pdf-library-error {
+  display: block;
+  margin-top: 8px;
+}
+
+.pdf-library-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 16px 0 12px;
+}
+
+.pdf-library-toolbar .n-input {
+  max-width: 320px;
+}
+
+.pdf-archive-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pdf-library-empty {
+  display: block;
+  padding: 32px;
+  text-align: center;
+}
+
+.pdf-library-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+@media (max-width: 720px) {
+  .pdf-upload-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

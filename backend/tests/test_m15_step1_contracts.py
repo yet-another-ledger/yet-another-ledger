@@ -252,7 +252,9 @@ async def test_mcp_mount_rejects_anonymous_requests_and_checks_authority() -> No
             assert malformed.json()["error"]["code"] == "MCP_ORIGIN_REJECTED"
 
 
-async def test_mcp_preflight_is_checked_before_dev_cors() -> None:
+async def test_mcp_preflight_is_checked_before_dev_cors(monkeypatch) -> None:
+    settings = cfg.Settings(static_dir=None, scheduler_enabled=False)
+    monkeypatch.setattr(cfg, "get_settings", lambda: settings)
     app = create_app()
     preflight_headers = {
         "origin": "http://localhost:5173",

@@ -506,7 +506,7 @@ async def test_validated_document_write_python_dates_replay_and_conflict(
             )
         ],
     )
-    args = {"write": validated_input.model_dump(mode="python")}
+    args = {"write": validated_input.model_dump(mode="python", exclude_unset=True)}
     target_id = uuid.uuid4()
     calls = 0
 
@@ -539,12 +539,12 @@ async def test_validated_document_write_python_dates_replay_and_conflict(
             principal,
             request_id=request_id,
             operation="test.validated_write",
-            arguments={"write": validated_input.model_dump(mode="python")},
+            arguments={"write": validated_input.model_dump(mode="python", exclude_unset=True)},
             mutate=mutate,
         )
         assert replayed.status == "replayed"
         assert replayed.operation_id == created.operation_id
-        changed_payload = validated_input.model_dump(mode="python")
+        changed_payload = validated_input.model_dump(mode="python", exclude_unset=True)
         changed_payload[date_field] = date(2026, 10, 1)
         changed_input = write_model.model_validate(changed_payload)
         with pytest.raises(HTTPException) as changed:
@@ -553,7 +553,7 @@ async def test_validated_document_write_python_dates_replay_and_conflict(
                 principal,
                 request_id=request_id,
                 operation="test.validated_write",
-                arguments={"write": changed_input.model_dump(mode="python")},
+                arguments={"write": changed_input.model_dump(mode="python", exclude_unset=True)},
                 mutate=mutate,
             )
         assert changed.value.status_code == 409

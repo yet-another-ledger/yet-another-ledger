@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import { defineComponent, h, ref } from 'vue'
 import en from '../../src/locales/en.json'
 
-const http = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), downloadBlob: vi.fn() }))
+const http = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), fetchBlob: vi.fn(), saveBlob: vi.fn() }))
 const quotes = vi.hoisted(() => ({
   fetchQuote: vi.fn(), fetchProductOptions: vi.fn(), calculatePreview: vi.fn(),
   createQuote: vi.fn(), updateQuote: vi.fn(), transitionStatus: vi.fn(),
@@ -24,6 +25,10 @@ const ui = vi.hoisted(() => ({
     inheritAttrs: false, props: ['value'], emits: ['update:value'],
     template: '<input v-bind="$attrs" :value="value ?? \'\'" @input="$emit(\'update:value\', Number($event.target.value))" />',
   },
+  select: {
+    inheritAttrs: false, props: ['value', 'options', 'disabled'], emits: ['update:value'],
+    template: '<select v-bind="$attrs" :value="value ?? \'\'" :disabled="disabled" @change="$emit(\'update:value\',$event.target.value)"><option value=""></option><option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option></select>',
+  },
   modal: {
     inheritAttrs: false, props: ['show'], emits: ['update:show', 'positive-click', 'negative-click'],
     template: '<section v-if="show" v-bind="$attrs"><slot /></section>',
@@ -37,10 +42,10 @@ vi.mock('../../src/stores/payments', () => ({ usePaymentsStore: () => payments }
 vi.mock('naive-ui', () => ({
   useMessage: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }), useDialog: () => dialog,
   NAlert: ui.box, NButton: ui.button, NCard: ui.box, NCollapse: ui.box, NCollapseItem: ui.box, NDatePicker: ui.box, NDivider: ui.box, NDropdown: ui.box,
-  NForm: ui.box, NFormItem: ui.box, NGrid: ui.box, NGi: ui.box, NIcon: ui.box, NInput: ui.input, NInputNumber: ui.number,
-  NList: ui.box, NListItem: ui.box, NModal: ui.modal, NSelect: ui.box, NSpace: ui.box, NSpin: ui.box, NSwitch: ui.box,
+  NForm: ui.box, NFormItem: ui.box, NGrid: ui.box, NGi: ui.box, NIcon: ui.box, NInput: ui.input, NInputNumber: ui.number, NSelect: ui.select,
+  NList: ui.box, NListItem: ui.box, NModal: ui.modal, NSpace: ui.box, NSpin: ui.box, NSwitch: ui.box,
   NTag: ui.box, NText: ui.box, NThing: ui.box, NDescriptions: ui.box, NDescriptionsItem: ui.box,
-  NEmpty: ui.box,
+  NEmpty: ui.box, NUpload: ui.box,
 }))
 vi.mock('@vicons/ionicons5', () => ({ AddOutline: ui.box, TrashOutline: ui.box, DocumentTextOutline: ui.box, DownloadOutline: ui.box, MailOutline: ui.box, EyeOutline: ui.box }))
 
@@ -718,6 +723,145 @@ describe('Quote duplication', () => {
   it('hides Duplicate on a new unsaved quote', async () => {
     const { wrapper } = await setup('DRAFT', 'new')
     expect(wrapper.findAll('button').some(button => button.text().includes('Duplicate'))).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('Quote appendix save and continue', () => {
+  it('waits for an in-flight upload before building the save payload and retains it after save failure', async () => {
+    vi.clearAllMocks()
+    invoices.fetchProductOptions.mockResolvedValue([])
+    const editable = {
+      ...quote, status: 'DRAFT', appendix_version: 0, appendices: [],
+      lines: [{ id: 'line-1', product_id: null, name: 'Consultation', description: null, quantity: '1', unit_id: null, unit_name: null, unit_price: '10', discount_type: 'NONE', discount_value: '0', vat_rate_id: null }],
+    }
+    quotes.fetchQuote.mockResolvedValue(editable)
+    let finishUpload!: () => void
+    let emitUploaded!: () => void
+    const uploadDone = new Promise<void>(resolve => { finishUpload = resolve })
+    const EditorStub = defineComponent({
+      emits: ['change'],
+      setup(_, { emit, expose }) {
+        expose({ waitForUpload: () => uploadDone, reload: vi.fn() })
+        emitUploaded = () => emit('change', [{
+          file_id: 'uploaded-during-save', owner_quote_id: 'quote', source: 'QUOTE',
+          title_snapshot: 'Uploaded', title: 'Uploaded', original_filename: 'uploaded.pdf',
+          sha256: 'hash', size_bytes: 12, page_count: 1, is_archived: false,
+        }])
+        return () => h('div', { 'data-appendix-editor': '' })
+      },
+    })
+    http.get.mockImplementation((url: string) => {
+      if (url === '/api/v1/quotes/quote/document-chain') return Promise.resolve(chain)
+      if (url.startsWith('/api/v1/customers?q=') || url === '/api/v1/vat-rates' || url.startsWith('/api/v1/vat-treatments')) return Promise.resolve({ items: [{ id: 'customer', name: 'Customer' }] })
+      if (url.startsWith('/api/v1/document-templates') || url.startsWith('/api/v1/content-blocks') || url.startsWith('/api/v1/note-templates')) return Promise.resolve([])
+      if (url === '/api/v1/customers/customer') return Promise.resolve({ id: 'customer', name: 'Customer' })
+      if (url === '/api/v1/pdf-library/limits') return Promise.resolve({ max_appendix_file_bytes: 1024, max_quote_appendices: 10, max_quote_appendix_input_bytes: 2048, max_quote_pdf_bytes: 2048, max_quote_pdf_pages: 20 })
+      if (url.startsWith('/api/v1/pdf-library?') || url.startsWith('/api/v1/quotes/quote/appendix-files')) return Promise.resolve({ items: [], total: 0 })
+      throw new Error(`unexpected ${url}`)
+    })
+    quotes.updateQuote.mockRejectedValueOnce(new Error('save failed')).mockResolvedValue(editable)
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/quotes/:id/edit', component: QuoteEdit }, { path: '/quotes', component: { template: '<div />' } }] })
+    await router.push('/quotes/quote/edit'); await router.isReady()
+    const wrapper = mount({ template: '<router-view />' }, { global: { plugins: [router, i18n], stubs: {
+      QuoteAppendixEditor: EditorStub, DocumentSendDialog: true, PdfPreviewDialog: true, EmailLogPanel: true, DocumentWorkflowPanel: true, QuotePaymentPanel: true,
+    } } })
+    await flushPromises()
+
+    await byText(wrapper, 'Save').trigger('click')
+    await flushPromises()
+    expect(quotes.updateQuote).not.toHaveBeenCalled()
+    emitUploaded()
+    finishUpload()
+    await flushPromises()
+    expect(quotes.updateQuote).toHaveBeenCalledTimes(1)
+    expect(quotes.updateQuote.mock.calls[0]![1].appendix_file_ids).toEqual(['uploaded-during-save'])
+    expect(quotes.updateQuote.mock.results[0]!.type).toBe('return')
+
+    await byText(wrapper, 'Save').trigger('click')
+    await flushPromises()
+    expect(quotes.updateQuote).toHaveBeenCalledTimes(2)
+    expect(quotes.updateQuote.mock.calls[1]![1].appendix_file_ids).toEqual(['uploaded-during-save'])
+    wrapper.unmount()
+  })
+
+  it('freezes editable controls during a deferred save so later edits cannot be marked clean', async () => {
+    vi.clearAllMocks()
+    invoices.fetchProductOptions.mockResolvedValue([])
+    const editable = {
+      ...quote, status: 'DRAFT', appendix_version: 0, appendices: [],
+      lines: [{ id: 'line-1', product_id: null, name: 'Original', description: null, quantity: '1', unit_id: null, unit_name: null, unit_price: '10', discount_type: 'NONE', discount_value: '0', vat_rate_id: null }],
+    }
+    quotes.fetchQuote.mockResolvedValue(editable)
+    let finishSave!: (value: typeof editable) => void
+    quotes.updateQuote.mockReturnValue(new Promise(resolve => { finishSave = resolve }))
+    http.get.mockImplementation((url: string) => {
+      if (url === '/api/v1/quotes/quote/document-chain') return Promise.resolve(chain)
+      if (url === '/api/v1/pdf-library/limits') return Promise.resolve({ max_appendix_file_bytes: 1024, max_quote_appendices: 10, max_quote_appendix_input_bytes: 2048, max_quote_pdf_bytes: 2048, max_quote_pdf_pages: 20 })
+      if (url.startsWith('/api/v1/pdf-library?')) return Promise.resolve({ items: [], total: 0 })
+      if (url.startsWith('/api/v1/quotes/quote/appendix-files')) return Promise.resolve({ items: [], total: 0 })
+      if (url.startsWith('/api/v1/customers?q=') || url === '/api/v1/vat-rates' || url.startsWith('/api/v1/vat-treatments')) return Promise.resolve({ items: [{ id: 'customer', name: 'Customer' }] })
+      if (url.startsWith('/api/v1/document-templates') || url.startsWith('/api/v1/content-blocks') || url.startsWith('/api/v1/note-templates')) return Promise.resolve([])
+      if (url === '/api/v1/customers/customer') return Promise.resolve({ id: 'customer', name: 'Customer' })
+      throw new Error(`unexpected ${url}`)
+    })
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/quotes/:id/edit', component: QuoteEdit }, { path: '/quotes', component: { template: '<div data-quote-list />' } }] })
+    await router.push('/quotes/quote/edit'); await router.isReady()
+    const wrapper = mount({ template: '<router-view />' }, { global: { plugins: [router, i18n], stubs: {
+      QuoteAppendixEditor: true, DocumentSendDialog: true, PdfPreviewDialog: true, EmailLogPanel: true, DocumentWorkflowPanel: true, QuotePaymentPanel: true,
+    } } })
+    await flushPromises()
+    await wrapper.find('input[placeholder="Service or product name"]').setValue('Submitted value')
+    await byText(wrapper, 'Save').trigger('click')
+    await flushPromises()
+    expect(quotes.updateQuote).toHaveBeenCalledTimes(1)
+    expect(byText(wrapper, 'Add line').attributes('disabled')).toBeDefined()
+    await byText(wrapper, 'Add line').trigger('click')
+    expect(wrapper.findAll('input[placeholder="Service or product name"]')).toHaveLength(1)
+    finishSave({ ...editable, lines: [{ ...editable.lines[0]!, name: 'Submitted value' }] })
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/quotes')
+    wrapper.unmount()
+  })
+
+  it('validates, creates once, and stays on the persisted editor with the Quote form restored', async () => {
+    vi.clearAllMocks()
+    invoices.fetchProductOptions.mockResolvedValue([])
+    const created = {
+      ...quote, id: 'created-quote', quote_number: 'Q-2', status: 'DRAFT', appendix_version: 0, appendices: [],
+      lines: [{ id: 'line-1', product_id: null, name: 'Consultation', description: null, quantity: '1', unit_id: null, unit_name: null, unit_price: '10', discount_type: 'NONE', discount_value: '0', vat_rate_id: null }],
+    }
+    quotes.createQuote.mockResolvedValue(created)
+    quotes.fetchQuote.mockResolvedValue(created)
+    http.get.mockImplementation((url: string) => {
+      if (url === '/api/v1/settings/quote-default-valid-days') return Promise.resolve({ default_valid_days: 30 })
+      if (url === '/api/v1/quotes/created-quote/document-chain') return Promise.resolve(chain)
+      if (url === '/api/v1/pdf-library/limits') return Promise.resolve({ max_appendix_file_bytes: 1024, max_quote_appendices: 10, max_quote_appendix_input_bytes: 2048, max_quote_pdf_bytes: 2048, max_quote_pdf_pages: 20 })
+      if (url.startsWith('/api/v1/pdf-library?')) return Promise.resolve({ items: [], total: 0 })
+      if (url.startsWith('/api/v1/quotes/created-quote/appendix-files')) return Promise.resolve({ items: [], total: 0 })
+      if (url.startsWith('/api/v1/customers?q=')) return Promise.resolve({ items: [{ id: 'customer', name: 'Customer' }] })
+      if (url === '/api/v1/vat-rates' || url.startsWith('/api/v1/vat-treatments')) return Promise.resolve({ items: [] })
+      if (url.startsWith('/api/v1/document-templates') || url.startsWith('/api/v1/content-blocks') || url.startsWith('/api/v1/note-templates')) return Promise.resolve([])
+      throw new Error(`unexpected ${url}`)
+    })
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/quotes/:id/edit', component: QuoteEdit }, { path: '/quotes', component: { template: '<div />' } }] })
+    await router.push('/quotes/new/edit'); await router.isReady()
+    const wrapper = mount({ template: '<router-view />' }, { global: { plugins: [router, i18n], stubs: {
+      QuoteAppendixEditor: { props: ['quoteId'], template: '<div data-appendix-editor :data-quote-id="quoteId" />', methods: { reload: vi.fn() } },
+      DocumentSendDialog: true, PdfPreviewDialog: true, EmailLogPanel: true, DocumentWorkflowPanel: true, QuotePaymentPanel: true,
+    } } })
+    await flushPromises()
+    await wrapper.findAll('select')[0]!.setValue('customer')
+    await wrapper.find('input[placeholder="Service or product name"]').setValue('Consultation')
+    const saveContinue = byText(wrapper, 'Save and continue')
+    await saveContinue.trigger('click')
+    await saveContinue.trigger('click')
+    await flushPromises()
+    expect(quotes.createQuote).toHaveBeenCalledTimes(1)
+    expect(quotes.createQuote.mock.calls[0]![0].appendix_file_ids).toEqual([])
+    expect(router.currentRoute.value.path).toBe('/quotes/created-quote/edit')
+    expect(wrapper.find('[data-appendix-editor]').attributes('data-quote-id')).toBe('created-quote')
+    expect(wrapper.find('input[placeholder="Service or product name"]').element).toHaveProperty('value', 'Consultation')
     wrapper.unmount()
   })
 })

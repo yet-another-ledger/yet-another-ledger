@@ -2,7 +2,7 @@
 
 > 🌐 **English** · [中文](M15-hermes-telegram_zh.md)
 
-> **Status (2026-10-24)**: ⏸️ M15 remains in development and is paused at the author's request. Its implementation and this guide are preserved on `wip/m15-agent-accounting-paused`, outside `main`. The procedures below are for a future resume, not an instruction to deploy now. Parts of receipt intake have been walked through, but acceptance is incomplete; see the [M15 resume checkpoint](M15.md) for progress and author-skipped checks.
+> **Status (2026-11-06)**: 🟡 The author resumed evaluation of existing M15 functionality. Current main is integrated on the M15 branch; this guide supports a later isolated development walkthrough, not a claim of deployment or acceptance. Check the actual migration history and profile before continuing 3/6, retaining earlier author-skipped/deferred checks. See the [current M15 synchronization checkpoint](M15.md).
 
 This guide documents the receipt-only part of M15 Step 5 using a separate Hermes profile and a distinct Telegram bot. Receipt intake has been partly walked through; remaining checks, author exceptions and the paused resume point are recorded in the M15 checkpoint. The guide and automated checks alone do not constitute author acceptance.
 

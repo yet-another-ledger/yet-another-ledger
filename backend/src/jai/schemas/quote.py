@@ -26,6 +26,7 @@ from jai.schemas.invoice import (
     InvoiceLineInput,
     VatTreatmentSnapshot,
 )
+from jai.schemas.pdf_appendix import QuoteAppendixRead
 
 # ---------------------------------------------------------------------------
 # Calculation request (step 1)
@@ -95,6 +96,8 @@ class QuoteWrite(BaseModel):
     bank_text: str | None = None
     payment_terms_text: str | None = None
     lines: list[InvoiceLineInput] = Field(min_length=1, description="At least 1 line required.")
+    appendix_file_ids: list[uuid.UUID] = Field(default=None)  # type: ignore[arg-type]
+    expected_appendix_version: int = Field(default=None, ge=0)  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +239,8 @@ class QuoteRead(BaseModel):
     bank_text: str | None = None
     payment_terms_text: str | None = None
     creator_id: uuid.UUID | None = None
+    appendices: list[QuoteAppendixRead] = Field(default_factory=list)
+    appendix_version: int = 0
 
     lines: list[QuoteLineRead] = []
     taxes: list[QuoteTaxRowRead] = []

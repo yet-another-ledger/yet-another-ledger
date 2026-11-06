@@ -1461,6 +1461,7 @@ async def render_quote_pdf(
     from jai.models.binary_asset import BinaryAsset
     from jai.models.company import Company
     from jai.models.customer import Customer
+    from jai.models.pdf_appendix import PdfAppendixFile, QuoteAppendix
     from jai.models.quote import Quote, QuoteLine
 
     await set_rls_company(session, company_id)
@@ -1472,7 +1473,12 @@ async def render_quote_pdf(
         .options(
             selectinload(Quote.lines).selectinload(QuoteLine.line_taxes),
             selectinload(Quote.taxes),
+            selectinload(Quote.appendix_memberships)
+            .joinedload(QuoteAppendix.file)
+            .undefer(PdfAppendixFile.pdf_bytes),
         )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     result = await session.execute(stmt)
     quote = result.scalar_one_or_none()
@@ -1481,6 +1487,7 @@ async def render_quote_pdf(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Quote not found.",
         )
+    appendix_members = sorted(quote.appendix_memberships, key=lambda item: item.sort_order)
 
     # -- Load company ---------------------------------------------------------
     company_stmt = select(Company).where(Company.id == company_id)
@@ -1546,5 +1553,58 @@ async def render_quote_pdf(
     )
     pdf_bytes = html_to_pdf(html)
 
+    if appendix_members:
+        from jai.config import get_settings
+        from jai.services.pdf_appendix import QuotePdfCompositionError, compose_quote_pdf
+
+        cfg = get_settings()
+        try:
+            if len(appendix_members) > cfg.max_quote_appendices:
+                raise QuotePdfCompositionError("PDF_APPENDIX_COUNT_LIMIT")
+            if any(member.file is None for member in appendix_members):
+                missing_member = next(member for member in appendix_members if member.file is None)
+                raise QuotePdfCompositionError(
+                    "QUOTE_PDF_COMPOSITION_FAILED", missing_member.file_id
+                )
+            pdf_bytes = await compose_quote_pdf(
+                pdf_bytes,
+                [
+                    (
+                        member.file.id,
+                        member.file.pdf_bytes,
+                        member.file.sha256,
+                        member.file.page_count,
+                    )
+                    for member in appendix_members
+                ],
+                max_input_bytes=cfg.max_quote_appendix_input_bytes,
+                max_output_bytes=cfg.max_quote_pdf_bytes,
+                max_pages=cfg.max_quote_pdf_pages,
+            )
+        except QuotePdfCompositionError as exc:
+            await session.rollback()
+            code = exc.code
+            too_large = code in {"PDF_APPENDIX_INPUT_LIMIT", "QUOTE_PDF_OUTPUT_LIMIT"}
+            invalid_selection_size = code in {
+                "QUOTE_PDF_PAGE_LIMIT",
+                "PDF_APPENDIX_COUNT_LIMIT",
+            }
+            status_code = (
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+                if too_large
+                else status.HTTP_422_UNPROCESSABLE_ENTITY
+                if invalid_selection_size
+                else status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+            detail: dict[str, object] = {
+                "code": code,
+                "message": "Quote PDF could not be safely composed." if status_code == 500 else "Quote PDF exceeds a configured output limit.",
+            }
+            if exc.file_id is not None:
+                detail["file_id"] = str(exc.file_id)
+            raise HTTPException(status_code=status_code, detail=detail) from None
+
     filename = f"{quote.quote_number}.pdf"
+    # Release the coherent Quote snapshot lock before any caller can start SMTP.
+    await session.commit()
     return pdf_bytes, filename

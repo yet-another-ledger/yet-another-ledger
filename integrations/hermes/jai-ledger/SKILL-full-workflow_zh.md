@@ -34,6 +34,7 @@ description: 在 JAI 中提交采购收据原件并准备完整客户、报价�
 
 - 只有澄清了所有可能相似的匹配项后才能创建客户。使用 `create_customer` 并提供所有已知完整字段及该操作专属的请求 ID。
 - 报价流程按需调用 JAI 查询工具，然后调用 `preview_quote` 并报告返回合计。仅在用户要求创建时使用 `create_quote_draft`。报价会分配编号并从 `DRAFT` 开始。
+- 除非用户要求更改 PDF 附录，否则省略报价的 `appendix_file_ids` 和 `expected_appendix_version`；省略会保留已有选择。这两个字段都不能传 `null`。明确更新选择时，需要已知文件 ID，以及 `get_quote` 返回的当前 `appendix_version`，不得猜测。
 - 发票只能是普通销售发票；调用 `preview_invoice` 和 `create_invoice_draft`。发票以未编号的 `DRAFT` 创建，只有所有者在 JAI 签发时才分配法定编号。
 - 使用 `get_quote`／`get_invoice` 查看用户明确指定的单据。只有 JAI 确认目标仍可编辑且状态为 `DRAFT` 时，才能使用更新工具，并提供完整替换输入。每次创建／更新都传入稳定 ID。
 - 原样报告 JAI 的准确结果、操作是否重放、合计、状态、已有编号和 `web_url`。不得编造链接。

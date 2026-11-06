@@ -14,6 +14,7 @@ import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
 import { useQuotesStore } from '../../stores/quotes'
 import type { QuoteListItem } from '../../stores/quotes'
 import { get, downloadBlob } from '../../api/http'
+import { quotePdfErrorMessage } from '../../utils/quotePdfErrors'
 import type { components } from '../../api/schema'
 
 type CustomerRead = components['schemas']['CustomerRead']
@@ -61,7 +62,7 @@ async function handleDownloadPdf(id: string, locale?: 'en' | 'zh') {
       : `/api/v1/quotes/${id}/pdf`
     await downloadBlob(url, `quote-${id}.pdf`)
   } catch (e: unknown) {
-    message.error(e instanceof Error ? e.message : t('pdf.downloadFailed'))
+    message.error(await quotePdfErrorMessage(e, id, t) ?? (e instanceof Error ? e.message : t('pdf.downloadFailed')))
   } finally {
     downloadingId.value = null
   }
@@ -88,8 +89,10 @@ function handlePdfLocaleSelect(key: string) {
 const previewShow = ref(false)
 const previewSrc = ref<string | null>(null)
 const previewFallback = ref('quote.pdf')
+const previewQuoteId = ref<string | undefined>()
 
 function openPreview(id: string, locale?: 'en' | 'zh') {
+  previewQuoteId.value = id
   previewSrc.value = locale
     ? `/api/v1/quotes/${id}/pdf?locale=${locale}`
     : `/api/v1/quotes/${id}/pdf`
@@ -471,6 +474,7 @@ const columns = computed(() => [
       v-model:show="previewShow"
       :src="previewSrc"
       :fallback-filename="previewFallback"
+      :quote-id="previewQuoteId"
     />
   </div>
 </template>

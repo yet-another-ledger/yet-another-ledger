@@ -34,6 +34,7 @@ Before each mutation (`submit_receipt`, `create_customer`, `create_quote_draft`,
 
 - Create a customer only after all plausible similar matches have been clarified. Use `create_customer` with complete known fields and its operation-specific request ID.
 - For quotes, call the JAI lookup tools as needed, then `preview_quote`; report returned totals. Create only when asked, using `create_quote_draft`. Quotes receive a number and start `DRAFT`.
+- Omit Quote `appendix_file_ids` and `expected_appendix_version` unless the user asks to change PDF appendices; omission preserves an existing selection. Never send `null` for either field. An explicit selection update needs known file IDs and the current `appendix_version` from `get_quote`; do not guess them.
 - For invoices, use `preview_invoice` and `create_invoice_draft` only for a Standard Invoice. It starts as an unnumbered `DRAFT`; its legal number is assigned only when the owner issues it in JAI.
 - Use `get_quote`/`get_invoice` to inspect an identified document. Use update tools only for the complete replacement input and only when JAI confirms the target is an editable `DRAFT`. Pass stable IDs for every create/update.
 - Report JAI's exact result, operation replay status, totals, status, assigned number when present and exact `web_url`. Do not invent URLs.

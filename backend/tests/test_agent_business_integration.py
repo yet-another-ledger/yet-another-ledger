@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import io
 import json
 import uuid
 from collections.abc import AsyncIterator
@@ -14,6 +16,7 @@ from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient, Response
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import ValidationError
+from pypdf import PdfWriter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.applications import Starlette
@@ -37,6 +40,7 @@ from jai.models.content import DocumentTemplate
 from jai.models.customer import Customer
 from jai.models.document import DocumentChainEvent
 from jai.models.invoice import Invoice
+from jai.models.pdf_appendix import PdfAppendixFile
 from jai.models.product import Product
 from jai.models.quote import Quote
 from jai.models.user import User
@@ -73,7 +77,7 @@ from jai.services.agent_business import (
     update_invoice_draft,
     update_quote_draft,
 )
-from jai.services.agent_operations import AgentOperationFailure
+from jai.services.agent_operations import AgentOperationFailure, canonical_argument_digest
 from jai.services.agent_tokens import AgentPrincipal, issue_token
 from jai.services.vat import seed_for_company
 
@@ -856,6 +860,21 @@ async def test_quote_tools_share_pricing_and_replay_original_snapshot_and_url(
     assert created.quote.total_incl_vat == preview.total
     assert created.operation.web_url == f"https://first.example.test/quotes/{created.quote.id}/edit"
 
+    # Simulate a persisted operation created before M17 added appendix fields.
+    legacy_quote = body.model_dump(mode="python")
+    legacy_quote.pop("appendix_file_ids")
+    legacy_quote.pop("expected_appendix_version")
+    async with admin_session_maker() as session:
+        operation = await session.get(AgentOperation, created.operation.operation_id)
+        assert operation is not None
+        operation.arguments_digest = canonical_argument_digest(
+            {"arguments": {"quote": legacy_quote}, "source": None}
+        )
+        await session.commit()
+    legacy_replay = await create_quote_draft(runtime_session_maker, principal, request)
+    assert legacy_replay.operation.status == "replayed"
+    assert legacy_replay.quote.id == created.quote.id
+
     updated_body = body.model_copy(update={"notes": "Changed after creation"})
     update_request = UpdateQuoteDraftInput(
         request_id=uuid.uuid4(), quote_id=created.quote.id, quote=updated_body
@@ -893,6 +912,107 @@ async def test_quote_tools_share_pricing_and_replay_original_snapshot_and_url(
     assert update_replay_after_delete.operation.status == "replayed"
     assert update_replay_after_delete.quote.notes == "Changed after creation"
     assert update_replay_after_delete.operation.web_url == updated.operation.web_url
+
+
+@pytest.mark.integration
+async def test_agent_quote_appendices_preserve_atomic_failures_and_replay(
+    business_principals: tuple[AgentPrincipal, AgentPrincipal, uuid.UUID],
+    admin_session_maker: async_sessionmaker[AsyncSession],
+    runtime_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """M17 selection writes remain inside the M15 operation's transaction."""
+    principal, _other, _owner_id = business_principals
+    customer = Customer(company_id=principal.company_id, name="Appendix customer")
+    writer = PdfWriter()
+    writer.add_blank_page(width=300, height=400)
+    output = io.BytesIO()
+    writer.write(output)
+    original = output.getvalue()
+    file = PdfAppendixFile(
+        company_id=principal.company_id,
+        title="Product catalogue",
+        original_filename="catalogue.pdf",
+        pdf_bytes=original,
+        sha256=hashlib.sha256(original).hexdigest(),
+        size_bytes=len(original),
+        page_count=1,
+        is_archived=False,
+    )
+    async with admin_session_maker() as session:
+        session.add_all([customer, file])
+        await seed_for_company(session, principal.company_id)
+        rate = await session.scalar(
+            select(VatRate).where(
+                VatRate.company_id == principal.company_id,
+                VatRate.percent == Decimal("21.000"),
+            )
+        )
+        treatment = await session.scalar(
+            select(VatTreatment).where(
+                VatTreatment.company_id == principal.company_id,
+                VatTreatment.code == "NL_DOMESTIC",
+            )
+        )
+        assert rate is not None and treatment is not None
+        await session.commit()
+    body = _quote_write(customer.id, rate.id, treatment.id)
+    invalid_create = CreateQuoteDraftInput(
+        request_id=uuid.uuid4(),
+        quote=body.model_copy(update={"appendix_file_ids": [uuid.uuid4()]}),
+    )
+    with pytest.raises(HTTPException) as failure:
+        await create_quote_draft(runtime_session_maker, principal, invalid_create)
+    assert failure.value.detail == {"code": "MCP_VALIDATION_FAILED"}
+    async with admin_session_maker() as session:
+        assert await session.scalar(
+            select(Quote.id).where(Quote.company_id == principal.company_id)
+        ) is None
+        failed = await session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.request_id == str(invalid_create.request_id)
+            )
+        )
+        assert failed is not None and failed.outcome == "failed"
+
+    create_request = CreateQuoteDraftInput(
+        request_id=uuid.uuid4(),
+        quote=body.model_copy(update={"appendix_file_ids": [file.id]}),
+    )
+    created = await create_quote_draft(runtime_session_maker, principal, create_request)
+    assert [item.file_id for item in created.quote.appendices] == [file.id]
+    assert created.quote.appendix_version == 1
+    stale_update = UpdateQuoteDraftInput(
+        request_id=uuid.uuid4(),
+        quote_id=created.quote.id,
+        quote=body.model_copy(update={
+            "notes": "Must roll back",
+            "appendix_file_ids": [],
+            "expected_appendix_version": 0,
+        }),
+    )
+    with pytest.raises(HTTPException) as failure:
+        await update_quote_draft(runtime_session_maker, principal, stale_update)
+    assert failure.value.detail == {"code": "MCP_VALIDATION_FAILED"}
+    current = await read_quote(runtime_session_maker, principal, created.quote.id)
+    assert current is not None
+    assert current.quote.notes is None
+    assert current.quote.appendix_version == 1
+    assert [item.file_id for item in current.quote.appendices] == [file.id]
+    updated = await update_quote_draft(
+        runtime_session_maker,
+        principal,
+        UpdateQuoteDraftInput(
+            request_id=uuid.uuid4(),
+            quote_id=created.quote.id,
+            quote=body.model_copy(update={"notes": "Omission keeps appendices"}),
+        ),
+    )
+    assert updated.quote.notes == "Omission keeps appendices"
+    assert [item.file_id for item in updated.quote.appendices] == [file.id]
+    replay = await create_quote_draft(runtime_session_maker, principal, create_request)
+    assert replay.operation.status == "replayed"
+    assert replay.quote.notes is None
+    assert replay.quote.appendices == created.quote.appendices
 
 
 @pytest.mark.integration
@@ -1025,7 +1145,10 @@ async def test_quote_tools_execute_over_streamable_http(
     settings = Settings(base_url="https://wire.example.test", scheduler_enabled=False)
     monkeypatch.setattr(mcp_module, "get_settings", lambda: settings)
     monkeypatch.setattr("jai.services.agent_business.get_settings", lambda: settings)
-    quote = _quote_write(customer.id, rate.id, treatment.id).model_dump(mode="json")
+    # M17's appendix fields may be omitted, but explicit null is invalid.
+    quote = _quote_write(customer.id, rate.id, treatment.id).model_dump(
+        mode="json", exclude_unset=True
+    )
     transport_app = _fresh_mcp_wire_app()
     async with mcp_module.server.session_manager.run():
         async with AsyncClient(
@@ -1070,6 +1193,13 @@ async def test_quote_tools_execute_over_streamable_http(
                         "params": {"name": tool_name, "arguments": arguments},
                     },
                 )
+
+            for index, field in enumerate(("appendix_file_ids", "expected_appendix_version")):
+                null_response = await call(
+                    "preview_quote", {"quote": {**quote, field: None}}, 100 + index
+                )
+                assert null_response.status_code == 200
+                assert "MCP_VALIDATION_FAILED" in null_response.text
 
             preview_response = await call("preview_quote", {"quote": quote}, 2)
             assert preview_response.status_code == 200

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 import LineOrdering from '../../components/LineOrdering.vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { localDateStr } from '../../utils/date'
 import {
@@ -16,10 +16,12 @@ import DocumentSendDialog from '../../components/DocumentSendDialog.vue'
 import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
 import EmailLogPanel from '../../components/EmailLogPanel.vue'
 import QuotePaymentPanel from '../../components/QuotePaymentPanel.vue'
+import QuoteAppendixEditor from '../../components/QuoteAppendixEditor.vue'
 import DocumentWorkflowPanel from '../../components/DocumentWorkflowPanel.vue'
 import { useQuotesStore } from '../../stores/quotes'
 import { useInvoicesStore } from '../../stores/invoices'
-import { get, downloadBlob } from '../../api/http'
+import { get, fetchBlob, saveBlob, ApiError } from '../../api/http'
+import { quotePdfErrorMessage } from '../../utils/quotePdfErrors'
 import {
   createDocumentChainPaymentChangeHandler,
   useDocumentChainRefresh,
@@ -39,6 +41,20 @@ type DocumentTemplateRead = components['schemas']['DocumentTemplateRead']
 type ContentBlockRead = components['schemas']['ContentBlockRead']
 type NoteTemplateRead = components['schemas']['NoteTemplateRead']
 type EmailLogRead = components['schemas']['EmailLogRead']
+type QuoteAppendixRead = components['schemas']['QuoteAppendixRead']
+
+interface AppendixEditorItem {
+  file_id: string
+  owner_quote_id: string | null
+  source: 'LIBRARY' | 'QUOTE'
+  title_snapshot: string
+  title: string
+  original_filename: string
+  sha256: string
+  size_bytes: number
+  page_count: number
+  is_archived: boolean
+}
 
 let lineKeyCounter = 0
 function nextLineKey() { return `l${++lineKeyCounter}` }
@@ -84,9 +100,27 @@ const invoicesStore = useInvoicesStore()
 const isEdit = ref(false)
 const pageLoading = ref(false)
 const saving = ref(false)
+const appendixReloading = ref(false)
+const allowRouteDuringSave = ref(false)
+let saveOperation = 0
+let appendixReloadOperation = 0
+const activeDirtyConfirmations = new Set<{
+  confirmation: ReturnType<typeof dialog.warning>
+  finish: (allow: boolean) => void
+}>()
+let dirtyCheckGeneration = 0
 const duplicating = ref(false)
 const pageError = ref<string | null>(null)
 const existingQuote = ref<QuoteRead | null>(null)
+const savedAppendices = ref<QuoteAppendixRead[]>([])
+const pendingAppendices = ref<AppendixEditorItem[]>([])
+const appendixConflict = ref(false)
+const appendixEditorRef = ref<InstanceType<typeof QuoteAppendixEditor> | null>(null)
+let newQuoteRouteNavigationInterrupted = false
+let dirtyConfirmationCreatingNewQuote = false
+const removeCreatedQuoteRouteRecovery = router.afterEach((_to, _from, failure) => {
+  if (failure && dirtyConfirmationCreatingNewQuote) newQuoteRouteNavigationInterrupted = true
+})
 const {
   documentChain,
   chainRefreshing,
@@ -171,6 +205,7 @@ const showNoteTemplateModal = ref(false)
 
 // Dirty tracking + reactivate modal
 const cleanSnapshot = ref<string | null>(null)
+const cleanAppendixSnapshot = ref<string | null>(null)
 const showReactivateModal = ref(false)
 const reactivateDate = ref<string | null>(null)
 const reactivating = ref(false)
@@ -214,6 +249,7 @@ const customerOptions = computed(() => customers.value.map(c => ({
 })))
 
 function handleCustomerSelect(id: string | null) {
+  if (saving.value || pageLoading.value || isReadOnly.value) return
   customerId.value = id
   vatTreatmentId.value = null
 }
@@ -238,14 +274,16 @@ const discountTypeOptions = computed(() => [
 ])
 
 function addLine() {
+  if (saving.value || pageLoading.value || isReadOnly.value) return
   lines.value.push(emptyLine())
 }
 
 function removeLine(i: number) {
-  if (lines.value.length > 1) lines.value.splice(i, 1)
+  if (!saving.value && !pageLoading.value && !isReadOnly.value && lines.value.length > 1) lines.value.splice(i, 1)
 }
 
 function handleProductSelect(i: number, productId: string | null) {
+  if (saving.value || pageLoading.value || isReadOnly.value) return
   const line = lines.value[i]
   line.product_id = productId
   if (productId) {
@@ -266,6 +304,7 @@ const filteredTemplates = computed(() =>
 )
 
 function applyTemplate(template: DocumentTemplateRead) {
+  if (saving.value || pageLoading.value || isReadOnly.value) return
   lines.value = (template.lines ?? []).map(l => ({
     _key: nextLineKey(),
     product_id: null,
@@ -285,6 +324,7 @@ function applyTemplate(template: DocumentTemplateRead) {
 // ------------------------------------------------------------------ note template insert
 
 function insertNoteTemplate(body: string) {
+  if (saving.value || pageLoading.value || isReadOnly.value) return
   notes.value = notes.value ? `${notes.value}\n${body}` : body
   showNoteTemplateModal.value = false
 }
@@ -313,6 +353,7 @@ const contentBlocksByKind = computed(() => {
 })
 
 function selectContentBlock(kind: 'WARRANTY' | 'TERMS' | 'BANK' | 'PAYMENT_TERMS', id: string) {
+  if (saving.value || pageLoading.value || isReadOnly.value) return
   const block = contentBlocks.value.find(b => b.id === id)
   if (!block) return
   if (kind === 'WARRANTY') warrantyText.value = block.body
@@ -416,8 +457,9 @@ function currentFormState(): string {
 }
 
 const formDirty = computed(() => {
-  if (!isEdit.value || !existingQuote.value || cleanSnapshot.value === null) return false
+  if (cleanSnapshot.value === null) return false
   return currentFormState() !== cleanSnapshot.value
+    || JSON.stringify(pendingAppendices.value.map(item => item.file_id)) !== cleanAppendixSnapshot.value
 })
 
 function isDateDisabled(ts: number): boolean {
@@ -460,69 +502,235 @@ function buildWritePayload(): QuoteWrite | null {
     bank_text: bankText.value ?? undefined,
     payment_terms_text: paymentTermsText.value ?? undefined,
     lines: linesPayload,
+    appendix_file_ids: pendingAppendices.value.map(item => item.file_id),
+    ...(existingQuote.value ? { expected_appendix_version: existingQuote.value.appendix_version ?? 0 } : {}),
   }
 }
 
-async function handleSave() {
-  const payload = buildWritePayload()
-  if (!payload) {
-    message.error(t('quotes.validationError'))
-    return
-  }
+function recordSavedQuote(quote: QuoteRead): void {
+  existingQuote.value = quote
+  isEdit.value = true
+  savedAppendices.value = quote.appendices ?? []
+  pendingAppendices.value = savedAppendices.value.map(item => ({
+    file_id: item.file_id, owner_quote_id: item.owner_quote_id, source: item.source,
+    title_snapshot: item.title_snapshot, title: item.title, original_filename: item.original_filename,
+    sha256: item.sha256, size_bytes: item.size_bytes, page_count: item.page_count, is_archived: item.is_archived,
+  }))
+  cleanSnapshot.value = currentFormState()
+  cleanAppendixSnapshot.value = JSON.stringify(pendingAppendices.value.map(item => item.file_id))
+  appendixConflict.value = false
+}
+
+function isAppendixConflict(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 409
+    && typeof error.detail === 'object' && error.detail !== null
+    && 'detail' in error.detail && typeof (error.detail as { detail?: unknown }).detail === 'object'
+    && (error.detail as { detail: { code?: unknown } }).detail.code === 'QUOTE_APPENDIX_VERSION_CONFLICT'
+}
+
+async function saveQuote(options: { continueEditing?: boolean } = {}): Promise<QuoteRead | null> {
+  if (saving.value || pageLoading.value || appendixReloading.value) return null
+  const generation = routeGeneration
+  const operation = ++saveOperation
+  const quoteId = existingQuote.value?.id ?? null
   saving.value = true
   try {
-    if (isEdit.value && existingQuote.value) {
-      await store.updateQuote(existingQuote.value.id, payload)
-      message.success(t('quotes.updateSuccess'))
-    } else {
-      await store.createQuote(payload)
-      message.success(t('quotes.createSuccess'))
+    await appendixEditorRef.value?.waitForUpload?.()
+    if (generation !== routeGeneration || (quoteId && route.params.id !== quoteId)) return null
+    const payload = buildWritePayload()
+    if (!payload) {
+      message.error(t('quotes.validationError'))
+      return null
     }
-    router.push('/quotes')
+    let result: QuoteRead
+    if (isEdit.value && existingQuote.value) {
+      result = await store.updateQuote(existingQuote.value.id, payload)
+    } else {
+      result = await store.createQuote(payload)
+    }
+    if (generation !== routeGeneration || (quoteId && route.params.id !== quoteId)) return null
+    recordSavedQuote(result)
+    message.success(quoteId ? t('quotes.updateSuccess') : t('quotes.createSuccess'))
+    allowRouteDuringSave.value = true
+    if (options.continueEditing) {
+      if (route.params.id === 'new' || !route.params.id) await router.replace(`/quotes/${result.id}/edit`)
+      await appendixEditorRef.value?.reload()
+    } else {
+      await router.push('/quotes')
+    }
+    return result
   } catch (e: unknown) {
+    if (generation !== routeGeneration || (quoteId && route.params.id !== quoteId)) return null
+    if (isAppendixConflict(e)) appendixConflict.value = true
     message.error(e instanceof Error ? e.message : t('quotes.saveFailed'))
+    return null
   } finally {
-    saving.value = false
+    if (operation === saveOperation && generation === routeGeneration) {
+      allowRouteDuringSave.value = false
+      saving.value = false
+    }
+  }
+}
+
+async function handleSave() { await saveQuote() }
+async function handleSaveAndContinue() { await saveQuote({ continueEditing: true }) }
+
+async function reloadAppendices(): Promise<void> {
+  if (appendixReloading.value || saving.value || pageLoading.value) return
+  const quoteId = existingQuote.value?.id
+  if (!quoteId) return
+  const generation = routeGeneration
+  const routeIdentity = route.fullPath
+  const operation = ++appendixReloadOperation
+  appendixReloading.value = true
+  try {
+    await appendixEditorRef.value?.waitForUpload?.()
+    if (operation !== appendixReloadOperation || generation !== routeGeneration || route.fullPath !== routeIdentity || route.params.id !== quoteId) return
+    const quote = await store.fetchQuote(quoteId)
+    if (operation !== appendixReloadOperation || generation !== routeGeneration || route.fullPath !== routeIdentity || route.params.id !== quoteId) return
+    existingQuote.value = { ...existingQuote.value!, appendix_version: quote.appendix_version ?? 0 }
+    savedAppendices.value = quote.appendices ?? []
+    pendingAppendices.value = savedAppendices.value.map(item => ({
+      file_id: item.file_id, owner_quote_id: item.owner_quote_id, source: item.source,
+      title_snapshot: item.title_snapshot, title: item.title, original_filename: item.original_filename,
+      sha256: item.sha256, size_bytes: item.size_bytes, page_count: item.page_count, is_archived: item.is_archived,
+    }))
+    cleanAppendixSnapshot.value = JSON.stringify(pendingAppendices.value.map(item => item.file_id))
+    appendixConflict.value = false
+    await appendixEditorRef.value?.reload()
+  } catch (e: unknown) {
+    if (operation === appendixReloadOperation && generation === routeGeneration && route.fullPath === routeIdentity && route.params.id === quoteId) message.error(e instanceof Error ? e.message : t('quotes.saveFailed'))
+  } finally {
+    if (operation === appendixReloadOperation) appendixReloading.value = false
   }
 }
 
 // ------------------------------------------------------------------ status actions
 
 async function withDirtyCheck(): Promise<boolean> {
+  if (saving.value || appendixReloading.value) return false
+  // A later navigation/action owns the confirmation lifetime. A superseded
+  // Router guard must not leave a live dialog that can save after its caller
+  // has already been canceled.
+  invalidateDirtyCheck()
+  const checkGeneration = ++dirtyCheckGeneration
+  const generation = routeGeneration
+  const routeIdentity = route.fullPath
+  const quoteId = existingQuote.value?.id ?? null
+  const isCurrentCheck = () => checkGeneration === dirtyCheckGeneration
+    && generation === routeGeneration
+    && route.fullPath === routeIdentity
+    && (quoteId === null || route.params.id === quoteId)
+  await appendixEditorRef.value?.waitForUpload?.()
+  if (!isCurrentCheck()) return false
   if (!formDirty.value) return true
-  return new Promise<boolean>((resolve) => {
-    dialog.warning({
+  let confirmation: ReturnType<typeof dialog.warning> | undefined
+  const checkPromise = new Promise<boolean>((resolve) => {
+    let settled = false
+    const finish = (allow: boolean) => {
+      if (settled) return
+      settled = true
+      for (const active of activeDirtyConfirmations) {
+        if (active.finish === finish) activeDirtyConfirmations.delete(active)
+      }
+      resolve(allow)
+    }
+    confirmation = dialog.warning({
       title: t('quotes.unsavedChanges'),
       content: t('quotes.unsavedChangesContent'),
       positiveText: t('quotes.saveAndContinue'),
       negativeText: t('quotes.cancel'),
       onPositiveClick: async () => {
-        if (!existingQuote.value) { resolve(false); return }
-        const payload = buildWritePayload()
-        if (!payload) {
-          message.error(t('quotes.validationError'))
-          resolve(false)
-          return
-        }
+        if (!isCurrentCheck()) { finish(false); return false }
+        if (saving.value) return false
         saving.value = true
+        if (confirmation) {
+          confirmation.loading = true
+          confirmation.negativeButtonProps = { disabled: true }
+        }
+        const closeAfterFailure = () => {
+          finish(false)
+          confirmation?.destroy()
+        }
+        const saveId = ++saveOperation
         try {
-          await store.updateQuote(existingQuote.value.id, payload)
-          cleanSnapshot.value = currentFormState()
-          resolve(true)
+          await appendixEditorRef.value?.waitForUpload?.()
+          if (!isCurrentCheck()) { closeAfterFailure(); return true }
+          const payload = buildWritePayload()
+          if (!payload) {
+            message.error(t('quotes.validationError'))
+            closeAfterFailure()
+            return true
+          }
+          if (!quoteId) dirtyConfirmationCreatingNewQuote = true
+          const quote = quoteId
+            ? await store.updateQuote(quoteId, payload)
+            : await store.createQuote(payload)
+          dirtyConfirmationCreatingNewQuote = false
+          if (!isCurrentCheck()) { finish(false); return false }
+          recordSavedQuote(quote)
+          if (!quoteId && newQuoteRouteNavigationInterrupted) {
+            newQuoteRouteNavigationInterrupted = false
+            allowRouteDuringSave.value = true
+            await router.replace(`/quotes/${quote.id}/edit`)
+            allowRouteDuringSave.value = false
+            saving.value = false
+            finish(false)
+            return true
+          }
+          finish(true)
+          return true
         } catch (e: unknown) {
+          dirtyConfirmationCreatingNewQuote = false
+          if (!isCurrentCheck()) { closeAfterFailure(); return true }
+          if (isAppendixConflict(e)) appendixConflict.value = true
           message.error(e instanceof Error ? e.message : t('quotes.saveFailed'))
-          resolve(false)
+          closeAfterFailure()
+          return true
         } finally {
-          saving.value = false
+          if (saveId === saveOperation && isCurrentCheck()) {
+            saving.value = false
+            if (confirmation) {
+              confirmation.loading = false
+              confirmation.negativeButtonProps = { disabled: false }
+            }
+          }
         }
       },
-      onNegativeClick: () => resolve(false),
-      onClose: () => resolve(false),
-      onMaskClick: () => resolve(false),
-      onEsc: () => resolve(false),
+      closable: false,
+      closeOnEsc: false,
+      maskClosable: false,
+      onNegativeClick: () => saving.value ? false : finish(false),
+      onClose: () => finish(false),
+      onMaskClick: () => finish(false),
+      onEsc: () => finish(false),
     })
+    if (confirmation) activeDirtyConfirmations.add({ confirmation, finish })
   })
+  return checkPromise
 }
+
+function invalidateDirtyCheck(): void {
+  dirtyCheckGeneration += 1
+  for (const active of activeDirtyConfirmations) {
+    active.finish(false)
+    active.confirmation.destroy()
+  }
+  activeDirtyConfirmations.clear()
+}
+
+watch(() => route.fullPath, invalidateDirtyCheck, { flush: 'sync' })
+onBeforeUnmount(() => {
+  removeCreatedQuoteRouteRecovery()
+  newQuoteRouteNavigationInterrupted = false
+  dirtyConfirmationCreatingNewQuote = false
+  invalidateDirtyCheck()
+  ++appendixReloadOperation
+  appendixReloading.value = false
+})
+
+onBeforeRouteLeave(async () => saving.value ? allowRouteDuringSave.value : await withDirtyCheck())
+onBeforeRouteUpdate(async (to, from) => saving.value ? allowRouteDuringSave.value : to.params.id === from.params.id || await withDirtyCheck())
 
 async function handleStatusTransition(newStatus: 'SENT' | 'ACCEPTED' | 'REJECTED' | 'DRAFT') {
   if (!existingQuote.value) return
@@ -603,6 +811,13 @@ async function confirmReactivate() {
 
 function populateFromQuote(q: QuoteRead) {
   existingQuote.value = q
+  savedAppendices.value = q.appendices ?? []
+  pendingAppendices.value = savedAppendices.value.map(item => ({
+    file_id: item.file_id, owner_quote_id: item.owner_quote_id, source: item.source,
+    title_snapshot: item.title_snapshot, title: item.title, original_filename: item.original_filename,
+    sha256: item.sha256, size_bytes: item.size_bytes, page_count: item.page_count, is_archived: item.is_archived,
+  }))
+  appendixConflict.value = false
   customerId.value = q.customer_id
   referenceNumber.value = q.reference_number ?? null
   quoteDate.value = q.quote_date
@@ -632,10 +847,16 @@ function populateFromQuote(q: QuoteRead) {
     vat_rate_id: l.vat_rate_id ?? null,
   }))
   cleanSnapshot.value = currentFormState()
+  cleanAppendixSnapshot.value = JSON.stringify(pendingAppendices.value.map(item => item.file_id))
 }
 
 let routeGeneration = 0
 function resetRouteState(): void {
+  ++saveOperation
+  ++appendixReloadOperation
+  appendixReloading.value = false
+  saving.value = false
+  allowRouteDuringSave.value = false
   ++previewVersion
   if (previewTimer) clearTimeout(previewTimer)
   previewLoading.value = false
@@ -647,13 +868,23 @@ function resetRouteState(): void {
   receiptModeLockCommitted.value = false
   advanceCardSignal.value = 0
   pageError.value = null
+  downloadingPdf.value = false
   preview.value = null
   previewError.value = null
+  previewShow.value = false
+  previewSrc.value = null
+  sendDialogShow.value = false
   cleanSnapshot.value = null
+  cleanAppendixSnapshot.value = null
+  savedAppendices.value = []
+  pendingAppendices.value = []
+  appendixConflict.value = false
   lines.value = [emptyLine()]
 }
 async function loadRoute(): Promise<void> {
   const generation = ++routeGeneration
+  const routeIdentity = route.fullPath
+  const isCurrentLoad = () => generation === routeGeneration && route.fullPath === routeIdentity
   resetRouteState()
   pageLoading.value = true
   try {
@@ -664,32 +895,39 @@ async function loadRoute(): Promise<void> {
       invoicesStore.fetchProductOptions().then(opts => { productOptions.value = opts }),
     ])
 
+    if (!isCurrentLoad()) return
+
     const id = route.params.id as string | undefined
     if (id && id !== 'new') {
       isEdit.value = true
       const q = await store.fetchQuote(id)
-      if (generation !== routeGeneration || route.params.id !== id) return
+      if (!isCurrentLoad() || route.params.id !== id) return
       populateFromQuote(q)
       await loadInitialDocumentChain()
-      if (generation !== routeGeneration || route.params.id !== id) return
+      if (!isCurrentLoad() || route.params.id !== id) return
       if (!customers.value.find(c => c.id === q.customer_id)) {
         const custRes = await get<CustomerRead>(`/api/v1/customers/${q.customer_id}`)
-        if (generation !== routeGeneration || route.params.id !== id) return
+        if (!isCurrentLoad() || route.params.id !== id) return
         customers.value = [custRes, ...customers.value]
       }
     } else {
       // New quote – pre-fill valid_until from company default, then apply default content blocks
       try {
         const vd = await get<{ default_valid_days: number }>('/api/v1/settings/quote-default-valid-days')
+        if (!isCurrentLoad()) return
         if (vd?.default_valid_days) {
           const d = new Date()
           d.setDate(d.getDate() + vd.default_valid_days)
           validUntil.value = localDateStr(d)
         }
       } catch {
+        if (!isCurrentLoad()) return
         // leave validUntil null; backend will fill in its own default on save
       }
+      if (!isCurrentLoad()) return
       applyDefaultContentBlocks()
+      cleanSnapshot.value = currentFormState()
+      cleanAppendixSnapshot.value = JSON.stringify(pendingAppendices.value.map(item => item.file_id))
     }
   } catch (e: unknown) {
     if (generation === routeGeneration) pageError.value = e instanceof Error ? e.message : String(e)
@@ -748,18 +986,28 @@ const pdfLocaleOptions = computed(() => [
 ])
 
 async function handleDownloadPdf(locale?: 'en' | 'zh') {
+  const startingGeneration = routeGeneration
+  if (!(await withDirtyCheck())) return
+  if (startingGeneration !== routeGeneration) return
   if (!existingQuote.value) return
+  const generation = routeGeneration
+  const quoteId = existingQuote.value.id
+  const quoteNumber = existingQuote.value.quote_number
   downloadingPdf.value = true
   try {
-    const id = existingQuote.value.id
     const url = locale
-      ? `/api/v1/quotes/${id}/pdf?locale=${locale}`
-      : `/api/v1/quotes/${id}/pdf`
-    await downloadBlob(url, `${existingQuote.value.quote_number}.pdf`)
+      ? `/api/v1/quotes/${quoteId}/pdf?locale=${locale}`
+      : `/api/v1/quotes/${quoteId}/pdf`
+    const { blob, filename } = await fetchBlob(url, `${quoteNumber}.pdf`)
+    if (generation !== routeGeneration || route.params.id !== quoteId) return
+    saveBlob(blob, filename)
   } catch (e: unknown) {
-    message.error(e instanceof Error ? e.message : t('pdf.downloadFailed'))
+    if (generation === routeGeneration && route.params.id === quoteId) {
+      const errorText = await quotePdfErrorMessage(e, quoteId, t) ?? (e instanceof Error ? e.message : t('pdf.downloadFailed'))
+      if (generation === routeGeneration && route.params.id === quoteId) message.error(errorText)
+    }
   } finally {
-    downloadingPdf.value = false
+    if (generation === routeGeneration && route.params.id === quoteId) downloadingPdf.value = false
   }
 }
 
@@ -776,7 +1024,10 @@ const previewShow = ref(false)
 const previewSrc = ref<string | null>(null)
 const previewFallback = ref('quote.pdf')
 
-function openPreview(locale?: 'en' | 'zh') {
+async function openPreview(locale?: 'en' | 'zh') {
+  const generation = routeGeneration
+  if (!(await withDirtyCheck())) return
+  if (generation !== routeGeneration) return
   if (!existingQuote.value) return
   const id = existingQuote.value.id
   previewSrc.value = locale
@@ -797,7 +1048,11 @@ function handlePreviewLocaleSelect(key: string) {
 // ---- Send dialog ----
 const sendDialogShow = ref(false)
 
-function openSendDialog() {
+async function openSendDialog() {
+  const generation = routeGeneration
+  if (!(await withDirtyCheck())) return
+  if (generation !== routeGeneration) return
+  if (!existingQuote.value) return
   sendDialogShow.value = true
 }
 
@@ -1014,7 +1269,7 @@ function handleReceiptSent(log: EmailLogRead) {
               {{ pageError }}
             </n-alert>
 
-            <n-form label-placement="top" :disabled="isReadOnly">
+            <n-form label-placement="top" :disabled="isReadOnly || saving || pageLoading">
 
               <!-- Quote header -->
               <n-card :title="t('quotes.headerSection')" style="margin-bottom: 16px">
@@ -1137,6 +1392,7 @@ function handleReceiptSent(log: EmailLogRead) {
                       size="small"
                       secondary
                       style="margin-top: 4px"
+                      :disabled="saving || pageLoading"
                       @click="showNoteTemplateModal = true"
                     >
                       {{ t('quotes.insertNoteTemplate') }}
@@ -1220,6 +1476,7 @@ function handleReceiptSent(log: EmailLogRead) {
                     v-if="!isReadOnly && filteredTemplates.length > 0"
                     size="small"
                     secondary
+                  :disabled="saving || pageLoading"
                     @click="showTemplateModal = true"
                   >
                     <template #icon><n-icon><DocumentTextOutline /></n-icon></template>
@@ -1323,6 +1580,7 @@ function handleReceiptSent(log: EmailLogRead) {
                   v-if="!isReadOnly"
                   dashed
                   block
+                  :disabled="saving || pageLoading"
                   style="margin-top: 12px"
                   @click="addLine"
                 >
@@ -1373,6 +1631,19 @@ function handleReceiptSent(log: EmailLogRead) {
 
             </n-form>
 
+            <n-alert v-if="appendixConflict" type="warning" style="margin-bottom: 12px">
+              {{ t('quotes.appendices.versionConflict') }}
+              <n-button text type="primary" :disabled="appendixReloading || saving || pageLoading" :loading="appendixReloading" @click="reloadAppendices">{{ t('quotes.appendices.reload') }}</n-button>
+            </n-alert>
+            <QuoteAppendixEditor
+              ref="appendixEditorRef"
+              :quote-id="existingQuote?.id ?? null"
+              :appendices="savedAppendices"
+              :readonly="isReadOnly"
+              :disabled="saving || pageLoading || appendixReloading"
+              @change="pendingAppendices = $event"
+            />
+
             <QuotePaymentPanel
               v-if="isEdit && existingQuote && showReceiptContinuation"
               :quote-id="existingQuote.id"
@@ -1397,9 +1668,16 @@ function handleReceiptSent(log: EmailLogRead) {
             <n-space justify="end" style="margin-bottom: 24px">
               <n-button @click="router.push('/quotes')">{{ t('quotes.backToList') }}</n-button>
               <n-button
+                v-if="!isEdit"
+                :loading="saving"
+                :disabled="saving || pageLoading || appendixReloading"
+                @click="handleSaveAndContinue"
+              >{{ t('quotes.appendices.saveAndContinue') }}</n-button>
+              <n-button
                 v-if="!isReadOnly"
                 type="primary"
                 :loading="saving"
+                :disabled="saving || pageLoading || appendixReloading"
                 @click="handleSave"
               >
                 {{ isEdit ? t('quotes.save') : t('quotes.create') }}
@@ -1505,6 +1783,7 @@ function handleReceiptSent(log: EmailLogRead) {
       v-model:show="previewShow"
       :src="previewSrc"
       :fallback-filename="previewFallback"
+      :quote-id="existingQuote?.id"
     />
   </div>
 </template>

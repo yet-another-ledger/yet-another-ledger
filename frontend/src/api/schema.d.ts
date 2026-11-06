@@ -1379,6 +1379,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pdf-library/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pdf Appendix Limits */
+        get: operations["pdf_appendix_limits_api_v1_pdf_library_limits_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pdf-library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pdf Library */
+        get: operations["list_pdf_library_api_v1_pdf_library_get"];
+        put?: never;
+        /** Upload Pdf Library File */
+        post: operations["upload_pdf_library_file_api_v1_pdf_library_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pdf-library/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Pdf Library File */
+        patch: operations["update_pdf_library_file_api_v1_pdf_library__file_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/pdf-files/{file_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Pdf Appendix Content */
+        get: operations["get_pdf_appendix_content_api_v1_pdf_files__file_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{quote_id}/appendix-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Quote Appendix Files */
+        get: operations["list_quote_appendix_files_api_v1_quotes__quote_id__appendix_files_get"];
+        put?: never;
+        /** Upload Quote Appendix File */
+        post: operations["upload_quote_appendix_file_api_v1_quotes__quote_id__appendix_files_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices/{invoice_id}/pdf": {
         parameters: {
             query?: never;
@@ -8747,6 +8834,14 @@ export interface components {
             lines: components["schemas"]["InvoiceLineInput"][];
         };
         /**
+         * LegacyDetailErrorResponse
+         * @description Existing Quote routes return plain string details for legacy errors.
+         */
+        LegacyDetailErrorResponse: {
+            /** Detail */
+            detail: string;
+        };
+        /**
          * LoginRequest
          * @description Body for ``POST /auth/login``.
          */
@@ -9518,6 +9613,84 @@ export interface components {
             /** Base Gross Amount */
             base_gross_amount: string;
         };
+        /** PdfAppendixErrorDetail */
+        PdfAppendixErrorDetail: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** File Id */
+            file_id?: string | null;
+        };
+        /** PdfAppendixErrorResponse */
+        PdfAppendixErrorResponse: {
+            detail: components["schemas"]["PdfAppendixErrorDetail"];
+        };
+        /** PdfAppendixFileListResponse */
+        PdfAppendixFileListResponse: {
+            /** Items */
+            items: components["schemas"]["PdfAppendixFileRead"][];
+            /** Total */
+            total: number;
+        };
+        /** PdfAppendixFileRead */
+        PdfAppendixFileRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Owner Quote Id */
+            owner_quote_id: string | null;
+            /** Title */
+            title: string;
+            /** Original Filename */
+            original_filename: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Page Count */
+            page_count: number;
+            /** Is Archived */
+            is_archived: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            source: components["schemas"]["PdfAppendixSource"];
+        };
+        /** PdfAppendixLimitsRead */
+        PdfAppendixLimitsRead: {
+            /** Max Appendix File Bytes */
+            max_appendix_file_bytes: number;
+            /** Max Quote Appendices */
+            max_quote_appendices: number;
+            /** Max Quote Appendix Input Bytes */
+            max_quote_appendix_input_bytes: number;
+            /** Max Quote Pdf Bytes */
+            max_quote_pdf_bytes: number;
+            /** Max Quote Pdf Pages */
+            max_quote_pdf_pages: number;
+        };
+        /**
+         * PdfAppendixSource
+         * @enum {string}
+         */
+        PdfAppendixSource: "LIBRARY" | "QUOTE";
+        /** PdfLibraryFileUpdate */
+        PdfLibraryFileUpdate: {
+            /** Title */
+            title?: string | null;
+            /** Is Archived */
+            is_archived?: boolean | null;
+        };
         /**
          * PlCostBasis
          * @description Source amount used to recognize an Expense in profit and loss.
@@ -9973,6 +10146,38 @@ export interface components {
             remaining_base_vat_amount: string;
             /** Remaining Base Gross Amount */
             remaining_base_gross_amount: string;
+        };
+        /** QuoteAppendixRead */
+        QuoteAppendixRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * File Id
+             * Format: uuid
+             */
+            file_id: string;
+            /** Owner Quote Id */
+            owner_quote_id: string | null;
+            source: components["schemas"]["PdfAppendixSource"];
+            /** Sort Order */
+            sort_order: number;
+            /** Title Snapshot */
+            title_snapshot: string;
+            /** Title */
+            title: string;
+            /** Original Filename */
+            original_filename: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Page Count */
+            page_count: number;
+            /** Is Archived */
+            is_archived: boolean;
         };
         /**
          * QuoteCalculationRead
@@ -10443,6 +10648,13 @@ export interface components {
             payment_terms_text?: string | null;
             /** Creator Id */
             creator_id?: string | null;
+            /** Appendices */
+            appendices?: components["schemas"]["QuoteAppendixRead"][];
+            /**
+             * Appendix Version
+             * @default 0
+             */
+            appendix_version?: number;
             /**
              * Lines
              * @default []
@@ -10565,6 +10777,10 @@ export interface components {
              * @description At least 1 line required.
              */
             lines: components["schemas"]["InvoiceLineInput"][];
+            /** Appendix File Ids */
+            appendix_file_ids?: string[];
+            /** Expected Appendix Version */
+            expected_appendix_version?: number;
         };
         /**
          * ReceiptInboxAIState
@@ -14958,6 +15174,319 @@ export interface operations {
             };
         };
     };
+    pdf_appendix_limits_api_v1_pdf_library_limits_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixLimitsRead"];
+                };
+            };
+        };
+    };
+    list_pdf_library_api_v1_pdf_library_get: {
+        parameters: {
+            query?: {
+                search?: string | null;
+                include_archived?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixFileListResponse"];
+                };
+            };
+            /** @description Invalid PDF material request. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+        };
+    };
+    upload_pdf_library_file_api_v1_pdf_library_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                    title?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixFileRead"];
+                };
+            };
+            /** @description PDF material exceeds a configured limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Invalid PDF material request. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description PDF material could not be saved. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+        };
+    };
+    update_pdf_library_file_api_v1_pdf_library__file_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PdfLibraryFileUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixFileRead"];
+                };
+            };
+            /** @description PDF material not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Invalid PDF material request. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+        };
+    };
+    get_pdf_appendix_content_api_v1_pdf_files__file_id__content_get: {
+        parameters: {
+            query?: {
+                disposition?: "inline" | "attachment";
+            };
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Original PDF file. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
+                };
+            };
+            /** @description PDF material not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Invalid PDF material request. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+        };
+    };
+    list_quote_appendix_files_api_v1_quotes__quote_id__appendix_files_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixFileListResponse"];
+                };
+            };
+            /** @description PDF material not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Invalid Quote appendix picker request. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_quote_appendix_file_api_v1_quotes__quote_id__appendix_files_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                quote_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                    title?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixFileRead"];
+                };
+            };
+            /** @description PDF material not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Accepted Quote is read only. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description PDF material exceeds a configured limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Invalid PDF material request. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description PDF material could not be saved. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+        };
+    };
     download_invoice_pdf_api_v1_invoices__invoice_id__pdf_get: {
         parameters: {
             query?: {
@@ -15208,13 +15737,31 @@ export interface operations {
                     "application/pdf": unknown;
                 };
             };
-            /** @description Validation Error */
+            /** @description Quote PDF exceeds a byte limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Quote PDF exceeds a page/count limit. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Quote PDF could not be composed safely. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
                 };
             };
         };
@@ -15347,13 +15894,40 @@ export interface operations {
                     "application/json": components["schemas"]["QuoteRead"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid Quote or appendix request. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["LegacyDetailErrorResponse"];
+                };
+            };
+            /** @description Invalid Quote or appendix request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["LegacyDetailErrorResponse"];
+                };
+            };
+            /** @description Appendix input limit exceeded. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Invalid Quote or appendix request. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["LegacyDetailErrorResponse"] | components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -15444,13 +16018,40 @@ export interface operations {
                     "application/json": components["schemas"]["QuoteRead"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid Quote or appendix request. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["LegacyDetailErrorResponse"];
+                };
+            };
+            /** @description Invalid Quote or appendix request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["LegacyDetailErrorResponse"];
+                };
+            };
+            /** @description Appendix input limit exceeded. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Invalid Quote or appendix request. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"] | components["schemas"]["LegacyDetailErrorResponse"] | components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -15710,13 +16311,31 @@ export interface operations {
                     "application/json": components["schemas"]["EmailLogRead"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Quote PDF exceeds a byte limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Quote PDF exceeds a page/count limit. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
+                };
+            };
+            /** @description Quote PDF could not be composed safely. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PdfAppendixErrorResponse"];
                 };
             };
         };

@@ -6,12 +6,13 @@ Self-hosted invoicing and small-business administration for freelancers and smal
 
 Built with **FastAPI + Vue 3 + PostgreSQL**.
 
-> **Status — pre-1.0 (`v0.10.0`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and possible breaking changes before `v1.0`.
+> **Status — pre-1.0 (`v0.11.0`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and possible breaking changes before `v1.0`.
 
 ## Features
 
 - **Invoices** — Standard, Advance, Final and source-bound Credit Notes; backend pricing, concurrency-safe numbering, independent lifecycle/settlement/credit states, and an auditable document chain.
 - **Quotes** — reusable content blocks/templates, auto-expiry, and an immutable choice between direct invoicing, receipt-only deposits, or formal staged Advance/Final invoicing.
+- **Quote PDF appendices (M17)** — keep reusable static PDFs in the Content Library or upload files to one saved Quote, choose and order them manually, and preview, download or email a single combined PDF. The author completed the recorded walkthrough scope on 2026-11-06.
 - **Editing and reuse** — audited revisions for eligible undelivered, unpaid Standard Invoices, retaining SENT, the original number, unchanged tax/identity snapshots and historical PDFs; drag-to-reorder lines in Invoice, Quote and Estimate editors; duplicate a Quote into an independent draft with a fresh number and dates.
 - **Cost estimation → quote** — internal margin-based costing that never leaks cost/margin to the customer.
 - **Payments & refunds** — partial payments, Quote deposits, automatic settlement states, Credit-linked Refunds, and Refund Confirmations.
@@ -58,7 +59,7 @@ Open **http://localhost:8000**, register the first (owner) account, and set up T
 
 To stop: `docker compose down` (add `-v` to also drop the database volume).
 
-> `:latest` tracks the newest non-prerelease release; pin this release by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.10.0` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
+> `:latest` tracks the newest non-prerelease release; pin this release by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.11.0` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
 
 ## Configuration
 
@@ -88,6 +89,18 @@ For a copy failure, check the stable error code: `IMAP_CONFIGURATION_FAILED` mea
 
 SMTP test failures keep the generic `SMTP_SEND_FAILED` API response. Server logs add fixed categories such as `SMTP_AUTH_FAILED`, `SMTP_SENDER_REJECTED`, `SMTP_RECIPIENT_REJECTED`, `SMTP_TIMEOUT`, `SMTP_TLS_FAILED` and `SMTP_CONNECTION_FAILED`, without logging provider text or credentials. Use the category to check the corresponding configuration before another manual test.
 
+### Quote PDF appendices (M17)
+
+Open **Content Library → PDF Materials** to upload company-private reusable static PDFs, search by title, preview/download originals, edit titles, and archive or restore library entries. In a saved Quote, use **PDF appendices** to select shared files or upload Quote-specific files, reorder the list, and save it with the Quote. New Quotes must first use **Save and continue** to create the Quote before a Quote-specific upload is available. A Quote-specific upload is retained for that Quote even if its pending selection is later abandoned; reopen the Quote and select it from that Quote's own-file list if needed. Removing an item from the saved selection does not delete its original.
+
+Quote preview, download, and email use the same assembled PDF: the quotation first, followed by selected originals in saved order. Original static page content, dimensions, and orientation are retained; originals are not translated, rasterized, or rewritten. Replacing a library file means uploading another record; archive/restore and title changes do not rewrite existing Quote selections. Accepted Quotes remain viewable and downloadable, but their selection is read-only. Duplicated Quotes start without appendices, and conversion does not copy appendices to an Invoice.
+
+The default typed server limits are 10 MiB per upload, 10 files per Quote, 15 MiB combined selected inputs, 15 MiB assembled output, and 200 total pages including the quotation. Deployments can override the corresponding typed settings (`MAX_APPENDIX_FILE_BYTES`, `MAX_QUOTE_APPENDICES`, `MAX_QUOTE_APPENDIX_INPUT_BYTES`, `MAX_QUOTE_PDF_BYTES`, `MAX_QUOTE_PDF_PAGES`). Only static, unencrypted PDFs without signatures or fillable forms are accepted. Unsupported active content and unsafe links are rejected or removed. A successful response is newly serialized, so combined PDFs need not be byte-identical between separate requests. Email encoding increases attachment size, and a mail provider may impose a smaller limit.
+
+Appendix originals and their metadata are stored transactionally in PostgreSQL (`BYTEA`), not in `STORAGE_DIR`. Include the database in backup and restore procedures; a storage-volume-only backup does not cover them. The existing formal Invoice/Refund `DocumentArtifact` history is unchanged: M17 does not retain exact historical outgoing Quote PDFs or freeze the quotation body.
+
+When upgrading from v0.10.0, back up PostgreSQL and the existing receipt storage before starting the new image. The normal Compose migration service applies revisions `0053` and `0054`. Existing Quotes start with an empty appendix list. If you explicitly set `APP_VERSION` in `.env`, update it to `0.11.0`.
+
 ## Development
 
 Run the full dev stack (app + Postgres, with the dev override) from source:
@@ -100,9 +113,11 @@ Backend lives in `backend/` (`uv run ...`), frontend in `frontend/` (`npm run ..
 
 ## Roadmap
 
-M0–M14 are complete. **M15 remains in development and was paused by the author on 2026-10-24 to prioritize other work**; it has not been accepted. Its implementation and walkthrough fixes are preserved on `wip/m15-agent-accounting-paused`, outside `main`. M15 covers scoped Agent/MCP receipt intake and customer, quote, and Standard Invoice draft tools; the existing M14 inbox and AI extraction remain independent. No milestone is currently active; the author selects the next work, and M15 must not resume automatically. See the [M15 status and resume checkpoint](docs/plan/milestones/M15.md), [roadmap](docs/plan/roadmap.md), and [M14](docs/plan/milestones/M14.md).
+M0–M14 are complete, and M16/M17 are accepted within their recorded scopes. **The author resumed evaluation of existing M15 functionality on 2026-11-06**: integrate current main into `wip/m15-agent-accounting-paused`, then continue the walkthrough from 3/6 quote preparation. Acceptance and any redesign remain pending. Agent/MCP implementation stays on the M15 branch, outside main; the inbox and AI extraction continue to use existing services. See the [M15 checkpoint](docs/plan/milestones/M15.md) and [roadmap](docs/plan/roadmap.md).
 
-The [M16 design](docs/plan/milestones/M16.md) was agreed on 2026-10-30; implementation has not started. Nine atomic steps cover external sales bookkeeping, VAT/P&L separation, annual battery private-use adjustment and the incorporated SI3 mileage/profit breakdown. These are planned capabilities, not shipped `main` features, and do not resume M15.
+The author accepted [M16](docs/plan/milestones/M16.md) on 2026-11-01 on its recorded representative walkthrough scope. External sales bookkeeping, VAT/P&L separation, annual battery private-use adjustment and the incorporated SI3 mileage/profit breakdown are delivered; skipped/unretested paths and known carryovers remain explicitly recorded.
+
+The [M17 Quote PDF appendices design](docs/plan/milestones/M17.md) was agreed and recorded on 2026-11-04: a shared library and Quote-specific uploads, manual ordered selection, and one merged output for preview/download/email. All six implementation steps passed local gates and independent review. The author walkthrough was completed on 2026-11-06 within the recorded scope. The walkthrough scope and omissions are recorded in the M17 plan. M15 evaluation resumes separately on 2026-11-06.
 
 SI1 (document ordering, Quote duplication and server-side Sent copies) was accepted on 2026-10-25 on a representative walkthrough scope; unperformed mail variants and failure paths remain explicitly recorded with automated coverage. See the [SI1 plan and acceptance](docs/plan/improvements/SI1.md).
 

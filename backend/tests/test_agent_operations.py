@@ -9,7 +9,6 @@ from typing import Any
 
 import pytest
 from pydantic import BaseModel, ValidationError
-from pydantic.fields import PydanticUndefined
 
 from jai.models._enums import DiscountType, InvoiceStatus, InvoiceTaxMode, QuoteStatus
 from jai.schemas.agent_tools import QuoteToolSnapshot, ReceiptSubmissionSnapshot
@@ -76,18 +75,18 @@ def test_quote_and_invoice_write_python_inputs_have_stable_date_digests(
         ],
     }
     write = model.model_validate(payload)
-    python_arguments = write.model_dump(mode="python")
+    python_arguments = write.model_dump(mode="python", exclude_unset=True)
 
     assert isinstance(python_arguments[date_field], date)
     assert isinstance(python_arguments["tax_mode"], InvoiceTaxMode)
     assert canonical_argument_digest(python_arguments) == canonical_argument_digest(
-        write.model_dump(mode="python")
+        write.model_dump(mode="python", exclude_unset=True)
     )
     changed_payload = dict(python_arguments)
     changed_payload[date_field] = date(2026, 10, 1)
     changed_date = model.model_validate(changed_payload)
     assert canonical_argument_digest(python_arguments) != canonical_argument_digest(
-        changed_date.model_dump(mode="python")
+        changed_date.model_dump(mode="python", exclude_unset=True)
     )
 
 
@@ -462,7 +461,7 @@ def _required_payload(model: type[BaseModel]) -> dict[str, Any]:
 
     values: dict[str, Any] = {}
     for name, field in model.model_fields.items():
-        if field.default is not PydanticUndefined:
+        if not field.is_required():
             continue
         annotation = field.annotation
         if isinstance(annotation, type) and issubclass(annotation, BaseModel):

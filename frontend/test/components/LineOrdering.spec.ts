@@ -24,7 +24,7 @@ vi.mock('naive-ui', () => ({
   NAlert: ui.box, NButton: ui.button, NCard: ui.box, NDatePicker: ui.input, NDivider: ui.box, NDropdown: ui.box,
   NForm: ui.box, NFormItem: ui.box, NGrid: ui.box, NGi: ui.box, NIcon: ui.box, NInput: ui.input, NInputNumber: ui.input,
   NList: ui.box, NListItem: ui.box, NModal: ui.box, NSpace: ui.box, NSelect: ui.select, NSpin: ui.box, NSwitch: ui.input,
-  NTag: ui.box, NText: ui.box, NThing: { props: ['title'], template: '<span data-template-title>{{ title }}</span>' }, NEmpty: ui.box,
+  NTag: ui.box, NText: ui.box, NThing: { props: ['title'], template: '<span data-template-title>{{ title }}</span>' }, NEmpty: ui.box, NUpload: ui.box,
 }))
 vi.mock('@vicons/ionicons5', () => ({ AddOutline: ui.box, TrashOutline: ui.box, DocumentTextOutline: ui.box, DownloadOutline: ui.box, MailOutline: ui.box, EyeOutline: ui.box }))
 import InvoiceEdit from '../../src/views/invoices/InvoiceEdit.vue'

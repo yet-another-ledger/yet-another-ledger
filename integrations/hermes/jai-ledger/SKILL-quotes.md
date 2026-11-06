@@ -23,6 +23,7 @@ If a tool is unavailable or JAI reports insufficient scope, explain that access 
 1. Resolve the customer with `search_customers` and, when needed, `get_customer`. Ask the user to clarify any plausible duplicate before choosing or creating a customer.
 2. Read saved catalog items, document templates, and VAT options from JAI. These are the source of truth. Ask the user for a missing customer, line, price, quantity, discount, tax treatment, or date. Never infer prices, discounts, VAT choices, or totals from names, receipts, general knowledge, or model calculations.
 3. Do not call preview or write tools until every field required by the complete `QuoteWrite` input is known, including customer, quote date, tax mode, and at least one complete line. Ask for clarification instead of creating a partial quote.
+   Omit `appendix_file_ids` and `expected_appendix_version` unless the user asks to change PDF appendices; omission preserves an existing selection. Never send `null` for either field. An explicit selection update needs known file IDs and the current `appendix_version` from `get_quote`; do not guess them.
 4. `preview_quote` returns JAI-calculated totals. Report those values as a preview; never calculate or adjust money values yourself.
 
 ## Create and edit

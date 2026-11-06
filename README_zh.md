@@ -6,12 +6,13 @@
 
 技术栈 **FastAPI + Vue 3 + PostgreSQL**。
 
-> **状态——1.0 前版本（`v0.10.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
+> **状态——1.0 前版本（`v0.11.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
 
 ## 功能
 
 - **发票** —— Standard、Advance、Final 以及绑定来源的 Credit Note；后端定价、并发安全编号、相互独立的生命周期/结算/贷记状态和可审计的单据链。
 - **报价** —— 可复用内容块/模板、到期自动失效，并可不可变地选择直接开票、仅收据定金或正式分阶段 Advance/Final 开票。
+- **报价 PDF 附录（M17）** —— 在内容资料库保存可复用静态 PDF，或上传到单个已保存报价，手动选择与排序，并在预览、下载或邮件中使用一份合并 PDF。作者于 2026-11-06 完成已记录范围的走查。
 - **编辑与复用** —— 对符合资格、未交付且未收款的 Standard Invoice 进行审计修订，保留 SENT、原编号、未修改的税务／身份快照及历史 PDF；Invoice、Quote、Estimate 编辑页支持明细拖动排序；Quote 可复制为独立新编号、新日期的草稿。
 - **成本核算 → 报价** —— 内部按 margin 反推卖价，成本/毛利绝不泄漏给客户。
 - **收付款与退款** —— 分次收款、Quote 定金、自动结算状态、关联 Credit 的 Refund，以及 Refund Confirmation。
@@ -57,7 +58,7 @@ docker compose up -d
 
 停止：`docker compose down`（加 `-v` 同时删除数据库卷）。
 
-> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.10.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
+> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.11.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
 
 ## 配置
 
@@ -87,6 +88,18 @@ SMTP 与 Sent 副本结果独立。复制失败时，SMTP 接受邮件仍代表�
 
 SMTP 测试失败仍返回通用的 `SMTP_SEND_FAILED` API 错误。服务端日志补充固定分类，例如 `SMTP_AUTH_FAILED`、`SMTP_SENDER_REJECTED`、`SMTP_RECIPIENT_REJECTED`、`SMTP_TIMEOUT`、`SMTP_TLS_FAILED` 和 `SMTP_CONNECTION_FAILED`，不记录供应商原文或凭据。再次手动测试前，可按分类核对相应配置。
 
+### 报价 PDF 附录（M17）
+
+打开 **内容库 → PDF 资料**，可上传公司私有的可复用静态 PDF，按标题搜索、预览／下载原件、修改标题，以及归档或恢复资料。在已保存的报价中，使用 **PDF 附录** 选择共享文件或上传报价专用文件、调整顺序并随报价保存。新报价必须先使用**保存并继续**创建报价，之后才能上传报价专用文件。即使之后放弃尚未保存的选择，报价专用上传仍属于该报价；如需使用，重新打开报价并从该报价专用文件列表中选入。移除已保存清单中的项目不会删除原件。
+
+报价预览、下载和邮件使用同一份组合 PDF：先放报价正文，再按已保存顺序附上原件。保留原静态页面内容、尺寸与方向；原件不会翻译、栅格化或改写。替换资料库文件需上传新记录；归档／恢复和修改标题不会改写既有报价选择。已接受报价仍可查看和下载，但选择清单只读。复制报价不带附录，转换也不会将附录复制到 Invoice。
+
+服务器默认的类型化限制为：单次上传 10 MiB、每个报价 10 个文件、所选原件合计 15 MiB、组合输出 15 MiB、总页数（含报价正文）200 页。部署可通过对应的类型化设置覆盖：`MAX_APPENDIX_FILE_BYTES`、`MAX_QUOTE_APPENDICES`、`MAX_QUOTE_APPENDIX_INPUT_BYTES`、`MAX_QUOTE_PDF_BYTES`、`MAX_QUOTE_PDF_PAGES`。仅接受无加密、无签名、无可填写表单的静态 PDF。系统会拒绝或移除不支持的活动内容及不安全链接。组合文件会重新序列化，因此不同请求生成的 PDF 不保证字节完全相同。邮件编码会增大附件，邮件服务商也可能设有更小上限。
+
+附录原件及其元数据通过事务存储在 PostgreSQL（`BYTEA`），不存入 `STORAGE_DIR`。备份和恢复流程必须包含数据库；只备份存储卷并不包含这些原件。既有正式 Invoice／Refund `DocumentArtifact` 历史保持不变：M17 不会留存精确的历史报价邮件 PDF，也不会冻结报价正文。
+
+从 v0.10.0 升级时，请先备份 PostgreSQL 和现有票据文件存储，再启动新镜像。正常 Compose 迁移服务会应用 `0053` 和 `0054`。既有报价的附录清单初始为空。如果在 `.env` 中显式设置了 `APP_VERSION`，请更新为 `0.11.0`。
+
 ## 开发
 
 从源码起完整开发栈（app + Postgres，带 dev override）：
@@ -99,9 +112,11 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 路线图
 
-M0–M14 已完成。**M15 仍在开发中，作者于 2026-10-24 决定暂缓，优先开展其他工作**；尚未验收。实现与走查修复保存在 `wip/m15-agent-accounting-paused` 分支，不属于 `main` 的功能。M15 范围为具备 scope 的 Agent/MCP 收据接入及客户、报价、普通发票草稿工具；现有 M14 收件箱与 AI 提取保持独立。当前没有活动里程碑，后续工作由作者指定，不自动恢复 M15。详见 [M15 状态与恢复检查点](docs/plan/milestones/M15_zh.md)、[路线图](docs/plan/roadmap_zh.md)及 [M14](docs/plan/milestones/M14_zh.md)。
+M0–M14 已完成。M16／M17 已在记录范围内验收。**作者于 2026-11-06 恢复 M15 已有功能评估**：先将最新 main 合入 `wip/m15-agent-accounting-paused`，再从 3/6 报价准备继续走查；尚未验收或批准重设计。Agent/MCP 实现保留在 M15 分支，主线不包含该实现。现有收件箱与 AI 提取继续沿用既有服务。详见 [M15 检查点](docs/plan/milestones/M15_zh.md)和[路线图](docs/plan/roadmap_zh.md)。
 
-[M16 设计](docs/plan/milestones/M16_zh.md)已于 2026-10-30 确认，尚未开始实施：以九个原子步骤规划外部销售凭证记账、VAT／P&L 分离、储能年度私用调整及并入的 SI3 里程利润拆分。该设计不是 `main` 已上线功能，也不恢复 M15。
+作者已于 2026-11-01 按记录的代表性走查范围验收 [M16](docs/plan/milestones/M16_zh.md)，外部销售凭证记账、VAT／P&L 分离、储能年度私用调整及并入的 SI3 里程利润拆分已交付；跳过／未重测路径及已知遗留仍明确记录。
+
+作者于 2026-11-04 确认并记录 [M17 报价 PDF 附录设计](docs/plan/milestones/M17_zh.md)：共享资料库和报价专用上传、人工选择排序、预览／下载／邮件统一合并输出。六个实施步骤均通过本地门禁和独立审查。作者于 2026-11-06 完成已记录范围的走查。走查范围与跳过项见 M17 计划。M15 保持暂停。
 
 SI1（单据排序、Quote 复制和服务器侧 Sent 副本）已于2026-10-25按代表性走查范围验收；未实际执行的邮件类型和失败分支明确记录为自动化覆盖。参见 [SI1 计划与验收](docs/plan/improvements/SI1_zh.md)。
 

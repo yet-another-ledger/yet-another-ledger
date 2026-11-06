@@ -30,17 +30,21 @@ def test_m15_follows_released_main_with_one_unambiguous_head() -> None:
     assert len(scripts.get_heads()) == 1
     assert scripts.get_revision("0053").down_revision == "0052"
     assert scripts.get_revision("0054").down_revision == "0053"
+    assert scripts.get_revision("0055").down_revision == "0054"
+    assert scripts.get_revision("0056").down_revision == "0055"
+    assert scripts.get_heads() == ["0056"]
     revisions = list(scripts.walk_revisions())
     assert len(revisions) == len({revision.revision for revision in revisions})
 
 
 @pytest.mark.integration
-def test_main_0052_upgrades_to_m15_without_losing_existing_company() -> None:
+@pytest.mark.parametrize("main_head", ["0052", "0054"])
+def test_released_main_upgrades_to_m15_without_losing_existing_company(main_head: str) -> None:
     url = make_url(_alembic_url()).set(database=f"jai_test_m15_sync_{uuid.uuid4().hex[:12]}")
     isolated_url = url.render_as_string(hide_password=False)
     _ensure_database(isolated_url)
     try:
-        result = _run_alembic("upgrade", "0052", url=isolated_url)
+        result = _run_alembic("upgrade", main_head, url=isolated_url)
         assert result.returncode == 0, result.stderr
         company_id = uuid.uuid4()
         _query(
@@ -61,20 +65,21 @@ def test_main_0052_upgrades_to_m15_without_losing_existing_company() -> None:
             isolated_url,
             "SELECT to_regclass('agent_token') IS NOT NULL AS tokens, "
             "to_regclass('agent_operation') IS NOT NULL AS operations, "
-            "to_regclass('invoice_revision') IS NOT NULL AS revisions",
-        ) == [{"tokens": True, "operations": True, "revisions": True}]
+            "to_regclass('invoice_revision') IS NOT NULL AS revisions, "
+            "to_regclass('pdf_appendix_file') IS NOT NULL AS appendices",
+        ) == [{"tokens": True, "operations": True, "revisions": True, "appendices": True}]
     finally:
         _drop_database(isolated_url)
 
 
 def _install_legacy_m15_schema(url: str, legacy_head: str) -> None:
-    """Apply the original Agent DDL at 0043, then record its historical ID."""
+    """Apply Agent DDL to its historical base, then record its ambiguous ID."""
 
     def install(connection: Connection) -> None:
         with Operations.context(MigrationContext.configure(connection)):
-            names = ["0053_m15_agent_tokens.py"]
-            if legacy_head == "0045":
-                names.append("0054_m15_agent_operations.py")
+            names = ["0055_m15_agent_tokens.py"]
+            if legacy_head in {"0045", "0054"}:
+                names.append("0056_m15_agent_operations.py")
             for name in names:
                 spec = importlib.util.spec_from_file_location(
                     f"legacy_{name[:-3]}", BACKEND_DIR / "alembic" / "versions" / name
@@ -99,13 +104,14 @@ def _install_legacy_m15_schema(url: str, legacy_head: str) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("legacy_head", ["0044", "0045"])
+@pytest.mark.parametrize("legacy_head", ["0044", "0045", "0053", "0054"])
 def test_legacy_m15_history_is_refused_before_main_migrations(legacy_head: str) -> None:
     url = make_url(_alembic_url()).set(database=f"jai_test_m15_legacy_{uuid.uuid4().hex[:12]}")
     isolated_url = url.render_as_string(hide_password=False)
     _ensure_database(isolated_url)
     try:
-        result = _run_alembic("upgrade", "0043", url=isolated_url)
+        main_base = "0043" if legacy_head in {"0044", "0045"} else "0052"
+        result = _run_alembic("upgrade", main_base, url=isolated_url)
         assert result.returncode == 0, result.stderr
         _install_legacy_m15_schema(isolated_url, legacy_head)
         result = _run_alembic("upgrade", "head", url=isolated_url)
@@ -118,8 +124,14 @@ def test_legacy_m15_history_is_refused_before_main_migrations(legacy_head: str) 
             isolated_url,
             "SELECT to_regclass('agent_token') IS NOT NULL AS tokens, "
             "to_regclass('invoice_revision') IS NOT NULL AS revisions, "
+            "to_regclass('pdf_appendix_file') IS NOT NULL AS appendices, "
             "EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'email_log' "
             "AND column_name = 'sent_copy_status') AS sent_copy",
-        ) == [{"tokens": True, "revisions": False, "sent_copy": False}]
+        ) == [{
+            "tokens": True,
+            "revisions": main_base == "0052",
+            "appendices": False,
+            "sent_copy": main_base == "0052",
+        }]
     finally:
         _drop_database(isolated_url)
