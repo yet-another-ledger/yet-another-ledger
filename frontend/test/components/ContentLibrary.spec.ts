@@ -10,6 +10,7 @@ vi.mock('../../src/components/PdfPreviewDialog.vue', () => ({ default: defineCom
 
 vi.mock('naive-ui', async () => {
   const { defineComponent, h } = await import('vue')
+  const { NUpload } = await vi.importActual<typeof import('naive-ui')>('naive-ui')
   const passthrough = defineComponent({ inheritAttrs: false, template: '<div v-bind="$attrs"><slot /><slot name="footer" /><slot name="checked" /><slot name="unchecked" /></div>' })
   const button = defineComponent({ inheritAttrs: false, props: ['disabled', 'loading', 'title'], emits: ['click'], template: '<button v-bind="$attrs" :disabled="disabled || loading" :title="title" @click="$emit(\'click\')"><slot /><slot name="icon" /></button>' })
   const input = defineComponent({ inheritAttrs: false, props: ['value', 'disabled', 'placeholder'], emits: ['update:value'], template: '<input v-bind="$attrs" :value="value" :disabled="disabled" :placeholder="placeholder" @input="$emit(\'update:value\',$event.target.value)" @keyup="$emit(\'keyup\',$event)" />' })
@@ -36,7 +37,7 @@ vi.mock('naive-ui', async () => {
     NButton: button, NInput: input, NSelect: passthrough, NSwitch: switchStub, NTabs: passthrough, NTabPane: tabPane,
     NDataTable: dataTable, NSpin: passthrough, NModal: passthrough, NForm: passthrough, NFormItem: passthrough, NTag: passthrough,
     NText: passthrough, NInputNumber: passthrough, NCard: passthrough, NAlert: passthrough, NIcon: passthrough,
-    NSpace: passthrough, NGrid: passthrough, NGi: passthrough,
+    NSpace: passthrough, NGrid: passthrough, NGi: passthrough, NUpload,
   }
 })
 
@@ -93,10 +94,21 @@ describe('Content Library PDF Materials', () => {
     api.http.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
     const wrapper = mountLibrary()
     await flushPromises()
-    const inputFile = wrapper.find('#pdf-material-file')
+    const inputFile = wrapper.find('.pdf-upload-card input[type=file]')
     const file = new File(['%PDF-x'], '资料.pdf', { type: 'application/pdf' })
     Object.defineProperty(inputFile.element, 'files', { configurable: true, value: [file] })
     await inputFile.trigger('change')
+    await flushPromises()
+    const first = new File(['%PDF-first'], 'first.pdf', { type: 'application/pdf' })
+    Object.defineProperty(inputFile.element, 'files', { configurable: true, value: [first] })
+    await inputFile.trigger('change')
+    await flushPromises()
+    expect(wrapper.text()).toContain('first.pdf')
+    expect(wrapper.text()).not.toContain('资料.pdf ·')
+    Object.defineProperty(inputFile.element, 'files', { configurable: true, value: [file] })
+    await inputFile.trigger('change')
+    await flushPromises()
+    expect(api.http).not.toHaveBeenCalled()
     await wrapper.find('input[placeholder="contentLibrary.pdfMaterials.titleFromFilename"]').setValue('安装手册')
     const upload = wrapper.findAll('button').find(b => b.text().includes('contentLibrary.pdfMaterials.upload'))!
     await upload.trigger('click')
@@ -109,19 +121,28 @@ describe('Content Library PDF Materials', () => {
     finish(material())
     await flushPromises()
     expect(messages.success).toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('资料.pdf ·')
 
     api.http.mockRejectedValueOnce(new Error('upload rejected'))
     Object.defineProperty(inputFile.element, 'files', { configurable: true, value: [file] })
     await inputFile.trigger('change')
+    await flushPromises()
     await upload.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('upload rejected')
     await wrapper.findAll('button').find(b => b.text().includes('common.retry'))!.trigger('click')
     await flushPromises()
     expect(api.http).toHaveBeenCalledTimes(3)
+    const replacement = new File(['%PDF-replacement'], 'replacement.pdf', { type: 'application/pdf' })
+    Object.defineProperty(inputFile.element, 'files', { configurable: true, value: [replacement] })
+    await inputFile.trigger('change')
+    await flushPromises()
+    expect(wrapper.text()).toContain('replacement.pdf')
+    expect(api.http).toHaveBeenCalledTimes(3)
     const oversized = new File(['x'.repeat(1025)], 'large.pdf', { type: 'application/pdf' })
     Object.defineProperty(inputFile.element, 'files', { configurable: true, value: [oversized] })
     await inputFile.trigger('change')
+    await flushPromises()
     expect(wrapper.text()).toContain('contentLibrary.pdfMaterials.fileTooLarge')
     expect(wrapper.findAll('button').find(b => b.text().includes('contentLibrary.pdfMaterials.upload'))!.attributes('disabled')).toBeDefined()
     wrapper.unmount()
@@ -164,11 +185,11 @@ describe('Content Library PDF Materials', () => {
     const wrapper = mountLibrary()
     await flushPromises()
     expect(wrapper.text()).toContain('contentLibrary.pdfMaterials.limitsFailed')
-    expect(wrapper.find('#pdf-material-file').attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('button').find(b => b.text() === 'contentLibrary.pdfMaterials.chooseFile')!.attributes('disabled')).toBeDefined()
     await wrapper.findAll('button').find(b => b.text() === 'common.retry')!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('contentLibrary.pdfMaterials.limits 1.0 KB 4 4.0 KB 4.0 KB 20')
-    expect(wrapper.find('#pdf-material-file').attributes('disabled')).toBeUndefined()
+    expect(wrapper.findAll('button').find(b => b.text() === 'contentLibrary.pdfMaterials.chooseFile')!.attributes('disabled')).toBeUndefined()
     expect(wrapper.text()).toContain('contentLibrary.template.tabTitle')
     expect(wrapper.text()).toContain('contentLibrary.block.tabTitle')
     expect(wrapper.text()).toContain('contentLibrary.note.tabTitle')

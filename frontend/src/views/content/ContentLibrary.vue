@@ -5,12 +5,13 @@ import {
   useMessage, useDialog,
   NButton, NSpace, NInput, NSelect, NSwitch, NTabs, NTabPane,
   NDataTable, NSpin, NModal, NForm, NFormItem, NTag,
-  NText, NInputNumber, NCard, NAlert,
+  NText, NInputNumber, NCard, NAlert, NUpload,
 } from 'naive-ui'
 import { AddOutline, CreateOutline, TrashOutline, EyeOutline, DownloadOutline, ArchiveOutline, RefreshOutline } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
 import { get, post, put, patch, del, http, downloadBlob } from '../../api/http'
 import PdfPreviewDialog from '../../components/PdfPreviewDialog.vue'
+import type { UploadFileInfo } from 'naive-ui'
 import type { components } from '../../api/schema'
 
 type DocumentTemplateRead = components['schemas']['DocumentTemplateRead']
@@ -510,9 +511,8 @@ function setPdfPage(page: number) {
   void loadPdfFiles()
 }
 
-function choosePdfFile(event: Event) {
-  const input = event.target as HTMLInputElement
-  pdfSelectedFile.value = input.files?.[0] ?? null
+function choosePdfFile({ file }: { file: UploadFileInfo }) {
+  pdfSelectedFile.value = file.file ?? null
   pdfUploadError.value = null
 }
 
@@ -529,8 +529,6 @@ async function uploadPdfFile() {
     await http<PdfAppendixFileRead>('/api/v1/pdf-library', { method: 'POST', body: form })
     pdfSelectedFile.value = null
     pdfUploadTitle.value = ''
-    const fileInput = document.getElementById('pdf-material-file') as HTMLInputElement | null
-    if (fileInput) fileInput.value = ''
     message.success(t('contentLibrary.pdfMaterials.uploadSuccess'))
     await loadPdfFiles()
   } catch (e: unknown) {
@@ -709,17 +707,17 @@ const appliesToOptions = computed(() => [
               <n-card size="small" class="pdf-upload-card">
                 <div class="pdf-upload-grid">
                   <n-form-item :label="t('contentLibrary.pdfMaterials.file')" required>
-                    <input id="pdf-material-file" type="file" accept="application/pdf,.pdf" :disabled="pdfUploading || !pdfLimits" @change="choosePdfFile" />
+                    <div class="pdf-picker">
+                      <n-upload :file-list="[]" :show-file-list="false" :default-upload="false" accept="application/pdf,.pdf" :disabled="pdfUploading || !pdfLimits" @change="choosePdfFile">
+                        <n-button :disabled="pdfUploading || !pdfLimits">{{ t('contentLibrary.pdfMaterials.chooseFile') }}</n-button>
+                      </n-upload>
+                      <n-text v-if="pdfSelectedFile" depth="3" class="pdf-selected-file">{{ pdfSelectedFile.name }} · {{ formatPdfSize(pdfSelectedFile.size) }}</n-text>
+                    </div>
                   </n-form-item>
                   <n-form-item :label="t('contentLibrary.pdfMaterials.optionalTitle')">
                     <n-input v-model:value="pdfUploadTitle" :disabled="pdfUploading || !pdfLimits" :placeholder="t('contentLibrary.pdfMaterials.titleFromFilename')" />
                   </n-form-item>
-                  <n-button type="primary" :loading="pdfUploading" :disabled="!pdfSelectedFile || !pdfLimits || pdfUploadTooLarge" @click="uploadPdfFile">
-                    <template #icon><n-icon><AddOutline /></n-icon></template>
-                    {{ t('contentLibrary.pdfMaterials.upload') }}
-                  </n-button>
                 </div>
-                <n-text v-if="pdfSelectedFile" depth="3" class="pdf-selected-file">{{ pdfSelectedFile.name }} · {{ formatPdfSize(pdfSelectedFile.size) }}</n-text>
                 <n-alert v-if="pdfUploadTooLarge && pdfLimits" type="warning" class="pdf-upload-error">
                   {{ t('contentLibrary.pdfMaterials.fileTooLarge', { size: formatPdfSize(pdfLimits.max_appendix_file_bytes) }) }}
                 </n-alert>
@@ -729,6 +727,12 @@ const appliesToOptions = computed(() => [
                     <n-button size="small" :disabled="!pdfSelectedFile || pdfUploading || !pdfLimits || pdfUploadTooLarge" :loading="pdfUploading" @click="uploadPdfFile">{{ t('common.retry') }}</n-button>
                   </div>
                 </n-alert>
+                <div class="pdf-upload-actions">
+                  <n-button type="primary" :loading="pdfUploading" :disabled="!pdfSelectedFile || !pdfLimits || pdfUploadTooLarge" @click="uploadPdfFile">
+                    <template #icon><n-icon><AddOutline /></n-icon></template>
+                    {{ t('contentLibrary.pdfMaterials.upload') }}
+                  </n-button>
+                </div>
               </n-card>
 
               <div class="pdf-library-toolbar">
@@ -1046,9 +1050,23 @@ const appliesToOptions = computed(() => [
 
 .pdf-upload-grid {
   display: grid;
-  grid-template-columns: minmax(200px, 1fr) minmax(200px, 1fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  align-items: end;
+  align-items: start;
+}
+
+.pdf-picker {
+  min-width: 0;
+}
+
+.pdf-selected-file {
+  overflow-wrap: anywhere;
+}
+
+.pdf-upload-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 
 .pdf-selected-file,

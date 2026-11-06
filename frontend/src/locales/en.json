@@ -1117,6 +1117,7 @@
       "limits": "Maximum file size: {size}; up to {files} appendices per quotation; selected originals combined: {inputSize}; completed quotation PDF: {outputSize}; page total: {pages}.",
       "emailLimitHint": "Email encoding increases attachment size, and your provider may impose a smaller limit.",
       "file": "PDF file",
+      "chooseFile": "Choose PDF",
       "optionalTitle": "Title (optional)",
       "titleFromFilename": "Uses the original filename when blank",
       "upload": "Upload PDF",

@@ -1117,6 +1117,7 @@
       "limits": "单个文件最大：{size}；每份报价最多 {files} 个附件；所选原件合计：{inputSize}；完整报价 PDF：{outputSize}；总页数：{pages}。",
       "emailLimitHint": "邮件编码会增加附件大小，邮件服务商也可能设置更小的限制。",
       "file": "PDF 文件",
+      "chooseFile": "选择 PDF",
       "optionalTitle": "标题（可选）",
       "titleFromFilename": "留空时使用原始文件名",
       "upload": "上传 PDF",
