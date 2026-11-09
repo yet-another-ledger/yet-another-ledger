@@ -12,6 +12,7 @@ type Scope =
   | 'quote:write_draft'
   | 'invoice:read'
   | 'invoice:write_draft'
+  | 'expense:read'
 type TokenRow = {
   id: string
   name: string
@@ -26,7 +27,7 @@ type TokenCreated = TokenRow & { token: string }
 const { t } = useI18n()
 const scopes: Scope[] = [
   'receipt:intake', 'customer:read', 'customer:create', 'catalog:read',
-  'quote:read', 'quote:write_draft', 'invoice:read', 'invoice:write_draft',
+  'quote:read', 'quote:write_draft', 'invoice:read', 'invoice:write_draft', 'expense:read',
 ]
 const name = ref('')
 const selectedScopes = ref<Scope[]>([])
@@ -107,7 +108,7 @@ async function revoke(row: TokenRow) {
       <n-form-item :label="t('settings.agentTokens.scopes')">
         <n-checkbox-group v-model:value="selectedScopes">
           <n-space vertical>
-            <n-checkbox v-for="scope in scopes" :key="scope" :value="scope" :label="scope" />
+            <n-checkbox v-for="scope in scopes" :key="scope" :value="scope" :label="scope === 'expense:read' ? t('settings.agentTokens.expenseReadScope') : scope" />
           </n-space>
         </n-checkbox-group>
       </n-form-item>

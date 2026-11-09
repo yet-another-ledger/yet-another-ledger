@@ -444,6 +444,7 @@
       "description": "Create limited credentials for trusted Agent integrations. A secret is shown only once.",
       "name": "Token name",
       "scopes": "Allowed capabilities",
+      "expenseReadScope": "Read expenses (read-only)",
       "create": "Create token",
       "oneTimeWarning": "Copy this secret now. JAI cannot show it again.",
       "copyOnce": "Copy secret and hide",

@@ -7,7 +7,7 @@ description: File original purchase receipts and prepare complete customer, quot
 
 > 🌐 **English** · [中文](SKILL-full-workflow_zh.md)
 
-Use this workflow only for tasks the user explicitly asks you to perform in JAI. The complete available tool surface is the 16 frozen tools in `config-full.yaml`; it contains no generic database or CRUD access.
+Use this workflow only for tasks the user explicitly asks you to perform in JAI. The current complete tool surface is the 18 tools in `config-full.yaml`; it contains no generic database or CRUD access. Expense access is read-only and requires the separate `expense:read` scope.
 
 ## Authorization and required facts
 
@@ -38,6 +38,11 @@ Before each mutation (`submit_receipt`, `create_customer`, `create_quote_draft`,
 - For invoices, use `preview_invoice` and `create_invoice_draft` only for a Standard Invoice. It starts as an unnumbered `DRAFT`; its legal number is assigned only when the owner issues it in JAI.
 - Use `get_quote`/`get_invoice` to inspect an identified document. Use update tools only for the complete replacement input and only when JAI confirms the target is an editable `DRAFT`. Pass stable IDs for every create/update.
 - Report JAI's exact result, operation replay status, totals, status, assigned number when present and exact `web_url`. Do not invent URLs.
+
+## Read-only Expense context
+
+- Use `list_expenses` to find expenses by the user-provided filters and `get_expense` to inspect a specific returned ID. Both are read-only; report saved values exactly and never infer missing fields.
+- These tools do not expose receipt bytes or storage paths. Expense posting, confirmation and edits remain web-only.
 
 ## Hard boundary
 

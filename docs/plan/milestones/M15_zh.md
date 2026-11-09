@@ -182,6 +182,8 @@ MCP 工具的准确名称为 `submit_receipt`、`get_receipt_status`、`search_c
 
 ## 验收结论（2026-11-09）
 
+> **当前扩展：** [SI4](../improvements/SI4_zh.md) 新增独立的 `expense:read` 能力和只读开支工具。上方 M15 原始验收仍冻结为 16 个工具／八项 scope；当前完整工作流为 18 个工具／九项 scope。
+
 - 作者已按本节记录范围验收 M15，并授权文档收尾、合入 main、推送及作为 v0.12.0 发版。九个原子实现步骤和已记录的走查修复均已交付。
 - 历史真实 PDF／有效图片接收、英文提取、精确重放及确认恰好一笔 Expense 已通过。真实 Codex 检查覆盖已有／新客户、报价与未编号 Standard Invoice 草稿、预览、更新、重放／冲突、状态及权限边界。隔离真实 Hermes CLI 检查覆盖读取、预览、草稿更新、重放及恢复。两项走查修复均通过回归门禁和分别进行的盲审。
 - owner 已撤销三枚临时客户端令牌。八项 Codex 和五项 Hermes 真实 HTTP 拒绝检查通过，包括原请求重放。临时 Hermes 进程／profile／缓存及专用回归资源已清理，隔离网页走查环境保留。本机忽略的 `review-notes/M15-report.md` 保存完整走查、配置及证据。

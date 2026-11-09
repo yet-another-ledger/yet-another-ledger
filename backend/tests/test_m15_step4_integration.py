@@ -246,6 +246,8 @@ async def test_mcp_receipt_submit_replay_status_and_per_request_bearer(
                 "create_invoice_draft",
                 "get_invoice",
                 "update_invoice_draft",
+                "list_expenses",
+                "get_expense",
             }
 
             bad_envelope_secret = "SENSITIVE_BASE64_ENVELOPE_AQIDBAUG"

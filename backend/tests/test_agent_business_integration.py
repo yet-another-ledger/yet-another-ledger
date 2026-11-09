@@ -10,6 +10,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import date
 from decimal import Decimal
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -17,7 +18,7 @@ from httpx import ASGITransport, AsyncClient, Response
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import ValidationError
 from pypdf import PdfWriter
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.applications import Starlette
 from starlette.routing import Mount, Route
@@ -38,7 +39,9 @@ from jai.models.agent_token import AgentToken
 from jai.models.company import Company
 from jai.models.content import DocumentTemplate
 from jai.models.customer import Customer
+from jai.models.dictionary import ExpenseCategory
 from jai.models.document import DocumentChainEvent
+from jai.models.expense import Expense
 from jai.models.invoice import Invoice
 from jai.models.pdf_appendix import PdfAppendixFile
 from jai.models.product import Product
@@ -58,6 +61,7 @@ from jai.schemas.agent_tools import (
     UpdateQuoteDraftInput,
 )
 from jai.schemas.customer import CustomerWrite
+from jai.schemas.expense import ExpenseInput
 from jai.schemas.invoice import InvoiceWrite
 from jai.schemas.quote import QuoteWrite
 from jai.services import agent_business as agent_business_service
@@ -77,8 +81,12 @@ from jai.services.agent_business import (
     update_invoice_draft,
     update_quote_draft,
 )
+from jai.services.agent_expenses import get_expense as get_agent_expense
+from jai.services.agent_expenses import list_expenses as list_agent_expenses
 from jai.services.agent_operations import AgentOperationFailure, canonical_argument_digest
 from jai.services.agent_tokens import AgentPrincipal, issue_token
+from jai.services.dictionary import seed_for_company as seed_dictionary_for_company
+from jai.services.expense import create_expense
 from jai.services.vat import seed_for_company
 
 
@@ -116,6 +124,7 @@ async def business_principals(
         AgentTokenScope.QUOTE_WRITE_DRAFT,
         AgentTokenScope.INVOICE_READ,
         AgentTokenScope.INVOICE_WRITE_DRAFT,
+        AgentTokenScope.EXPENSE_READ,
     ]
     tokens: list[AgentToken] = []
     principals: list[AgentPrincipal] = []
@@ -1424,3 +1433,187 @@ async def test_each_step6_tool_checks_scope_on_every_call(
         assert "MCP_INSUFFICIENT_SCOPE" in str(exc.value)
     finally:
         mcp_module.agent_principal.reset(token)
+
+
+@pytest.mark.integration
+async def test_agent_expense_reads_reuse_filters_and_company_rls_without_writes(
+    business_principals: tuple[AgentPrincipal, AgentPrincipal, uuid.UUID],
+    admin_session_maker: async_sessionmaker[AsyncSession],
+    runtime_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    principal, other, _owner_id = business_principals
+    async with admin_session_maker() as session:
+        for tenant_id in (principal.company_id, other.company_id):
+            await seed_for_company(session, tenant_id)
+            await seed_dictionary_for_company(session, tenant_id)
+        await session.commit()
+
+        created_ids: dict[uuid.UUID, uuid.UUID] = {}
+        for tenant_id, supplier, expense_date in (
+            (principal.company_id, "Northwind A", date(2026, 2, 1)),
+            (principal.company_id, "Northwind B", date(2026, 3, 1)),
+            (other.company_id, "Northwind Foreign", date(2026, 2, 15)),
+        ):
+            category = await session.scalar(
+                select(ExpenseCategory).where(ExpenseCategory.company_id == tenant_id)
+            )
+            rate = await session.scalar(
+                select(VatRate).where(VatRate.company_id == tenant_id)
+            )
+            treatment = await session.scalar(
+                select(VatTreatment).where(
+                    VatTreatment.company_id == tenant_id,
+                    VatTreatment.side == "PURCHASE",
+                )
+            )
+            assert category is not None and rate is not None and treatment is not None
+            created = await create_expense(
+                session,
+                tenant_id,
+                ExpenseInput(
+                    expense_date=expense_date,
+                    category_id=category.id,
+                    supplier_name=supplier,
+                    vat_treatment_id=treatment.id,
+                    vat_rate_id=rate.id,
+                    net_amount=Decimal("10.00"),
+                    vat_amount=Decimal("2.10"),
+                ),
+                None,
+            )
+            created_ids[tenant_id] = created.id
+
+    async with admin_session_maker() as session:
+        before_expenses = await session.scalar(select(func.count()).select_from(Expense))
+        before_operations = await session.scalar(select(func.count()).select_from(AgentOperation))
+
+    page = await list_agent_expenses(
+        runtime_session_maker,
+        principal,
+        q="Northwind",
+        date_from=date(2026, 2, 1),
+        date_to=date(2026, 3, 31),
+        limit=1,
+        offset=1,
+    )
+    assert page.total == 2
+    assert len(page.items) == 1
+    assert page.items[0].supplier_name == "Northwind A"
+    detail = await get_agent_expense(runtime_session_maker, principal, page.items[0].id)
+    assert detail is not None and detail.expense.id == page.items[0].id
+    assert detail.expense.supplier_name == page.items[0].supplier_name
+
+    empty = await list_agent_expenses(runtime_session_maker, principal, q="no match")
+    assert empty.total == 0 and empty.items == []
+    foreign = await get_agent_expense(
+        runtime_session_maker, principal, created_ids[other.company_id]
+    )
+    assert foreign is None
+    own_page = await list_agent_expenses(runtime_session_maker, principal)
+    own_ids = {item.id for item in own_page.items}
+    assert len(own_ids) == 2
+
+    async with admin_session_maker() as session:
+        assert await session.scalar(select(func.count()).select_from(Expense)) == before_expenses
+        assert (
+            await session.scalar(select(func.count()).select_from(AgentOperation))
+            == before_operations
+        )
+
+
+@pytest.mark.integration
+async def test_expense_tools_reject_unknown_fields_over_streamable_http(
+    admin_session_maker: async_sessionmaker[AsyncSession],
+    runtime_session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    company_id, owner_id = uuid.uuid4(), uuid.uuid4()
+    token, secret = issue_token(
+        AgentTokenCreate(name="Expense MCP wire", scopes=[AgentTokenScope.EXPENSE_READ]),
+        company_id,
+    )
+    token.creator_id = owner_id
+    async with admin_session_maker() as session:
+        session.add_all(
+            [
+                Company(id=company_id, name="Expense wire company", base_currency="EUR"),
+                User(
+                    id=owner_id,
+                    email=f"{owner_id}@example.test",
+                    hashed_password="not-a-real-password-hash",
+                    company_id=company_id,
+                    role="owner",
+                    mfa_enabled=True,
+                    totp_secret="test-secret",
+                ),
+            ]
+        )
+        await session.flush()
+        session.add(token)
+        await session.commit()
+
+    list_service = AsyncMock()
+    detail_service = AsyncMock()
+    monkeypatch.setattr(mcp_module, "list_expenses_agent_service", list_service)
+    monkeypatch.setattr(mcp_module, "get_expense_agent_service", detail_service)
+    monkeypatch.setattr(mcp_module, "get_session_maker", lambda: runtime_session_maker)
+    monkeypatch.setattr(
+        mcp_module,
+        "get_settings",
+        lambda: Settings(base_url="https://wire.example.test", scheduler_enabled=False),
+    )
+
+    transport_app = _fresh_mcp_wire_app()
+    async with mcp_module.server.session_manager.run():
+        async with AsyncClient(
+            transport=ASGITransport(app=transport_app), base_url="http://localhost"
+        ) as client:
+            initialize = await client.post(
+                "/api/v1/mcp",
+                headers={
+                    "authorization": f"Bearer {secret}",
+                    "content-type": "application/json",
+                    "accept": "application/json, text/event-stream",
+                },
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-11-25",
+                        "capabilities": {},
+                        "clientInfo": {"name": "expense-wire-test", "version": "1"},
+                    },
+                },
+            )
+            assert initialize.status_code == 200
+            headers = {
+                "authorization": f"Bearer {secret}",
+                "content-type": "application/json",
+                "accept": "application/json, text/event-stream",
+                "mcp-session-id": initialize.headers["mcp-session-id"],
+                "mcp-protocol-version": "2025-11-25",
+            }
+            calls = (
+                ("list_expenses", {"unknown": "synthetic"}),
+                (
+                    "get_expense",
+                    {"expense_id": str(uuid.uuid4()), "unknown": "synthetic"},
+                ),
+            )
+            for call_id, (tool_name, arguments) in enumerate(calls, start=2):
+                response = await client.post(
+                    "/api/v1/mcp",
+                    headers=headers,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": call_id,
+                        "method": "tools/call",
+                        "params": {"name": tool_name, "arguments": arguments},
+                    },
+                )
+                assert response.status_code == 200
+                assert "MCP_VALIDATION_FAILED" in response.text
+
+    list_service.assert_not_awaited()
+    detail_service.assert_not_awaited()

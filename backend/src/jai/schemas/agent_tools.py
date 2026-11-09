@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Literal
@@ -11,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from jai.schemas.content import DocumentTemplateRead
 from jai.schemas.customer import CustomerRead, CustomerWrite
+from jai.schemas.expense import ExpenseListItem, ExpenseRead
 from jai.schemas.invoice import InvoiceRead, InvoiceWrite, ProductInvoiceOptionRead
 from jai.schemas.quote import QuoteRead, QuoteWrite
 from jai.schemas.receipt_inbox import ReceiptInboxErrorCode
@@ -226,6 +228,39 @@ class CreateInvoiceDraftInput(BaseModel):
 
 class GetInvoiceInput(BaseModel):
     invoice_id: uuid.UUID
+
+
+class GetExpenseInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expense_id: uuid.UUID
+
+
+class ListExpensesInput(BaseModel):
+    """Filters for the existing company expense list service."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    q: str | None = None
+    category_id: uuid.UUID | None = None
+    vat_treatment_id: uuid.UUID | None = None
+    deductible: bool | None = None
+    is_draft: bool | None = None
+    kind: Literal["PURCHASE", "MILEAGE"] | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+    limit: int = Field(default=50, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)
+    sort_by: Literal["expense_date", "created_at"] = "expense_date"
+
+
+class ExpenseListOutput(BaseModel):
+    items: list[ExpenseListItem]
+    total: int
+
+
+class ExpenseOutput(BaseModel):
+    expense: ExpenseRead
 
 
 class UpdateInvoiceDraftInput(BaseModel):

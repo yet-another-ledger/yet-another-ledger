@@ -38,7 +38,7 @@ These commands use the historical **`accountant`** profile and **development por
 
    The adapter needs Python 3.12+ and `uv`. Its script pins MCP 2.2.0 and httpx 0.28.1 in a separate script environment; Hermes' Python environment is not modified. First launch may install these dependencies. Its default per-file limit is 10 MiB, matching JAI. If JAI's `MAX_RECEIPT_BYTES` is changed, set matching `JAI_MAX_RECEIPT_BYTES` in the adapter environment and explicitly forward it in the config's `env`.
 
-5. Merge [config-receipts-local.yaml](../../../integrations/hermes/jai-ledger/config-receipts-local.yaml) into this profile's `config.yaml`, keeping one `mcp_servers` key and preserving provider/model settings. Remote `jai` exposes `get_receipt_status`; local `jai_receipts` exposes `submit_receipt`. Remove remote Base64 `submit_receipt` from the active inclusion list. For a full workflow, preserve the other 15 authorized remote tools and add the same local entry. The inspected Hermes config loader recursively expands `${VAR}` in `env` too; explicitly forward only the required JAI values. Never paste the token into YAML, shell arguments or chat.
+5. Merge [config-receipts-local.yaml](../../../integrations/hermes/jai-ledger/config-receipts-local.yaml) into this profile's `config.yaml`, keeping one `mcp_servers` key and preserving provider/model settings. Remote `jai` exposes `get_receipt_status`; local `jai_receipts` exposes `submit_receipt`. Remove remote Base64 `submit_receipt` from the active inclusion list. For the current full workflow, preserve the other 17 authorized remote tools and add the same local entry. The M15 historical configuration had 15 remaining remote tools out of 16; SI4 adds two current read tools, bringing the server to 18. The inspected Hermes config loader recursively expands `${VAR}` in `env` too; explicitly forward only the required JAI values. Never paste the token into YAML, shell arguments or chat.
 
 6. Verify and apply only to this profile:
 
@@ -47,7 +47,7 @@ These commands use the historical **`accountant`** profile and **development por
    hermes -p accountant gateway restart
    ```
 
-   The local diagnostic should discover one tool. Remote `mcp test jai` may discover all 16 server tools even when the client inclusion list registers fewer tools.
+   The local diagnostic should discover one tool. Remote `mcp test jai` may discover all 18 current server tools even when the client inclusion list registers fewer tools. The original M15 acceptance recorded 16 tools.
 
 7. Load the updated existing `jai-receipts` skill. If `/jai-receipts` is unknown, ask in natural language to read it using `skill_view`; absent menu entries or visible loading notices alone do not establish failure. Start a fresh conversation if the old rules remain in context. Send one image as a Telegram file/document and one PDF, with explicit submission instructions. Hermes should run the operation-specific request-ID helper, call `mcp_jai_receipts_submit_receipt` with short original-path arguments, and then call remote `mcp_jai_get_receipt_status`. The helper can still need terminal approval under Hermes' configured policy; do not disable global approvals just for this walkthrough.
 

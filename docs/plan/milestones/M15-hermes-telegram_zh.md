@@ -4,6 +4,8 @@
 
 > **状态（2026-11-09）** 🟢 M15 已按记录范围验收并纳入 v0.12.0。本指南保留部署配置步骤。历史真实 PDF／图片接收及本轮隔离 Hermes CLI 检查已有证据，新的 Telegram 验证、原件哈希及手机链接由作者决定跳过，AI 不可用测试暂缓。完整范围见 [M15 验收结论](M15_zh.md)。
 
+> **当前完整工作流：** [SI4](../improvements/SI4_zh.md) 新增只读开支工具。本指南保留 M15 历史 16 工具／八项 scope 的设置与验收证据。
+
 本指南记录使用独立 Hermes profile 和独立 Telegram bot 配置 M15 第 5 步仅收据功能，下方也说明可选完整工作流。部署新 profile 时请核对 M15 验收结论中的实际证据和作者批准的省略项。
 
 ## 支持的配置边界
@@ -33,7 +35,7 @@ TELEGRAM_BOT_TOKEN=<新 BotFather bot 令牌>
 TELEGRAM_ALLOWED_USERS=<一个数字 Telegram 用户 ID>
 ```
 
-JAI 所有者使用受 MFA 保护的 owner 账号登录，打开 **设置 → Agent 访问**，填写可识别的令牌名称，仅选择此 profile 所需 scope 后创建。使用一次 **复制密钥并隐藏**，并将密钥直接填入 profile 私有 `.env`；UI 之后无法再次显示。仅凭证 profile 只选 `receipt:intake`。可选完整工作流 profile 需要下文列出的全部八个 scope。可在同一页面通过 **撤销** 禁用令牌；删除环境变量前先验证后续 MCP 调用失败。不得复用旧 profile 的令牌，也不得把令牌复制到 shell 命令中。
+JAI 所有者使用受 MFA 保护的 owner 账号登录，打开 **设置 → Agent 访问**，填写可识别的令牌名称，仅选择此 profile 所需 scope 后创建。使用一次 **复制密钥并隐藏**，并将密钥直接填入 profile 私有 `.env`；UI 之后无法再次显示。仅凭证 profile 只选 `receipt:intake`。M15 原始完整工作流 profile 使用八项 scope。当前 profile 还需要 SI4 的 `expense:read` scope；见下方当前配置说明。可在同一页面通过 **撤销** 禁用令牌；删除环境变量前先验证后续 MCP 调用失败。不得复用旧 profile 的令牌，也不得把令牌复制到 shell 命令中。
 
 创建技能目录并复制仓库中英文运行版技能。中文文件仅供作者阅读，不作为第二个 Hermes 技能安装：
 
@@ -102,7 +104,7 @@ Telegram 相册要求每次更新和重投的规范请求参数完全相同。�
 
 ## 可选完整业务工作流
 
-上面的仅凭证配置仍是最小安装。若需启用 M15 完整冻结工具面，可安装[完整工作流技能](../../../integrations/hermes/jai-ledger/SKILL-full-workflow_zh.md)，并使用[完整 MCP 允许列表](../../../integrations/hermes/jai-ledger/config-full_zh.yaml)。用完整配置整体替换新 profile 中的 `mcp_servers.jai` 项；不要叠加凭证、报价、发票和客户的角色配置片段，因为 YAML 映射覆盖可能替换先前工具列表，导致能力悄悄缺失。保留 profile 的 provider/model 设置。可选完整 token 需要 M15 冻结的八个 scope：`receipt:intake`、`customer:read`、`customer:create`、`catalog:read`、`quote:read`、`quote:write_draft`、`invoice:read` 和 `invoice:write_draft`。配置恰好暴露冻结的 16 个 MCP 工具，不增加 owner、生命周期、过账、通用 CRUD 或管理能力。
+M15 原始冻结范围为八项 scope、16 个工具；该历史验收保持不变。当前部署请安装[完整工作流 skill](../../../integrations/hermes/jai-ledger/SKILL-full-workflow_zh.md)，并用[当前 SI4 允许列表](../../../integrations/hermes/jai-ledger/config-full_zh.yaml)整体替换 `mcp_servers.jai` 项。当前完整 profile 需要全部九项 scope（含 `expense:read`），并暴露 18 个工具。Expense 能力仅限只读列表／详情；不提供过账、确认或编辑工具。不要在完整配置上叠加角色片段，以免 YAML 映射覆盖悄悄删掉能力。保留 profile 的 provider/model 设置。
 
 将完整技能与共享助手安装到同一 profile 路径：
 

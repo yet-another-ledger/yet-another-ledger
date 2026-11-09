@@ -4,6 +4,8 @@
 
 > **Status (2026-11-09)** 🟢 M15 is accepted within the recorded scope and included in v0.12.0. This guide retains deployment configuration steps. Historical real PDF/image intake and current isolated Hermes CLI checks have evidence. New Telegram validation, original hashes and phone links are author-skipped; AI-unavailable testing is deferred. Full scope is in the [M15 acceptance conclusion](M15.md).
 
+> **Current full workflow:** [SI4](../improvements/SI4.md) adds read-only Expense tools. This guide retains M15's historical 16-tool/eight-scope setup and evidence.
+
 This guide documents the receipt-only part of M15 Step 5 using a separate Hermes profile and a distinct Telegram bot. The optional full workflow is described below. Consult the M15 acceptance conclusion for actual evidence and author-approved omissions when deploying a new profile.
 
 ## Supported setup boundary
@@ -33,7 +35,7 @@ TELEGRAM_BOT_TOKEN=<new BotFather bot token>
 TELEGRAM_ALLOWED_USERS=<one numeric Telegram user ID>
 ```
 
-As the JAI owner, sign in with the MFA-protected owner account, open **Settings → Agent access**, enter a descriptive token name, select only the scope required by this profile, and create it. Use **Copy secret and hide** once and place the secret directly into the private profile `.env`; the UI cannot reveal it again. The receipt-only profile selects only `receipt:intake`. The optional full-workflow profile needs all eight scopes listed below. Use the same page's **Revoke** action to disable a token; verify that a subsequent MCP call fails before removing its environment value. Never reuse an old profile token or copy a token into a shell command.
+As the JAI owner, sign in with the MFA-protected owner account, open **Settings → Agent access**, enter a descriptive token name, select only the scope required by this profile, and create it. Use **Copy secret and hide** once and place the secret directly into the private profile `.env`; the UI cannot reveal it again. The receipt-only profile selects only `receipt:intake`. The original M15 full-workflow profile used eight scopes. The current profile also needs the SI4 `expense:read` scope; see the current configuration note below. Use the same page's **Revoke** action to disable a token; verify that a subsequent MCP call fails before removing its environment value. Never reuse an old profile token or copy a token into a shell command.
 
 Create the skill directory and copy the checked-in English runtime skill. The Chinese file is a reading mirror and is not installed as a second Hermes skill:
 
@@ -102,7 +104,7 @@ If the MCP result is an error, or Hermes cannot provide original bytes, say the 
 
 ## Optional full business workflow
 
-The receipt-only setup above remains the minimal installation. To enable the complete frozen M15 surface, install [the full workflow skill](../../../integrations/hermes/jai-ledger/SKILL-full-workflow.md) and use [the complete MCP allowlist](../../../integrations/hermes/jai-ledger/config-full.yaml). Replace the entire `mcp_servers.jai` entry in the fresh profile with that complete block; do not layer the separate receipt, quote, invoice and customer config snippets, because a YAML mapping overlay can replace an earlier tool list and silently remove capabilities. Keep the profile's provider/model settings. The optional full token needs exactly the eight M15 scopes: `receipt:intake`, `customer:read`, `customer:create`, `catalog:read`, `quote:read`, `quote:write_draft`, `invoice:read`, and `invoice:write_draft`. The config exposes exactly the 16 frozen MCP tools. It adds no owner, lifecycle, posting, generic CRUD, or administration capability.
+M15 originally froze a 16-tool surface across eight scopes; that historical acceptance remains unchanged. For current deployment, install [the full workflow skill](../../../integrations/hermes/jai-ledger/SKILL-full-workflow.md) and replace the full `mcp_servers.jai` entry with [the current SI4 allowlist](../../../integrations/hermes/jai-ledger/config-full.yaml). The current complete profile needs all nine scopes, including `expense:read`, and exposes 18 tools. Expense access is limited to read-only list/detail; there is no posting, confirmation, or edit tool. Do not layer role snippets over the complete block, because YAML mapping overlays can silently remove capabilities. Keep the profile's provider/model settings.
 
 Install the full skill and its shared helper at the same profile paths:
 

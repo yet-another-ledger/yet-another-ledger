@@ -444,6 +444,7 @@
       "description": "为可信的 Agent 集成创建受限凭据。密钥只显示一次。",
       "name": "令牌名称",
       "scopes": "允许的能力",
+      "expenseReadScope": "读取开支（只读）",
       "create": "创建令牌",
       "oneTimeWarning": "请立即复制此密钥。JAI 无法再次显示。",
       "copyOnce": "复制密钥并隐藏",

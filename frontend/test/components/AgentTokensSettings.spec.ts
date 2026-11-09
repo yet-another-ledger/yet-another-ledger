@@ -27,6 +27,8 @@ describe('AgentTokensSettings', () => {
     expect(wrapper.text()).toContain('Agent 访问令牌')
     expect(wrapper.text()).toContain('Hermes')
     expect(wrapper.text()).toContain('receipt:intake')
+    expect(wrapper.text()).toContain('读取开支（只读）')
+    expect(wrapper.findAll('.n-checkbox')).toHaveLength(9)
 
     // Exercise the one-time display after a successful create response.
     api.post.mockResolvedValue({ ...token, token: 'jai1.secret.once' })

@@ -1,6 +1,6 @@
 # M15 完整可选工作流的 MCP 工具允许列表。
 # 用此块整体替换 profile 的 mcp_servers.jai 项；不要合并多个角色片段，
-# 因为 YAML 映射覆盖可能会丢失工具。Bearer token 需要 M15 冻结的全部八项 scope。
+# 因为 YAML 映射覆盖可能会丢失工具。Bearer token 需要当前完整的九项 scope。
 mcp_servers:
   jai:
     url: "http://127.0.0.1:8000/api/v1/mcp"
@@ -24,5 +24,7 @@ mcp_servers:
         - create_invoice_draft
         - get_invoice
         - update_invoice_draft
+        - list_expenses
+        - get_expense
       prompts: false
       resources: false

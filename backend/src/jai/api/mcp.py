@@ -6,6 +6,7 @@ import json
 import uuid
 from collections.abc import MutableMapping
 from contextvars import ContextVar
+from datetime import date
 from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
@@ -32,12 +33,16 @@ from jai.schemas.agent_tools import (
     DocumentPreviewOutput,
     DocumentTemplateListOutput,
     EmptyInput,
+    ExpenseListOutput,
+    ExpenseOutput,
     GetCustomerInput,
+    GetExpenseInput,
     GetInvoiceInput,
     GetQuoteInput,
     GetReceiptStatusInput,
     InvoiceOutput,
     InvoiceWriteOutput,
+    ListExpensesInput,
     NonEmpty,
     PreviewInvoiceInput,
     PreviewQuoteInput,
@@ -77,6 +82,12 @@ from jai.services.agent_business import (
 )
 from jai.services.agent_business import (
     search_customers as search_customers_service,
+)
+from jai.services.agent_expenses import (
+    get_expense as get_expense_agent_service,
+)
+from jai.services.agent_expenses import (
+    list_expenses as list_expenses_agent_service,
 )
 from jai.services.agent_receipts import (
     AgentReceiptError,
@@ -397,6 +408,8 @@ _TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "create_invoice_draft": CreateInvoiceDraftInput,
     "get_invoice": GetInvoiceInput,
     "update_invoice_draft": UpdateInvoiceDraftInput,
+    "list_expenses": ListExpensesInput,
+    "get_expense": GetExpenseInput,
 }
 
 
@@ -795,3 +808,80 @@ async def update_invoice_draft_tool(
         if isinstance(exc, ToolError):
             raise
         raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="list_expenses",
+    description="List company expenses using the saved expense filters and ordering.",
+    structured_output=True,
+)
+async def list_expenses_tool(
+    q: str | None = None,
+    category_id: uuid.UUID | None = None,
+    vat_treatment_id: uuid.UUID | None = None,
+    deductible: bool | None = None,
+    is_draft: bool | None = None,
+    kind: Literal["PURCHASE", "MILEAGE"] | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: Annotated[int, Field(ge=1, le=500)] = 50,
+    offset: Annotated[int, Field(ge=0)] = 0,
+    sort_by: Literal["expense_date", "created_at"] = "expense_date",
+) -> ExpenseListOutput:
+    principal = _authorized_principal(AgentTokenScope.EXPENSE_READ)
+    try:
+        request = ListExpensesInput(
+            q=q,
+            category_id=category_id,
+            vat_treatment_id=vat_treatment_id,
+            deductible=deductible,
+            is_draft=is_draft,
+            kind=kind,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+            offset=offset,
+            sort_by=sort_by,
+        )
+        from jai.models._enums import ExpenseKind
+
+        return await list_expenses_agent_service(
+            get_session_maker(),
+            principal,
+            q=request.q,
+            category_id=request.category_id,
+            vat_treatment_id=request.vat_treatment_id,
+            deductible=request.deductible,
+            is_draft=request.is_draft,
+            kind=ExpenseKind(request.kind) if request.kind is not None else None,
+            date_from=request.date_from,
+            date_to=request.date_to,
+            limit=request.limit,
+            offset=request.offset,
+            sort_by=request.sort_by,
+        )
+    except Exception as exc:
+        if isinstance(exc, ToolError):
+            raise
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="get_expense",
+    description="Read one company expense and its saved business fields.",
+    structured_output=True,
+)
+async def get_expense_tool(expense_id: uuid.UUID) -> ExpenseOutput:
+    principal = _authorized_principal(AgentTokenScope.EXPENSE_READ)
+    try:
+        request = GetExpenseInput(expense_id=expense_id)
+        result = await get_expense_agent_service(
+            get_session_maker(), principal, request.expense_id
+        )
+    except Exception as exc:
+        if isinstance(exc, ToolError):
+            raise
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+    if result is None:
+        raise _tool_error("MCP_TARGET_NOT_FOUND")
+    return result

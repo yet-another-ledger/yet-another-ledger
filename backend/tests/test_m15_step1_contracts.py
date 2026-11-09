@@ -23,7 +23,11 @@ from jai.schemas.agent_tools import (
     CreateCustomerOutput,
     CreateInvoiceDraftInput,
     DocumentTemplateListOutput,
+    ExpenseListOutput,
+    ExpenseOutput,
+    GetExpenseInput,
     InvoiceWriteOutput,
+    ListExpensesInput,
     QuoteWriteOutput,
     SubmitReceiptInput,
     SubmitReceiptOutput,
@@ -84,6 +88,43 @@ def test_mcp_input_contracts_are_bounded_and_errors_are_stable() -> None:
         }
     )
     assert invoice.invoice.invoice_date.isoformat() == "2026-09-30"
+
+
+def test_expense_read_contract_is_typed_bounded_and_read_only() -> None:
+    request = ListExpensesInput.model_validate(
+        {
+            "q": "  laptop ",
+            "kind": "PURCHASE",
+            "date_from": "2026-01-01",
+            "date_to": "2026-12-31",
+            "limit": 500,
+            "offset": 0,
+            "sort_by": "created_at",
+        }
+    )
+    assert request.q == "  laptop "
+    assert request.date_from.isoformat() == "2026-01-01"
+    assert request.limit == 500
+    assert request.sort_by == "created_at"
+    assert ListExpensesInput().limit == 50
+    assert ListExpensesInput().offset == 0
+    assert AgentTokenScope.EXPENSE_READ.value == "expense:read"
+    assert GetExpenseInput.model_validate({"expense_id": uuid.uuid4()})
+    assert "expense" in ExpenseOutput.model_fields
+    assert {"items", "total"} == set(ExpenseListOutput.model_fields)
+
+    for invalid in (
+        {"limit": 0},
+        {"limit": 501},
+        {"offset": -1},
+        {"sort_by": "supplier_name"},
+        {"unknown": True},
+    ):
+        try:
+            ListExpensesInput.model_validate(invalid)
+        except ValidationError:
+            continue
+        raise AssertionError(f"Invalid expense list input should fail: {invalid}")
 
 
 def test_read_tool_outputs_preserve_authoritative_catalog_template_and_vat_fields() -> None:
@@ -383,6 +424,8 @@ async def test_parent_lifespan_runs_real_mcp_session_manager(monkeypatch) -> Non
         "create_invoice_draft",
         "get_invoice",
         "update_invoice_draft",
+        "list_expenses",
+        "get_expense",
     }
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://localhost"

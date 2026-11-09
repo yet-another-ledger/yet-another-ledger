@@ -38,7 +38,7 @@
 
    适配器需要 Python 3.12+ 和 `uv`。脚本将 MCP 2.2.0 与 httpx 0.28.1 固定在独立脚本环境中，不修改 Hermes 的 Python 环境，首次启动可能安装依赖。默认每文件 10 MiB，与 JAI 一致。如果修改 JAI 的 `MAX_RECEIPT_BYTES`，应在适配器环境设置对应 `JAI_MAX_RECEIPT_BYTES`，并在配置的 `env` 显式转发。
 
-5. 将 [config-receipts-local_zh.yaml](../../../integrations/hermes/jai-ledger/config-receipts-local_zh.yaml) 合并到此 profile 的 `config.yaml`，只保留一个 `mcp_servers`，保留 provider／model 设置。远程 `jai` 暴露 `get_receipt_status`，本地 `jai_receipts` 暴露 `submit_receipt`。从当前 include 列表移除远程 Base64 `submit_receipt`。完整工作流保留其他 15 个已授权远程工具并添加相同本地条目。只读检查确认 Hermes 配置加载器也递归展开 `env` 中的 `${VAR}`；仅显式转发所需 JAI 值。不得将 token 粘贴到 YAML、命令参数或聊天。
+5. 将 [config-receipts-local_zh.yaml](../../../integrations/hermes/jai-ledger/config-receipts-local_zh.yaml) 合并到此 profile 的 `config.yaml`，只保留一个 `mcp_servers`，保留 provider／model 设置。远程 `jai` 暴露 `get_receipt_status`，本地 `jai_receipts` 暴露 `submit_receipt`。从当前 include 列表移除远程 Base64 `submit_receipt`。当前完整工作流保留其他 17 个已授权远程工具并添加相同本地条目。M15 历史配置为 16 个工具中保留其余 15 个；SI4 新增两个当前只读工具后，服务端共 18 个工具。只读检查确认 Hermes 配置加载器也递归展开 `env` 中的 `${VAR}`；仅显式转发所需 JAI 值。不得将 token 粘贴到 YAML、命令参数或聊天。
 
 6. 只验证并应用到此 profile：
 
@@ -47,7 +47,7 @@
    hermes -p accountant gateway restart
    ```
 
-   本地诊断应发现一个工具。即使客户端 include 注册较少工具，远程 `mcp test jai` 仍可能发现全部 16 个服务端工具。
+   本地诊断应发现一个工具。即使客户端 include 注册较少工具，远程 `mcp test jai` 仍可能发现当前全部 18 个服务端工具。M15 原始验收记录为 16 个工具。
 
 7. 加载更新后的已有 `jai-receipts` skill。如果 `/jai-receipts` 未识别，用自然语言要求通过 `skill_view` 读取；只缺少菜单项或加载提示不能说明失败。如果上下文仍保留旧规则，开启新会话。分别以 Telegram 文件／文档方式发送一张图片和一份 PDF，并明确要求提交。Hermes 应运行操作专属的请求编号助手，以简短原件路径参数调用 `mcp_jai_receipts_submit_receipt`，随后调用远程 `mcp_jai_get_receipt_status`。按 Hermes 的配置策略，助手仍可能需要终端审批；不要仅为走查关闭全局审批。
 
