@@ -565,7 +565,15 @@ async def test_standard_invoice_tools_share_pricing_atomic_replay_and_locked_dra
         f"https://invoice-first.example.test/invoices/{created.invoice.id}/edit"
     )
 
-    changed_body = body.model_copy(update={"notes": "Changed terms", "terms_text": "Net 14"})
+    changed_body = body.model_copy(
+        update={
+            "notes": "Changed terms",
+            "terms_text": "Net 14",
+            "tax_mode": InvoiceTaxMode.DOCUMENT,
+            "document_vat_rate_id": rate.id,
+            "lines": [body.lines[0].model_copy(update={"quantity": Decimal("3")})],
+        }
+    )
     update_request = UpdateInvoiceDraftInput(
         request_id=uuid.uuid4(), invoice_id=created.invoice.id, invoice=changed_body
     )
@@ -576,7 +584,32 @@ async def test_standard_invoice_tools_share_pricing_atomic_replay_and_locked_dra
     assert {updated.operation.status, update_replay.operation.status} == {"created", "replayed"}
     assert updated.invoice.notes == "Changed terms"
     assert updated.invoice.terms_text == "Net 14"
+    assert updated.invoice.subtotal_excl_vat == Decimal("300.00")
+    assert updated.invoice.vat_total == Decimal("63.00")
+    assert updated.invoice.total_incl_vat == Decimal("363.00")
+    assert len(updated.invoice.lines) == 1
+    assert updated.invoice.lines[0].quantity == Decimal("3")
+    assert updated.invoice.lines[0].total_incl_vat == Decimal("300.00")
+    assert updated.invoice.lines[0].line_taxes == []
+    assert len(updated.invoice.taxes) == 1
+    assert updated.invoice.taxes[0].taxable_amount == Decimal("300.00")
+    assert updated.invoice.taxes[0].tax_amount == Decimal("63.00")
     assert updated.operation.web_url == created.operation.web_url
+
+    persisted = await read_invoice(runtime_session_maker, principal, created.invoice.id)
+    assert persisted is not None
+    assert persisted.invoice.subtotal_excl_vat == updated.invoice.subtotal_excl_vat
+    assert persisted.invoice.vat_total == updated.invoice.vat_total
+    assert persisted.invoice.total_incl_vat == updated.invoice.total_incl_vat
+    assert [line.model_dump(mode="json") for line in persisted.invoice.lines] == [
+        line.model_dump(mode="json") for line in updated.invoice.lines
+    ]
+    assert [tax.model_dump(mode="json") for tax in persisted.invoice.taxes] == [
+        tax.model_dump(mode="json") for tax in updated.invoice.taxes
+    ]
+    assert update_replay.invoice.model_dump(mode="json") == updated.invoice.model_dump(
+        mode="json"
+    )
 
     # A later edit and BASE_URL change cannot rewrite the already stored result.
     async with admin_session_maker() as session:
@@ -591,6 +624,7 @@ async def test_standard_invoice_tools_share_pricing_atomic_replay_and_locked_dra
     )
     replay = await update_invoice_draft(runtime_session_maker, principal, update_request)
     assert replay.operation.status == "replayed"
+    assert replay.invoice.model_dump(mode="json") == updated.invoice.model_dump(mode="json")
     assert replay.invoice.notes == "Changed terms"
     assert replay.operation.web_url == updated.operation.web_url
 

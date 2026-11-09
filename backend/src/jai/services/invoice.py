@@ -1640,6 +1640,10 @@ async def update_invoice(
         await session.commit()
         await session.refresh(updated)
         return _invoice_to_read(updated)
+    # The bulk child deletes above do not update already-loaded collections on
+    # ``inv``. Agent mutations keep the caller's transaction open and snapshot
+    # this read immediately, so discard those collections before reloading.
+    session.expire(updated, attribute_names=["lines", "taxes"])
     return await _load_invoice_read(session, updated)
 
 

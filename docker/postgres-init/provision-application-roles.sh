@@ -156,6 +156,10 @@ ALTER DATABASE :"DBNAME" OWNER TO :"migration_user";
 GRANT CONNECT ON DATABASE :"DBNAME" TO :"app_user";
 GRANT USAGE ON SCHEMA public TO :"app_user";
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO :"app_user";
+-- M15's operation log is append-only. Provisioning may run again after
+-- migrations, so restore its narrower table grant when that table exists.
+SELECT format('REVOKE DELETE ON TABLE %I.%I FROM %I', 'public', 'agent_operation', :'app_user')
+WHERE to_regclass('public.agent_operation') IS NOT NULL \gexec
 -- ``UPDATE`` permits setval(), which lets the runtime role move application
 -- counters.  Explicitly revoke it as well as granting the minimum runtime
 -- sequence privileges so a rerun converges old provisioned volumes.

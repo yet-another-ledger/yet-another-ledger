@@ -2,9 +2,9 @@
 
 > 🌐 **English** · [中文](M15-hermes-telegram_zh.md)
 
-> **Status (2026-11-06)**: 🟡 The author resumed evaluation of existing M15 functionality. Current main is integrated on the M15 branch; this guide supports a later isolated development walkthrough, not a claim of deployment or acceptance. Check the actual migration history and profile before continuing 3/6, retaining earlier author-skipped/deferred checks. See the [current M15 synchronization checkpoint](M15.md).
+> **Status (2026-11-09)** 🟢 M15 is accepted within the recorded scope and included in v0.12.0. This guide retains deployment configuration steps. Historical real PDF/image intake and current isolated Hermes CLI checks have evidence. New Telegram validation, original hashes and phone links are author-skipped; AI-unavailable testing is deferred. Full scope is in the [M15 acceptance conclusion](M15.md).
 
-This guide documents the receipt-only part of M15 Step 5 using a separate Hermes profile and a distinct Telegram bot. Receipt intake has been partly walked through; remaining checks, author exceptions and the paused resume point are recorded in the M15 checkpoint. The guide and automated checks alone do not constitute author acceptance.
+This guide documents the receipt-only part of M15 Step 5 using a separate Hermes profile and a distinct Telegram bot. The optional full workflow is described below. Consult the M15 acceptance conclusion for actual evidence and author-approved omissions when deploying a new profile.
 
 ## Supported setup boundary
 
@@ -67,7 +67,7 @@ hermes -p jai-ledger gateway start
 hermes -p jai-ledger gateway status
 ```
 
-In Telegram, open the new bot's private chat and send `/jai-receipts` before the first receipt request. Use `hermes -p jai-ledger gateway stop` to stop this profile. These commands target only the new profile; do not run the unqualified `hermes gateway` command for this setup.
+In Telegram, open the new bot's private chat and ask it to load `jai-receipts` through `skill_view` before the first receipt request. If the client exposes a `/jai-receipts` command, it may also be used. Start a new conversation after replacing the skill so earlier rules leave the context. Use `hermes -p jai-ledger gateway stop` to stop this profile. These commands target only the new profile; do not run the unqualified `hermes gateway` command for this setup.
 
 ## JAI network addresses
 
@@ -89,7 +89,7 @@ Telegram albums need identical canonical request arguments on every update and r
 
 ## Original attachment and receipt-only rules
 
-Copy [the Hermes receipt skill](../../../integrations/hermes/jai-ledger/SKILL.md) into the new profile at `~/.hermes/profiles/jai-ledger/skills/jai-receipts/SKILL.md`, then verify it with `hermes -p jai-ledger skills list` and start a new Telegram session. Hermes uses the directory name as the `/jai-receipts` skill command; invoke `/jai-receipts` to load these rules for a receipt task:
+Copy [the Hermes receipt skill](../../../integrations/hermes/jai-ledger/SKILL.md) into the new profile at `~/.hermes/profiles/jai-ledger/skills/jai-receipts/SKILL.md`, then verify it with `hermes -p jai-ledger skills list` and start a new Telegram session. Ask Hermes to load `jai-receipts` with `skill_view` before a receipt task. Slash-command availability depends on the installed Hermes client. The skill supplies these rules.
 
 - Submit only original bytes available from the current Telegram attachment event. Do not reconstruct or encode the model's visual representation. If the host-side original bytes are not exposed to the helper/terminal tool, stop; do not guess a cache path or read arbitrary host files.
 - For photos, send the original as a Telegram **file/document** during the walkthrough if byte preservation is required. A displayed Telegram photo may be transformed; only a byte-for-byte comparison with the original proves preservation.
@@ -185,9 +185,9 @@ rm -rf "$STORAGE_DIR"
 
 Never target the normal `jai-dev` project or any production image tag for cleanup.
 
-## Pending author walkthrough
+## Deployment validation checklist
 
-The following checks remain outstanding and must be completed against the actual fresh profile, bot, JAI token, original files, and phone before Step 5/M15 can be accepted:
+Use the following checklist when enabling a new Telegram profile. M15 was accepted within the recorded scope on 2026-11-09. The acceptance conclusion distinguishes historical passes, this round’s isolated CLI evidence and author-skipped/deferred manual checks. This checklist does not turn omitted checks into passes.
 
 1. Confirm the active Hermes profile is `jai-ledger`, its bot token is distinct, its `.env` is private, and JAI MCP discovery exposes only the two receipt tools.
 2. In Telegram, send one image as a file/document and one PDF. For each, compare the original file's SHA-256 with the original bytes stored by JAI; confirm one pending inbox item and open JAI's returned review URL from a phone.
@@ -195,4 +195,4 @@ The following checks remain outstanding and must be completed against the actual
 4. Test an unauthorized Telegram sender and a group attempt. Confirm the sender is denied and that BotFather disallows group joins; do not interpret a Hermes allowlist alone as enforcing sender/chat intersection.
 5. Revoke/disable the JAI token and verify MCP calls fail. Separately exercise an AI-disabled/error submission and confirm the receipt remains pending and the reply gives its current status and phone link. After confirming an item in the web app, replay its Telegram event and verify the reply reports `confirmed` rather than `pending`.
 
-The author's real PDF transfer failed on 2026-10-01 because Hermes could not reliably pass the complete Base64 as tool arguments. The frozen Step 5 fallback has been implemented; see [local receipt adapter setup](M15-local-receipt-adapter.md). Re-test both real image and PDF, hashes, replay and phone links after installation. The author uses the `accountant` walkthrough profile and confirmed development port 8000.
+The author's real PDF transfer failed on 2026-10-01 because Hermes could not reliably pass the complete Base64 as tool arguments. The frozen Step 5 fallback has been implemented; see [local receipt adapter setup](M15-local-receipt-adapter.md). Historical real PDF/valid-image intake and replay subsequently passed through the adapter. Original hashes and phone links were author-skipped. That historical walkthrough used `accountant` on development port 8000; the resumed 2026-11-09 isolated environment used port 18015. Substitute your actual new profile and port.

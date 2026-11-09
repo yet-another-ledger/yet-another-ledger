@@ -2,23 +2,19 @@
 
 > 🌐 **English** · [中文](M15-local-receipt-adapter_zh.md)
 
-> **Status (2026-11-06)**: 🟡 The author resumed evaluation of existing M15 functionality. Current main is integrated on the M15 branch; this guide supports a later isolated development walkthrough, not a claim of deployment or acceptance. Check the actual migration history and profile before continuing 3/6, retaining earlier author-skipped/deferred checks. See the [current M15 synchronization checkpoint](M15.md).
+> **Status (2026-11-09)** 🟢 M15 is accepted within the recorded scope and included in v0.12.0. This guide retains deployment configuration steps. Historical real PDF/image intake and current isolated Hermes CLI checks have evidence. New Telegram validation, original hashes and phone links are author-skipped; AI-unavailable testing is deferred. Full scope is in the [M15 acceptance conclusion](M15.md).
 
 ## Why this path is needed
 
-On 2026-10-01, the author tested a real 106,388-byte Telegram PDF. Hermes could read it and load `jai-receipts`, but could not reliably place the complete Base64 into remote MCP arguments. No submission succeeded. This triggers the fallback already frozen in [M15 Step 5](M15.md). Repeat real image/PDF, stored-original SHA-256, replay and phone-link checks after installation; automated checks do not replace acceptance.
+On 2026-10-01, the author tested a real 106,388-byte Telegram PDF. Hermes could read it and load `jai-receipts`, but could not reliably place the complete Base64 into remote MCP arguments. No submission succeeded. This triggers the fallback already frozen in [M15 Step 5](M15.md). Historical real PDF/valid-image intake and replay subsequently passed. Original hashes and phone links remain author-skipped in the accepted scope. Use the deployment checklist when enabling a new profile.
 
 The [adapter](../../../integrations/hermes/jai-ledger/receipt_adapter.py) is a local stdio MCP subprocess managed by Hermes. It takes original attachment paths, filenames and MIME types and streams multipart to `POST /api/v1/agent/receipt-inbox`. No new container or Hermes source change is required. The endpoint checks the same bearer token and `receipt:intake` scope before parsing, bounds the request body even without Content-Length, and calls the same M14 validation, RLS and atomic intake/replay service as remote MCP. File bytes and Base64 stay out of model arguments and results.
 
 ## Install one action at a time
 
-These commands match the author's **`accountant`** profile and confirmed **development port 8000**. Run repository-relative commands from the project root. Do not operate the production app, database or default Hermes gateway.
+These commands use the historical **`accountant`** profile and **development port 8000**. Substitute the actual profile and JAI port. The resumed isolated walkthrough used **18015**. Run repository-relative commands from the project root and use the isolated Compose instructions in the setup guide for testing.
 
-1. Rebuild the development app to load the new endpoint. There is no new migration:
-
-   ```sh
-   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build app
-   ```
+1. Use the v0.12.0 app, which includes the streaming endpoint and migrations `0055`/`0056`. Back up the database and storage before a normal release upgrade. For testing, prepare the isolated stack in the setup guide. The local adapter itself adds no further database migration.
 
 2. Ask Hermes to report only the current original attachment's full cache path and directory, without encoding, submitting or copying the file. Confirm the actual host-visible path. The locally inspected Hermes source uses profile-relative `cache/documents` and `cache/images`, with possible legacy `document_cache`/`image_cache` directories. Approve only a specific attachment-cache root containing the required originals, such as the profile's `cache` when both types really live there. Never approve `/`, `/tmp`, HOME, the entire profile, or a directory containing credentials. Do not guess container/host path translations or invent paths.
 

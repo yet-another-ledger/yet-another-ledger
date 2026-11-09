@@ -6,7 +6,7 @@
 
 技术栈 **FastAPI + Vue 3 + PostgreSQL**。
 
-> **状态——1.0 前版本（`v0.11.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
+> **状态——1.0 前版本（`v0.12.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
 
 ## 功能
 
@@ -23,6 +23,7 @@
 - **单据** —— 发票、报价、收据和 Refund Confirmation 的中英 PDF/邮件，包含发出时交易方快照、实际下载/发送成品的精确留存，以及可选 AI 建议性比对的不可变历史 Invoice PDF 补传。
 - **报表** —— 盈亏（P/L）、**荷兰 BTW 申报汇总**、ICP 清单、开支报表和 ECharts 仪表盘，包含 Advance/Final/Credit 只计一次的投影，以及独立里程费用与扣里程前／后利润。
 - **平台** —— TOTP 两步验证、类型化三层设置、`Decimal` 金额计算、双语界面（English / 中文）、单容器应用经 Docker Compose 部署。
+- **Agent／MCP（M15）** — owner 管理可撤销限权令牌，支持收据接收、客户查询／创建、报价与普通发票草稿的预览／创建／修改，带持久重放与审计。支持 Codex 和 Hermes 客户端，收据确认及单据发送／签发由网页完成。
 
 ## 技术栈
 
@@ -58,7 +59,7 @@ docker compose up -d
 
 停止：`docker compose down`（加 `-v` 同时删除数据库卷）。
 
-> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.11.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
+> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.12.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
 
 ## 配置
 
@@ -98,7 +99,17 @@ SMTP 测试失败仍返回通用的 `SMTP_SEND_FAILED` API 错误。服务端日
 
 附录原件及其元数据通过事务存储在 PostgreSQL（`BYTEA`），不存入 `STORAGE_DIR`。备份和恢复流程必须包含数据库；只备份存储卷并不包含这些原件。既有正式 Invoice／Refund `DocumentArtifact` 历史保持不变：M17 不会留存精确的历史报价邮件 PDF，也不会冻结报价正文。
 
-从 v0.10.0 升级时，请先备份 PostgreSQL 和现有票据文件存储，再启动新镜像。正常 Compose 迁移服务会应用 `0053` 和 `0054`。既有报价的附录清单初始为空。如果在 `.env` 中显式设置了 `APP_VERSION`，请更新为 `0.11.0`。
+M17 在 v0.11.0 引入 `0053` 和 `0054` 迁移。从 v0.10.0 升级时，既有报价的附录清单初始为空。每次升级前先备份 PostgreSQL 和票据存储。如果 `.env` 显式设置 `APP_VERSION`，本次发版请更新为 `0.12.0`。
+
+## Agent 接入与 M15 升级
+
+v0.12.0 在现有应用镜像内通过 `/api/v1/mcp` 提供 Streamable HTTP MCP。通过 MFA 登录的 owner 在**设置 → Agent access** 创建具名令牌、选择权限、将只显示一次的密钥保存到客户端私有环境，之后可随时撤销。客户端 HTTP 地址填写 `http://127.0.0.1:<JAI端口>/api/v1/mcp`，通过客户端私有密钥配置传入 `Authorization: Bearer <token>`。端点保持同机／私网使用，浏览器审阅链接单独配置 JAI 的 `BASE_URL`。
+
+可选权限为 `receipt:intake`、`customer:read`、`customer:create`、`catalog:read`、`quote:read`、`quote:write_draft`、`invoice:read` 和 `invoice:write_draft`。按所需能力勾选。仅收据接入使用 `receipt:intake`，完整 16 工具工作流使用全部八项。每次调用及重放均重新检查授权。每次写操作要求调用方生成稳定 `request_id`，相同参数重试沿用同一 ID，新操作使用新 ID。普通 CLI 客户端省略 Telegram `source` 元数据。
+
+Hermes 配置、分角色 skill 及完整 MCP 允许列表见[客户端指南](docs/plan/milestones/M15-hermes-telegram_zh.md)。Skill 是安装到所选 Hermes profile 的文件。原始 Telegram 附件在远程 Base64 传输不可靠时使用[本地流式适配器](docs/plan/milestones/M15-local-receipt-adapter_zh.md)。可选 stdio 适配器在 Hermes 一侧运行，需要批准的附件缓存根目录、本地 JAI 地址与令牌。MCP 端点与上传路由均包含在同一个 JAI 镜像中，替换 skill 后开启新会话加载当前规则。
+
+从 v0.11.0 升级前先备份 PostgreSQL 和存储。正常 Compose 迁移服务在 M17 的 `0054` 后应用 `0055`／`0056`，新增令牌、操作记录、RLS 和受限审计权限。旧 M15 预览库可能存在含糊的 `0044`／`0045` 或 `0053`／`0054` 历史。存在 Agent 表时迁移会拒绝此类历史，须保留备份后单独协调，或准备全新的隔离测试库，绝不能盲目 stamp。[M15 计划](docs/plan/milestones/M15_zh.md)记录实际验收范围及跳过／暂缓项目。
 
 ## 开发
 
@@ -112,11 +123,11 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 路线图
 
-M0–M14 已完成。M16／M17 已在记录范围内验收。**作者于 2026-11-06 恢复 M15 已有功能评估**：先将最新 main 合入 `wip/m15-agent-accounting-paused`，再从 3/6 报价准备继续走查；尚未验收或批准重设计。Agent/MCP 实现保留在 M15 分支，主线不包含该实现。现有收件箱与 AI 提取继续沿用既有服务。详见 [M15 检查点](docs/plan/milestones/M15_zh.md)和[路线图](docs/plan/roadmap_zh.md)。
+M0–M17 均已按各自记录范围验收。**M15 于 2026-11-09 验收并纳入 v0.12.0**，证据包括历史真实收据接收、自动化 Codex MCP 验收与隔离真实 Hermes CLI 验证。作者跳过及暂缓的检查继续保留在 [M15 验收结论](docs/plan/milestones/M15_zh.md)和[路线图](docs/plan/roadmap_zh.md)。
 
 作者已于 2026-11-01 按记录的代表性走查范围验收 [M16](docs/plan/milestones/M16_zh.md)，外部销售凭证记账、VAT／P&L 分离、储能年度私用调整及并入的 SI3 里程利润拆分已交付；跳过／未重测路径及已知遗留仍明确记录。
 
-作者于 2026-11-04 确认并记录 [M17 报价 PDF 附录设计](docs/plan/milestones/M17_zh.md)：共享资料库和报价专用上传、人工选择排序、预览／下载／邮件统一合并输出。六个实施步骤均通过本地门禁和独立审查。作者于 2026-11-06 完成已记录范围的走查。走查范围与跳过项见 M17 计划。M15 保持暂停。
+作者于 2026-11-04 确认并记录 [M17 报价 PDF 附录设计](docs/plan/milestones/M17_zh.md)：共享资料库和报价专用上传、人工选择排序、预览／下载／邮件统一合并输出。六个实施步骤均通过本地门禁和独立审查。作者于 2026-11-06 完成已记录范围的走查。走查范围与跳过项见 M17 计划。M15 已于 2026-11-09 按记录范围单独验收。
 
 SI1（单据排序、Quote 复制和服务器侧 Sent 副本）已于2026-10-25按代表性走查范围验收；未实际执行的邮件类型和失败分支明确记录为自动化覆盖。参见 [SI1 计划与验收](docs/plan/improvements/SI1_zh.md)。
 

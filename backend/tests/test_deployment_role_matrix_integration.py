@@ -393,6 +393,35 @@ def _runtime_privilege_flags(url: str) -> dict[str, Any]:
     return asyncio.run(query())
 
 
+def _agent_operation_privilege_flags(url: str) -> dict[str, bool]:
+    """Check runtime access to the append-only Agent operation log."""
+
+    async def query() -> dict[str, bool]:
+        engine = create_async_engine(url)
+        try:
+            async with engine.connect() as conn:
+                row = (
+                    await conn.execute(
+                        text(
+                            "SELECT "
+                            "has_table_privilege(current_user, 'public.agent_operation', "
+                            "'SELECT') AS can_select, "
+                            "has_table_privilege(current_user, 'public.agent_operation', "
+                            "'INSERT') AS can_insert, "
+                            "has_table_privilege(current_user, 'public.agent_operation', "
+                            "'UPDATE') AS can_update, "
+                            "has_table_privilege(current_user, 'public.agent_operation', "
+                            "'DELETE') AS can_delete"
+                        )
+                    )
+                ).mappings().one()
+                return {key: bool(value) for key, value in row.items()}
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(query())
+
+
 def _create_default_privilege_probe(url: str) -> None:
     """Create objects as the migration owner after 0031 grants defaults."""
 
@@ -1127,3 +1156,76 @@ def test_0030_role_identifier_cannot_escape_grant_statement(
         "SELECT rolname FROM pg_roles WHERE rolname = 'jai_matrix_injected'"
     )
     assert _role_flags(admin_url)["current_user"] == admin_user
+
+
+def test_repeat_provisioning_preserves_agent_operation_append_only_grant(
+    disposable_servers: list[_Postgres18],
+) -> None:
+    """A pre-migration provision and post-0056 rerun keep their intended grants."""
+    if not _docker_is_available():
+        pytest.skip("requires a Docker daemon; CI integration runners must provide one")
+
+    admin_user, admin_password = "audit_admin", "admin@secret:/#"
+    migration_user, migration_password = "custom-migrator", "migration@secret:/#"
+    app_user, app_password = "runtime-role", "runtime@secret:/#"
+    server = _Postgres18(
+        "agent-audit", user=admin_user, password=admin_password, database="audit_jai"
+    )
+    disposable_servers.append(server)
+    server.start()
+    _admin_url, migration_url, runtime_url = _database_urls(
+        server.port,
+        server.database,
+        admin_user=admin_user,
+        admin_password=admin_password,
+        migration_user=migration_user,
+        migration_password=migration_password,
+        app_user=app_user,
+        app_password=app_password,
+    )
+
+    # The initial call must be safe while agent_operation is still absent.
+    _run_provision(
+        server,
+        admin_user=admin_user,
+        admin_password=admin_password,
+        legacy_user="missing_legacy_role",
+        legacy_password="unused",
+        migration_user=migration_user,
+        migration_password=migration_password,
+        app_user=app_user,
+        app_password=app_password,
+    )
+    assert server.psql(
+        "SELECT to_regclass('public.agent_operation') IS NOT NULL",
+        user=admin_user,
+        password=admin_password,
+    ).strip() == "f"
+
+    migration_env = _test_env(
+        DATABASE_URL=migration_url,
+        POSTGRES_APP_USER=app_user,
+        POSTGRES_APP_PASSWORD=app_password,
+    )
+    _upgrade_host(migration_url, migration_env)
+    expected = {
+        "can_select": True,
+        "can_insert": True,
+        "can_update": True,
+        "can_delete": False,
+    }
+    assert _agent_operation_privilege_flags(runtime_url) == expected
+
+    # This real script rerun used to restore DELETE via its all-tables grant.
+    _run_provision(
+        server,
+        admin_user=admin_user,
+        admin_password=admin_password,
+        legacy_user="missing_legacy_role",
+        legacy_password="unused",
+        migration_user=migration_user,
+        migration_password=migration_password,
+        app_user=app_user,
+        app_password=app_password,
+    )
+    assert _agent_operation_privilege_flags(runtime_url) == expected

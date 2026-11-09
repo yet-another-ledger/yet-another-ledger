@@ -1,7 +1,7 @@
 # SI1 · Document Ordering, Quote Duplication and Sent Copies
 > 🌐 **English** · [中文](SI1_zh.md)
 
-> **Status**: Completed and accepted by the author on 2026-10-25 after all four implementation steps, automated gates, independent blind reviews and the recorded representative walkthrough scope. SI1 is a small-improvement issue, not a milestone. Its plan uses the milestone implementation format and lives beside `milestones/` in `improvements/`. M15 remains paused; SI1 neither depends on nor resumes its development branch.
+> **Status**: Completed and accepted by the author on 2026-10-25 after all four implementation steps, automated gates, independent blind reviews and the recorded representative walkthrough scope. SI1 is a small-improvement issue, not a milestone. Its plan uses the milestone implementation format and lives beside `milestones/` in `improvements/`. SI1 was delivered independently during the M15 pause. M15 was separately accepted on 2026-11-09.
 
 ## Goals & Scope
 
@@ -163,7 +163,7 @@ The final report must state which mail types were manually exercised and which r
 - Walkthrough diagnostic follow-up: Added fixed, redacted SMTP test-failure categories to server logs while keeping the existing generic API error and independent SMTP/IMAP outcomes. Ruff, strict mypy (122 files), isolated default pytest (1388 tests, including 18 new diagnostics tests) and Docker build passed; full integration was not repeated for this logging-only change. The follow-up used the ordinary walkthrough workflow without another blind-review run; the author accepted and authorized committing this follow-up with closeout. The author updated credentials and the next real test succeeded; the earlier generic failure cannot be retrospectively classified. No agent sent real mail or accessed mailbox contents.
 - Release-candidate verification: main commit `5815bb7` passed all remote CI jobs on 2026-10-25, including full PostgreSQL integration, backend quality, generated-type freshness, frontend build and Docker build. This includes the walkthrough diagnostic follow-up; its earlier local-only integration limitation is historical. The v0.8.0 tag points to this verified commit.
 - Operator guidance: See [README SMTP and server-side Sent copies](../../../README.md#smtp-and-server-side-sent-copies) for effective shared SMTP credentials/environment fallback, TLS/ports, existing-folder discovery, independent outcomes and safe troubleshooting.
-- Known carryover / follow-on: product-manual PDF management and manual selection are covered by [M17](../milestones/M17.md); All six implementation steps passed local gates and independent review. The author walkthrough was completed on 2026-11-06 within the recorded scope. Sent-copy retries/backfill and Quote version management remain out of scope. SI1 historical acceptance is unchanged; M15 stays paused.
+- Known carryover / follow-on: product-manual PDF management and manual selection are covered by [M17](../milestones/M17.md); All six implementation steps passed local gates and independent review. The author walkthrough was completed on 2026-11-06 within the recorded scope. Sent-copy retries/backfill and Quote version management remain out of scope. SI1 historical acceptance is unchanged; M15 was separately accepted within its recorded scope on 2026-11-09.
 
 ## Protocol References
 

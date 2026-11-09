@@ -2,23 +2,19 @@
 
 > 🌐 [English](M15-local-receipt-adapter.md) · **中文**
 
-> **状态（2026-11-06）**：🟡 作者恢复既有 M15 功能评估。最新主线已合入 M15 分支；本指南供后续隔离开发走查使用，不代表已部署或验收。先核实实际迁移历史与 profile，再继续原 3/6 检查点；此前作者跳过／暂缓的项目继续保留。见 [M15 当前同步检查点](M15_zh.md)。
+> **状态（2026-11-09）** 🟢 M15 已按记录范围验收并纳入 v0.12.0。本指南保留部署配置步骤。历史真实 PDF／图片接收及本轮隔离 Hermes CLI 检查已有证据，新的 Telegram 验证、原件哈希及手机链接由作者决定跳过，AI 不可用测试暂缓。完整范围见 [M15 验收结论](M15_zh.md)。
 
 ## 为什么需要此路径
 
-2026-10-01，作者测试了真实的 106,388 字节 Telegram PDF。Hermes 能读取文件并加载 `jai-receipts`，但无法可靠地将完整 Base64 放入远程 MCP 参数，没有提交成功。这触发了 [M15 Step 5](M15_zh.md) 已冻结的备用方案。安装后重新进行真实图片／PDF、原件 SHA-256、重放与手机链接检查；自动化检查不能替代验收。
+2026-10-01，作者测试了真实的 106,388 字节 Telegram PDF。Hermes 能读取文件并加载 `jai-receipts`，但无法可靠地将完整 Base64 放入远程 MCP 参数，没有提交成功。这触发了 [M15 Step 5](M15_zh.md) 已冻结的备用方案。随后真实 PDF／有效图片接收和重放已通过，验收范围中的原件哈希及手机链接仍由作者决定跳过。启用新 profile 时使用部署清单。
 
 [适配器](../../../integrations/hermes/jai-ledger/receipt_adapter.py) 是 Hermes 管理的本地 stdio MCP 子进程。它接受原始附件路径、文件名与 MIME 类型，向 `POST /api/v1/agent/receipt-inbox` 流式上传 multipart。无需新容器或修改 Hermes 源码。接口在解析前检查相同 bearer token 与 `receipt:intake` scope，即使没有 Content-Length 也限制请求体大小，并调用远程 MCP 使用的同一 M14 校验、RLS、原子收件／重放服务。文件字节与 Base64 不进入模型的参数或结果。
 
 ## 每次只做一个安装动作
 
-以下命令匹配作者的 **`accountant`** profile 和已确认的**开发端口 8000**。相对仓库的命令从项目根目录执行。不要操作生产应用、数据库或默认 Hermes 网关。
+这些命令采用历史 **`accountant`** profile 和**开发端口 8000**，请替换成实际 profile 与 JAI 端口。恢复后的隔离走查使用 **18015**。仓库相对命令从项目根目录执行，测试按配置指南中的隔离 Compose 步骤准备。
 
-1. 重建开发应用以加载新接口，没有新迁移：
-
-   ```sh
-   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build app
-   ```
+1. 使用包含流式端点及 `0055`／`0056` 迁移的 v0.12.0 应用。正常发版升级前先备份数据库与存储，测试则按配置指南准备隔离栈。本地适配器本身没有额外的数据库迁移。
 
 2. 让 Hermes 只报告当前原始附件的完整缓存路径与目录，不编码、不提交、不复制。确认主机可见的真实路径。本机只读检查的 Hermes 源码使用 profile 下的 `cache/documents` 与 `cache/images`，旧 `document_cache`／`image_cache` 目录也可能存在。只批准包含所需原件的具体附件缓存根目录，例如两类原件确实都位于 profile 的 `cache` 时使用它。不得批准 `/`、`/tmp`、HOME、整个 profile 或包含凭据的目录，不得猜测容器／主机路径映射或编造路径。
 

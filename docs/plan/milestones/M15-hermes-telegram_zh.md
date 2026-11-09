@@ -2,9 +2,9 @@
 
 > 🌐 [English](M15-hermes-telegram.md) · **中文**
 
-> **状态（2026-11-06）**：🟡 作者恢复既有 M15 功能评估。最新主线已合入 M15 分支；本指南供后续隔离开发走查使用，不代表已部署或验收。先核实实际迁移历史与 profile，再继续原 3/6 检查点；此前作者跳过／暂缓的项目继续保留。见 [M15 当前同步检查点](M15_zh.md)。
+> **状态（2026-11-09）** 🟢 M15 已按记录范围验收并纳入 v0.12.0。本指南保留部署配置步骤。历史真实 PDF／图片接收及本轮隔离 Hermes CLI 检查已有证据，新的 Telegram 验证、原件哈希及手机链接由作者决定跳过，AI 不可用测试暂缓。完整范围见 [M15 验收结论](M15_zh.md)。
 
-本指南记录使用独立 Hermes profile 和独立 Telegram bot 配置 M15 第 5 步仅收据功能。收据接入已进行部分走查；剩余检查、作者例外及暂缓恢复位置见 M15 检查点。指南和自动化检查本身不代表作者验收。
+本指南记录使用独立 Hermes profile 和独立 Telegram bot 配置 M15 第 5 步仅收据功能，下方也说明可选完整工作流。部署新 profile 时请核对 M15 验收结论中的实际证据和作者批准的省略项。
 
 ## 支持的配置边界
 
@@ -67,7 +67,7 @@ hermes -p jai-ledger gateway start
 hermes -p jai-ledger gateway status
 ```
 
-在 Telegram 中打开新 bot 的私聊，并在首次提交凭证前发送 `/jai-receipts`。使用 `hermes -p jai-ledger gateway stop` 停止该 profile。本配置的命令均只针对新建 profile；不要为此配置运行不带 `-p` 的 `hermes gateway`。
+在 Telegram 中打开新 bot 的私聊，首次提交凭证前以自然语言要求它通过 `skill_view` 加载 `jai-receipts`。客户端若提供 `/jai-receipts` 命令，也可使用。替换 skill 后开始新会话，让旧规则退出上下文。使用 `hermes -p jai-ledger gateway stop` 停止该 profile。本配置的命令均只针对新建 profile；不要为此配置运行不带 `-p` 的 `hermes gateway`。
 
 ## JAI 网络地址
 
@@ -89,7 +89,7 @@ Telegram 相册要求每次更新和重投的规范请求参数完全相同。�
 
 ## 原始附件与仅凭证回复规则
 
-将英文版运行文件 [SKILL.md](../../../integrations/hermes/jai-ledger/SKILL.md) 复制到新 profile 的 `~/.hermes/profiles/jai-ledger/skills/jai-receipts/SKILL.md`；作者阅读用的[中文镜像](../../../integrations/hermes/jai-ledger/SKILL_zh.md)。然后运行 `hermes -p jai-ledger skills list` 确认并开启新的 Telegram 会话。Hermes 使用目录名作为 `/jai-receipts` 技能命令；处理凭证时调用 `/jai-receipts` 载入以下规则：
+将英文版运行文件 [SKILL.md](../../../integrations/hermes/jai-ledger/SKILL.md) 复制到新 profile 的 `~/.hermes/profiles/jai-ledger/skills/jai-receipts/SKILL.md`；作者阅读用的[中文镜像](../../../integrations/hermes/jai-ledger/SKILL_zh.md)。然后运行 `hermes -p jai-ledger skills list` 确认并开启新的 Telegram 会话。凭证任务前让 Hermes 通过 `skill_view` 加载 `jai-receipts`。Slash 命令是否可用取决于所装 Hermes 客户端。该 skill 提供以下规则。
 
 - 只提交当前 Telegram 附件事件提供的原始字节。不得重建或编码模型的视觉表示。如果主机侧原始字节未暴露给 helper／terminal 工具，应停止；不得猜测缓存路径或读取任意主机文件。
 - 对照片，若走查要求保留字节，需将原件作为 Telegram **文件／文档**发送。Telegram 展示用照片可能经过转换；只有原始文件与 JAI 存储字节逐字节比较才能证明保留完整。
@@ -185,9 +185,9 @@ rm -rf "$STORAGE_DIR"
 
 清理时绝不要操作常规 `jai-dev` project 或任何生产镜像标签。
 
-## 待作者走查
+## 部署验证清单
 
-以下检查仍待完成，必须使用实际的新 profile、bot、JAI 令牌、原始文件和手机验证，才能接受第 5 步／M15：
+启用新的 Telegram profile 时使用下列清单。M15 已于 2026-11-09 按记录范围验收，验收结论区分历史通过项、本轮隔离 CLI 证据及作者跳过／暂缓的人工项目。清单中的省略项仍按实际状态记录。
 
 1. 确认当前 Hermes profile 是 `jai-ledger`、bot 令牌独立、`.env` 权限私密，且 JAI MCP 发现结果只包含两个凭证工具。
 2. 在 Telegram 中分别发送一张作为文件／文档的图片和一个 PDF。针对每个文件，下载 JAI 存储的原件并与源文件比较 SHA-256；不得比较或哈希模型可见的 Base64。确认各自产生一条待审核收件项，并用手机打开 JAI 返回的审阅链接。
@@ -195,4 +195,4 @@ rm -rf "$STORAGE_DIR"
 4. 测试未授权 Telegram 发送者和群组尝试。确认发送者被拒绝，且 BotFather 禁止 bot 加入群组；不得将 Hermes allowlist 单独解释为已实现发送者／聊天交集。
 5. 撤销／停用 JAI 令牌并确认 MCP 调用失败。另行测试 AI 禁用／错误时的提交，确认凭证仍待审核，回复中包含当前状态和手机链接。在网页确认一条凭证后，重放对应 Telegram 事件并确认回复报告 `confirmed`，而非 `pending`。
 
-作者在 2026-10-01 的真实 PDF 传输失败，因为 Hermes 无法可靠地将完整 Base64 放入工具参数。冻结的 Step 5 备用方案现已实现，见[本地收据适配器配置](M15-local-receipt-adapter_zh.md)。安装后重新测试真实图片与 PDF、哈希、重放和手机链接。作者使用 `accountant` 走查 profile 与已确认的开发端口 8000。
+作者在 2026-10-01 的真实 PDF 传输失败，因为 Hermes 无法可靠地将完整 Base64 放入工具参数。冻结的 Step 5 备用方案现已实现，见[本地收据适配器配置](M15-local-receipt-adapter_zh.md)。随后真实 PDF／有效图片接收及重放已通过适配器验证，原件哈希和手机链接由作者决定跳过。历史走查使用 `accountant` 和开发端口 8000，2026-11-09 恢复走查的隔离环境使用 18015。部署时替换为实际新 profile 和端口。
