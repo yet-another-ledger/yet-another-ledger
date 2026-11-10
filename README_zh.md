@@ -131,6 +131,8 @@ M0–M17 均已按各自记录范围验收。**M15 于 2026-11-09 验收并纳�
 
 SI1（单据排序、Quote 复制和服务器侧 Sent 副本）已于2026-10-25按代表性走查范围验收；未实际执行的邮件类型和失败分支明确记录为自动化覆盖。参见 [SI1 计划与验收](docs/plan/improvements/SI1_zh.md)。
 
+[M18 里程 MCP 录入](docs/plan/milestones/M18_zh.md)设计已于 2026-11-10 确认，四张原子任务卡待实施。计划提供客户端通用的交通工具选项、用户确认的预览及幂等创建，新增显式 `mileage:create` 权限。路线建议由 Agent 自身可用的搜索／地图能力提供。该能力尚未包含在当前发版中。
+
 ## 文档
 
 文档英文优先，并配同步的中文镜像（`*_zh.md`）。从 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md) 入手；荷兰 VAT/BTW 申报口径见 [`docs/insight/btw-aangifte-2026-guide_zh.md`](docs/insight/btw-aangifte-2026-guide_zh.md)。

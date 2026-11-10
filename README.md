@@ -132,6 +132,8 @@ The [M17 Quote PDF appendices design](docs/plan/milestones/M17.md) was agreed an
 
 SI1 (document ordering, Quote duplication and server-side Sent copies) was accepted on 2026-10-25 on a representative walkthrough scope; unperformed mail variants and failure paths remain explicitly recorded with automated coverage. See the [SI1 plan and acceptance](docs/plan/improvements/SI1.md).
 
+[M18 Agent mileage intake](docs/plan/milestones/M18.md) has an agreed design dated 2026-11-10, with four atomic task cards awaiting implementation. It plans client-neutral transport options, user-confirmed previews and idempotent creation under a new explicit `mileage:create` permission. Route suggestions come from the Agent's own available search/map capabilities. This capability is pending delivery in a future release.
+
 ## Documentation
 
 Docs are English-first with a synchronized Chinese mirror (`*_zh.md`). Start at [`docs/plan/roadmap.md`](docs/plan/roadmap.md); the Dutch VAT/BTW filing basis is in [`docs/insight/btw-aangifte-2026-guide.md`](docs/insight/btw-aangifte-2026-guide.md).

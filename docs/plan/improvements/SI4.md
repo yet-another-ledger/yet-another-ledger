@@ -4,6 +4,8 @@
 
 > **Status (2026-11-10)** 🟢 Implementation, independent review and author-delegated real TCP subagent acceptance are complete. The two read tools and `expense:read` are delivered in 0.13.0. Historical M15 acceptance is preserved. Human UI/Telegram/Hermes checks remain distinguished from this automated evidence.
 
+> **Planned follow-on (2026-11-10)** [M18 Agent mileage intake](../milestones/M18.md) has an agreed design awaiting implementation. It reuses the mileage and Agent foundations for client-neutral options, previews and confirmed creation under a separate `mileage:create` permission.
+
 ## Contract and boundary
 
 - Add `list_expenses` and `get_expense`, both requiring new `expense:read`. The complete current surface becomes 18 tools and nine scopes. Existing tokens retain exactly their original grants. Owners create a replacement token to obtain the new scope.

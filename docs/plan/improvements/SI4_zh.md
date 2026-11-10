@@ -4,6 +4,8 @@
 
 > **状态（2026-11-10）** 🟢 实现、独立盲审及作者委托的真实 TCP subagent 验收完成。两个只读工具及 `expense:read` 已交付，版本为 0.13.0。M15 的历史验收保留，人工网页／Telegram／Hermes 检查与本轮自动化证据分开记录。
 
+> **后续计划（2026-11-10）** [M18 里程 MCP 录入](../milestones/M18_zh.md)设计已确认、待实施，将复用既有里程与 Agent 基础提供客户端通用的选项、预览及确认创建，使用独立 `mileage:create` 权限。
+
 ## 契约与边界
 
 - 新增 `list_expenses` 和 `get_expense`，均要求新的 `expense:read`。当前完整工具面变为 18 项、权限变为九项。旧 token 保留原有授权，owner 需要创建替换 token 获得新权限。

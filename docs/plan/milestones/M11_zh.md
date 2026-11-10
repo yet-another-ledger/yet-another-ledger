@@ -6,6 +6,8 @@
 >
 > **税务锚点（规划时的现行口径）**：荷兰税务局说明，私人交通工具用于商业行程时，**2026 年可按 €0.25/km** 从利润中扣除；**2024 与 2025 年为 €0.23/km**。所得税口径下，通勤（`woon-werkverkeer`）属于商业里程。该定额已包含燃油、保险、过路费、停车等成本，不能再通过此里程申报重复扣除。来源：[Belastingdienst · Zakelijk gebruik privévervoermiddel](https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/zakelijk/winst/inkomstenbelasting/inkomstenbelasting_voor_ondernemers/zakelijk-gebruik-privevervoermiddel)。
 
+> **后续计划（2026-11-10）** [M18 里程 MCP 录入](M18_zh.md)设计已确认、待实施，将复用既有里程与 Agent 基础提供客户端通用的选项、预览及确认创建，使用独立 `mileage:create` 权限。
+
 ## 执行模型
 
 > 遵循 `AGENTS_zh.md`：默认是人工模式；只有作者明确指定时才进入 orchestrator 模式。orchestrator 模式下，下面每一步各落一个实现 commit，随后盲审 / 返工收敛并逐步 autosquash；全部步骤完成后才生成里程碑级报告。
