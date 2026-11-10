@@ -5,12 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import socket
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
-from httpx import ASGITransport, AsyncClient, Response
+import uvicorn
+from httpx import AsyncClient, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.applications import Starlette
@@ -30,6 +34,7 @@ from jai.models.setting import Setting
 from jai.models.user import User
 from jai.models.vat import VatRate, VatTreatment
 from jai.schemas.agent_token import AgentTokenCreate, AgentTokenScope
+from jai.schemas.agent_tools import AgentMileageWrite
 from jai.schemas.setting import SETTING_KEY_MILEAGE_DEFAULTS
 from jai.services.agent_tokens import issue_token
 from jai.services.mileage import seed_for_company as seed_mileage
@@ -55,6 +60,47 @@ def _fresh_mcp_wire_app() -> ASGIApp:
             ]
         )
     )
+
+
+@asynccontextmanager
+async def _tcp_mcp_client(transport_app: ASGIApp) -> AsyncIterator[AsyncClient]:
+    """Serve the real MCP ASGI boundary on an owned ephemeral loopback port."""
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    port = listener.getsockname()[1]
+    server = uvicorn.Server(
+        uvicorn.Config(
+            transport_app,
+            host="127.0.0.1",
+            port=port,
+            log_level="error",
+            lifespan="off",
+            timeout_graceful_shutdown=2,
+        )
+    )
+    server_task = asyncio.create_task(server.serve(sockets=[listener]))
+    try:
+        async with asyncio.timeout(10):
+            while not server.started:
+                if server_task.done():
+                    await server_task
+                    raise RuntimeError("The loopback MCP server stopped before startup.")
+                await asyncio.sleep(0.01)
+        async with AsyncClient(
+            base_url=f"http://127.0.0.1:{port}", timeout=10, trust_env=False
+        ) as client:
+            yield client
+    finally:
+        server.should_exit = True
+        try:
+            await asyncio.wait_for(asyncio.shield(server_task), timeout=5)
+        except TimeoutError:
+            server.force_exit = True
+            await server_task
+        finally:
+            listener.close()
 
 
 @pytest.mark.integration
@@ -191,9 +237,7 @@ async def test_mileage_options_preview_and_create_work_over_mcp(
 
     transport_app = _fresh_mcp_wire_app()
     async with mcp_module.server.session_manager.run():
-        async with AsyncClient(
-            transport=ASGITransport(app=transport_app), base_url="http://localhost"
-        ) as client:
+        async with _tcp_mcp_client(transport_app) as client:
             initialize = await client.post(
                 "/api/v1/mcp",
                 headers={
@@ -261,6 +305,125 @@ async def test_mileage_options_preview_and_create_work_over_mcp(
                 "Bicycle",
                 "Other",
             }
+
+            # These route descriptions and user decisions are controlled test
+            # evidence, not live provider queries. The MCP contract receives
+            # only the final user-confirmed mileage fields.
+            controlled_route_scenarios = [
+                {
+                    "state": "suggestion",
+                    "candidates": [
+                        {
+                            "origin": "Studio",
+                            "destination": "Client A",
+                            "mode": "car",
+                            "suggested_km": "12.400",
+                            "source": "controlled-route-fixture:valid-1",
+                        }
+                    ],
+                    "decision": "user_corrected_distance",
+                    "confirmed_km": "11.800",
+                },
+                {
+                    "state": "ambiguous",
+                    "candidates": [
+                        {
+                            "origin": "Studio",
+                            "destination": "Client B - North",
+                            "mode": "car",
+                            "suggested_km": "8.000",
+                            "source": "controlled-route-fixture:ambiguous-1",
+                        },
+                        {
+                            "origin": "Studio - West",
+                            "destination": "Client B - South",
+                            "mode": "car",
+                            "suggested_km": "10.500",
+                            "source": "controlled-route-fixture:ambiguous-2",
+                        },
+                    ],
+                    "decision": "candidate_2_clarified_and_corrected",
+                    "selected_candidate": 2,
+                    "confirmed_km": "7.200",
+                },
+                {
+                    "state": "failed",
+                    "candidates": [],
+                    "failure": "controlled no-route result",
+                    "decision": "user_supplied_manual_distance",
+                    "manual_endpoints": {
+                        "origin": "Home - manual fallback",
+                        "destination": "Client C - manual fallback",
+                    },
+                    "confirmed_km": "4.500",
+                },
+            ]
+            for offset, scenario in enumerate(controlled_route_scenarios, start=1):
+                if scenario["state"] == "suggestion":
+                    candidate = scenario["candidates"][0]
+                    assert {"origin", "destination", "mode", "suggested_km", "source"} <= set(
+                        candidate
+                    )
+                    assert scenario["decision"] == "user_corrected_distance"
+                    assert scenario["confirmed_km"] != candidate["suggested_km"]
+                elif scenario["state"] == "ambiguous":
+                    candidates = scenario["candidates"]
+                    assert len(candidates) == 2
+                    assert all(
+                        {"origin", "destination", "mode", "suggested_km", "source"}
+                        <= set(candidate)
+                        for candidate in candidates
+                    )
+                    assert scenario["selected_candidate"] == 2
+                    assert scenario["decision"] == "candidate_2_clarified_and_corrected"
+                else:
+                    assert scenario["state"] == "failed"
+                    assert scenario["candidates"] == []
+                    assert scenario["failure"]
+                    assert scenario["decision"] == "user_supplied_manual_distance"
+
+                confirmed_km = scenario["confirmed_km"]
+                if scenario["state"] == "ambiguous":
+                    selected_candidate = scenario["candidates"][
+                        scenario["selected_candidate"] - 1
+                    ]
+                    origin = selected_candidate["origin"]
+                    destination = selected_candidate["destination"]
+                elif scenario["state"] == "failed":
+                    origin = scenario["manual_endpoints"]["origin"]
+                    destination = scenario["manual_endpoints"]["destination"]
+                else:
+                    candidate = scenario["candidates"][0]
+                    origin = candidate["origin"]
+                    destination = candidate["destination"]
+                confirmed_mileage = {
+                    "trip_date": date(2026, 11, 10).isoformat(),
+                    "one_way_distance_km": confirmed_km,
+                    "round_trip": False,
+                    "origin_address": origin,
+                    "destination_address": destination,
+                }
+                # Validate against the real strict input schema instead of a
+                # duplicated field allowlist that can drift from the contract.
+                confirmed_mileage = AgentMileageWrite.model_validate(
+                    confirmed_mileage
+                ).model_dump(mode="json", exclude_unset=True)
+                route_preview = await call(
+                    "preview_mileage_expense",
+                    {
+                        "request_id": str(uuid.uuid4()),
+                        "mileage": confirmed_mileage,
+                    },
+                    200 + offset,
+                )
+                assert route_preview.status_code == 200
+                route_result = json.loads(route_preview.text.split("data: ", 1)[1])["result"][
+                    "structuredContent"
+                ]
+                assert route_result["mileage"]["one_way_distance_km"] == confirmed_km
+                assert route_result["mileage"]["origin_address"] == origin
+                assert route_result["mileage"]["destination_address"] == destination
+                assert route_result["calculation"]["total_distance_km"] == confirmed_km
 
             request_id = uuid.uuid4()
             base_mileage = {

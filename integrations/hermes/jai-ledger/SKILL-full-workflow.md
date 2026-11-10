@@ -1,13 +1,13 @@
 ---
 name: jai-full-workflow
-description: File original purchase receipts and prepare complete customer, quote, and Standard Invoice drafts in JAI.
+description: File original receipts, record user-confirmed mileage trips in JAI, and prepare complete customer, quote, and Standard Invoice drafts.
 ---
 
 # JAI full workflow
 
 > 🌐 **English** · [中文](SKILL-full-workflow_zh.md)
 
-Use this workflow only for tasks the user explicitly asks you to perform in JAI. The current complete tool surface is the 18 tools in `config-full.yaml`; it contains no generic database or CRUD access. Expense access is read-only and requires the separate `expense:read` scope.
+Use this workflow only for tasks the user explicitly asks you to perform in JAI. The complete tool surface in the current source tree is the 21 tools in `config-full.yaml`; it contains no generic database or CRUD access. The published `v0.13.0` image provides 18 tools, nine scopes, and migration `0057`; the current source-tree workflow requires an image built from this source, with migration `0058`, 21 tools and ten scopes. Expense access is read-only under `expense:read`. The separate `mileage:create` scope permits only the three confirmed mileage-intake tools described below.
 
 ## Authorization and required facts
 
@@ -20,7 +20,9 @@ Use this workflow only for tasks the user explicitly asks you to perform in JAI.
 
 ## Stable request IDs for every mutation
 
-Before each mutation (`submit_receipt`, `create_customer`, `create_quote_draft`, `update_quote_draft`, `create_invoice_draft`, `update_invoice_draft`), run `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" <exact_operation_name>` in the current trusted Telegram session. Pass its complete `request_id` and `source` output unchanged. Retries with identical arguments reuse the same ID. Changed arguments require a new trusted Telegram event/message and a regenerated ID; non-Telegram callers supply a new UUID. Do not alter or guess source coordinates to force a new ID. Different operations from one Telegram message naturally receive different IDs because the operation name is part of the UUID input.
+Before each mutation other than `create_mileage_expense` (`submit_receipt`, `create_customer`, `create_quote_draft`, `update_quote_draft`, `create_invoice_draft`, `update_invoice_draft`), run `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" <exact_operation_name>` in the current trusted Telegram session. Pass its complete `request_id` and `source` output unchanged. Retries with identical arguments reuse the same ID. Changed arguments require a new trusted Telegram event/message and a regenerated ID; non-Telegram callers supply a new UUID. Do not alter or guess source coordinates to force a new ID. Different operations from one Telegram message naturally receive different IDs because the operation name is part of the UUID input.
+
+For each new mileage attempt, derive the ID and source exactly once from the trusted initiating Telegram event before requesting its preview. Save that exact output with the attempt and reuse it through later user-confirmation turns and every identical network retry; never derive mileage metadata from a confirmation or retry event. A separate unequal-distance leg and a renewed/stale attempt each need their own initiating event, newly derived ID/source, preview and explicit confirmation.
 
 ## Receipt intake
 
@@ -42,8 +44,18 @@ Before each mutation (`submit_receipt`, `create_customer`, `create_quote_draft`,
 ## Read-only Expense context
 
 - Use `list_expenses` to find expenses by the user-provided filters and `get_expense` to inspect a specific returned ID. Both are read-only; report saved values exactly and never infer missing fields.
-- These tools do not expose receipt bytes or storage paths. Expense posting, confirmation and edits remain web-only.
+- These tools do not expose receipt bytes or storage paths. General Expense posting, receipt confirmation and Expense edits remain in JAI's web app; the specific confirmed mileage workflow below is the only Agent Expense-creation path.
+
+## Confirmed mileage intake
+
+- Follow the client-neutral [M18 Agent mileage workflow](../../../docs/plan/milestones/M18-agent-workflow.md) in the repository. This installed skill repeats the operational rules here so it remains usable by itself after copying into a Hermes profile. `mileage:create` exposes only `get_mileage_options`, `preview_mileage_expense`, and `create_mileage_expense`; preview is read-only and confirmed create records one formal mileage trip with its linked Expense.
+- Resolve an enabled transport type from JAI options. Clarify an ambiguous name. Collect a definite date, positive one-way kilometres, and an explicit one-way/return choice. JAI resolves the default transport when omitted; show it in preview.
+- A client route/map suggestion must be shown with endpoints, travel mode, suggested kilometres and source. Ask the user to confirm or correct it; send only user-confirmed kilometres. If search is ambiguous, ask the user to disambiguate; if unavailable or unreliable, ask for kilometres. Never invent a distance or claim a controlled scenario was a live lookup.
+- Before preview, run `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" create_mileage_expense` once in the trusted initiating Telegram event and retain the complete output. Keep that same request ID, `source`, complete `mileage` input and preview token through later confirmation and create; do not rerun the helper on a confirmation turn or retry. The complete preview must show the date, one-way kilometres, return-trip choice, every supplied origin/destination/purpose/note field, resolved transport and expense category, total kilometres, effective rate and date, amount and currency. JAI supplies all financial values. Do not create before the user confirms that exact preview.
+- A JAI trip has one transport type and one distance for its chosen one-way or return setting. If outbound and return route distances differ, present both route suggestions and ask the user to confirm the legs; record them as two separately previewed, separately confirmed one-way trips, each with its own initiating event and request ID. Do not average or combine unequal legs into one return trip.
+- An exact retry after a lost response repeats the same complete create arguments. For a stale/failed attempt or changed input, obtain renewed confirmation and use a new trusted initiating event and new ID. A separate leg also needs its own initiating event, ID, preview and confirmation.
+- Report the actual `operation` envelope and `mileage` result, including created/replayed status, trip/Expense IDs and the exact returned `operation.web_url`. Do not reconstruct the link.
 
 ## Hard boundary
 
-Never confirm/discard receipts, post Expenses, change document lifecycle, send/issue/accept/reject/convert documents, collect payments, create Advance/Final/Credit Note/refund/correction documents, modify existing customer/catalog/template/VAT records, or file VAT. No tool supports these actions. Never bypass a refusal through another tool or route. Owner lifecycle and accounting confirmation stay in JAI's web app.
+Never confirm/discard receipts, create or edit a general Expense, change document lifecycle, send/issue/accept/reject/convert documents, collect payments, create Advance/Final/Credit Note/refund/correction documents, modify existing customer/catalog/template/VAT records, or file VAT. The only Agent Expense-creation exception is one formal mileage Expense through `create_mileage_expense`, after explicit user confirmation of its complete JAI preview under `mileage:create`. No other tool or route may be used to bypass this boundary. Owner lifecycle and general Expense/receipt confirmation stay in JAI's web app.

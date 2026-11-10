@@ -1,13 +1,13 @@
 ---
 name: jai-full-workflow
-description: 在 JAI 中提交采购收据原件并准备完整客户、报价和普通发票草稿。
+description: 归档原始收据，记录经用户确认的 JAI 里程行程，并准备完整的客户、报价和标准发票草稿。
 ---
 
 # JAI 完整工作流
 
 > 🌐 [English](SKILL-full-workflow.md) · **中文**
 
-仅在用户明确要求执行相应 JAI 操作时使用本工作流。当前完整工具面为 `config-full.yaml` 中的 18 个工具，不包含通用数据库或 CRUD 访问。开支访问为只读，并需要独立的 `expense:read` scope。
+仅在用户明确要求执行相应 JAI 操作时使用本工作流。当前源码树中的完整工具面为 `config-full.yaml` 中的 21 个工具，不包含通用数据库或 CRUD 访问。已发布的 `v0.13.0` 镜像提供 18 个工具、九项 scope 和迁移 `0057`；当前源码工作流要求使用从本源码构建的镜像，并应用迁移 `0058`，提供 21 个工具和十项 scope。开支通过 `expense:read` 只读。独立的 `mileage:create` scope 仅允许下述三个经确认的里程录入工具。
 
 ## 授权与必需事实
 
@@ -20,7 +20,9 @@ description: 在 JAI 中提交采购收据原件并准备完整客户、报价�
 
 ## 每次修改都使用稳定请求 ID
 
-每次修改操作（`submit_receipt`、`create_customer`、`create_quote_draft`、`update_quote_draft`、`create_invoice_draft`、`update_invoice_draft`）前，在当前可信 Telegram 会话中运行 `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" <准确操作名>`。将其完整 `request_id` 和 `source` 原样传入。参数完全相同的重试复用同一 ID；参数改变时必须使用新的可信 Telegram 事件／消息并重新生成 ID，非 Telegram 调用方则提供新 UUID。不得篡改或猜测来源坐标以强行生成新 ID。同一 Telegram 消息执行不同操作会因操作名参与 UUID 输入而获得不同 ID。
+除 `create_mileage_expense` 外，每次修改操作（`submit_receipt`、`create_customer`、`create_quote_draft`、`update_quote_draft`、`create_invoice_draft`、`update_invoice_draft`）前，在当前可信 Telegram 会话中运行 `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" <准确操作名>`。将其完整 `request_id` 和 `source` 原样传入。参数完全相同的重试复用同一 ID；参数改变时必须使用新的可信 Telegram 事件／消息并重新生成 ID，非 Telegram 调用方则提供新 UUID。不得篡改或猜测来源坐标以强行生成新 ID。同一 Telegram 消息执行不同操作会因操作名参与 UUID 输入而获得不同 ID。
+
+每次新的里程尝试都必须在请求预览前，从可信 Telegram 发起事件准确派生一次 ID 和 source。将完整原始输出与该尝试一同保存，并在之后的用户确认轮次及每次完全相同的网络重试中沿用；绝不能从确认或重试事件重新派生里程元数据。往返两程公里数不等时需拆成独立的单程行程，每程及过期／失败后的新尝试都必须使用自己的发起事件、新派生的 ID／source、预览和明确确认。
 
 ## 收据收件
 
@@ -42,8 +44,18 @@ description: 在 JAI 中提交采购收据原件并准备完整客户、报价�
 ## 只读开支信息
 
 - 使用 `list_expenses` 按用户提供的筛选条件查找开支，再用 `get_expense` 查看明确返回的 ID。两者均为只读；准确报告已保存值，不得推断缺失字段。
-- 这些工具不会暴露收据字节或存储路径。开支过账、确认和编辑仍只能在网页中完成。
+- 这些工具不会暴露收据字节或存储路径。通用开支过账、收据确认及开支编辑仍须在 JAI 网页应用中完成；下方明确确认的里程工作流是唯一 Agent 开支创建途径。
+
+## 确认后录入里程
+
+- 遵循仓库中的客户端通用 [M18 Agent 里程工作流](../../../docs/plan/milestones/M18-agent-workflow_zh.md)。本安装版也重复实际操作规则，以便复制到 Hermes profile 后可单独使用。`mileage:create` 只开放 `get_mileage_options`、`preview_mileage_expense` 和 `create_mileage_expense`；预览只读，确认后创建会记录一条正式里程行程及关联 Expense。
+- 从 JAI 选项中解析启用的交通工具类型。名称有歧义时先询问。收集明确日期、正数单程公里数，并明确区分单程／往返。未指定时 JAI 会解析默认交通工具，须在预览中展示。
+- 客户端路线／地图建议必须展示端点、交通方式、建议公里数和来源。请用户确认或修正，只发送用户确认的公里数。搜索结果有歧义时请用户澄清；不可用或不可靠时询问公里数。不得编造距离或声称受控场景是真实查询。
+- 预览前，在可信发起 Telegram 事件中运行一次 `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" create_mileage_expense`，并保留完整输出。后续确认轮次和创建必须沿用该 request ID、`source`、完整 `mileage` 输入及预览凭据；确认轮次或重试时不得重跑助手。完整预览必须显示日期、单程公里数、往返选择、所有已提供的起点／终点／用途／备注字段、解析出的交通工具／开支分类、总公里数、生效费率及日期、金额和币种。所有财务值均由 JAI 提供。用户未确认这份确切预览前不得创建。
+- 一条 JAI 行程只能有一种交通工具及一个单程或往返距离。如果去程和返程路线距离不同，应展示两程路线建议并让用户分别确认；将其记录为两条独立预览、分别确认的单程行程，各自使用独立发起事件和请求 ID。不得对不等距两程取平均或合并成一条往返行程。
+- 响应丢失后的精确重试须原样重复完整创建参数。尝试过期／失败或输入改变时，应取得用户新的确认，并使用新的可信发起事件和 ID。独立的一程也需独立事件、ID、预览和确认。
+- 按实际 `operation` 信封和 `mileage` 结果报告新建／重放状态、行程／Expense ID，以及原样返回的准确 `operation.web_url`。不得重建链接。
 
 ## 严格边界
 
-绝不确认／丢弃收据、过账 Expense、改变单据生命周期、发送／签发／接受／拒绝／转换单据、收取付款、创建 Advance／Final／Credit Note／退款／更正单据，或修改现有客户／目录／模板／VAT 记录，也不申报 VAT。没有工具支持这些动作。不得通过其他工具或路由绕过拒绝。生命周期操作和会计确认仍由所有者在 JAI 网页中完成。
+绝不确认／丢弃收据、创建或编辑通用 Expense、改变单据生命周期、发送／签发／接受／拒绝／转换单据、收取付款、创建 Advance／Final／Credit Note／退款／更正单据，或修改现有客户／目录／模板／VAT 记录，也不申报 VAT。唯一的 Agent Expense 创建例外，是在 `mileage:create` 下，用户明确确认完整 JAI 预览后通过 `create_mileage_expense` 创建一笔正式里程 Expense。不得使用其他工具或路由绕过此边界。所有者网页仍处理单据生命周期及通用开支／收据确认。

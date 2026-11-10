@@ -2,7 +2,7 @@
 
 > 🌐 **English** · [中文](roadmap_zh.md)
 
-> **Current scheduling (2026-11-10)** M0–M17 are accepted within their recorded scopes. M15 shipped in v0.12.0, with historical checks and skips/deferrals retained in the [M15 acceptance conclusion](milestones/M15.md). 🟢 [SI4 expense MCP reads](improvements/SI4.md) completed independent review and author-delegated real TCP subagent acceptance for v0.13.0. 🟡 [M18 Agent mileage intake](milestones/M18.md) is in implementation across four atomic task cards.
+> **Current scheduling (2026-11-10)** M0–M17 are accepted within their recorded scopes. M15 shipped in v0.12.0, with historical checks and skips/deferrals retained in the [M15 acceptance conclusion](milestones/M15.md). 🟢 [SI4 expense MCP reads](improvements/SI4.md) completed independent review and author-delegated real TCP subagent acceptance for v0.13.0. 🟡 All four [M18 Agent mileage intake](milestones/M18.md) steps passed local gates and independent review. The author walkthrough is pending.
 
 > **What this is** A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the receipt-inbox, agent-accounting, external-bookkeeping/VAT–P&L, Quote PDF appendix and Agent mileage intake follow-ons **M14–M18**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
 >
@@ -296,7 +296,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ### M18 · Agent mileage intake through MCP | existing mileage and MCP foundations
 
-- **Status** 🟡 Steps 1–2 of 4 passed local gates and independent review. Step 3 is in implementation. See the [full design and four atomic task cards](milestones/M18.md).
+- **Status** 🟡 All four steps passed local automated gates and independent review on 2026-11-10. The author walkthrough is pending. See the [full design and four atomic task cards](milestones/M18.md).
 - **Workflow** Client-neutral transport options → complete JAI preview → user confirmation → atomic trip and linked Expense creation. Agents may use their own search/map capabilities, with the user confirming the actual kilometres.
 - **Contract** Three MCP tools and an explicit `mileage:create` permission, with preview credentials binding inputs and booking snapshots, reusing M15 request idempotency and response replay.
 - **Implementation order** Transaction-compatible mileage creation → permission/options/preview → confirmed creation/replay → generic workflow/isolated acceptance. Historical mileage reads and in-app map integration remain follow-on work.
@@ -459,7 +459,7 @@ Small improvements use the same implementation-plan structure and quality gates,
 | M15 | Agent receipt intake and business drafts (MCP; Hermes/Telegram first) | 🟢 Accepted within the recorded scope on 2026-11-09; historical receipts, Codex MCP, isolated real Hermes CLI and revocation checks passed; manual skips/deferrals retained; v0.12.0; see `milestones/M15.md` |
 | M16 | External sales bookkeeping and VAT / P&L separation (including SI3) | 🟢 Steps 1–9 of 9 completed local automated gates and independent review on 2026-10-31. The author accepted the recorded representative walkthrough scope on 2026-11-01. External sales, Expense/receipt inbox, battery 45%→0% revisions and in-service-date reconfirmation were checked with read-only report/original/history verification. Step 7 reporting reconciles; the author accepted a brief page check. Step 8 was accepted on the author’s confirmation of prior testing, without repeating pending deletion in this round. Recurring-expense walkthrough was explicitly skipped; untested provider, concurrency and second-account UI paths remain distinguished from automated evidence. Prior orchestrated UI refinements passed independent review; the later upload-state/error-display fix passed separate automated checks and author confirmation without another blind review. Known carryovers remain documented. See [M16](milestones/M16.md); M15 was separately accepted within its recorded scope on 2026-11-09. Post-acceptance follow-up: a USER-level Battery Assets navigation preference defaults off; stored data and calculations are unaffected. Local checks and the author UI check passed; release preparation resumed for the same v0.10.0. |
 | M17 | Quote PDF appendices (shared library + Quote-specific uploads) | 🟢 All six implementation steps passed local gates and independent review. The author walkthrough was completed on 2026-11-06 within the recorded scope; [design and acceptance](milestones/M17.md); M15 evaluation resumes separately on 2026-11-06 |
-| M18 | Agent mileage intake through MCP | 🟡 Steps 1–2 of 4 passed local gates and independent review. Step 3 is in implementation. Client-neutral preview/confirmation/idempotent creation. [Design and four atomic task cards](milestones/M18.md) |
+| M18 | Agent mileage intake through MCP | 🟡 All four steps passed local automated gates and independent review on 2026-11-10. The author walkthrough is pending. Client-neutral preview/confirmation/idempotent creation. [Design and four atomic task cards](milestones/M18.md) |
 
 Separately numbered improvements:
 

@@ -4,7 +4,7 @@
 
 > **状态（2026-11-09）** 🟢 M15 已按记录范围验收并纳入 v0.12.0。本指南保留部署配置步骤。历史真实 PDF／图片接收及本轮隔离 Hermes CLI 检查已有证据，新的 Telegram 验证、原件哈希及手机链接由作者决定跳过，AI 不可用测试暂缓。完整范围见 [M15 验收结论](M15_zh.md)。
 
-> **当前完整工作流：** [SI4](../improvements/SI4_zh.md) 新增只读开支工具。本指南保留 M15 历史 16 工具／八项 scope 的设置与验收证据。
+> **当前完整工作流：** SI4 新增只读开支工具，M18 增加确认后里程录入。已发布的 `v0.13.0` 镜像仅含 SI4：18 个工具、九项 scope 和迁移 `0057`。下方 21 工具／十项 scope 的完整 profile 需要带迁移 `0058` 的当前源码树镜像。本指南保留 M15 历史 16 工具／八项 scope 的设置与验收证据。
 
 本指南记录使用独立 Hermes profile 和独立 Telegram bot 配置 M15 第 5 步仅收据功能，下方也说明可选完整工作流。部署新 profile 时请核对 M15 验收结论中的实际证据和作者批准的省略项。
 
@@ -35,7 +35,7 @@ TELEGRAM_BOT_TOKEN=<新 BotFather bot 令牌>
 TELEGRAM_ALLOWED_USERS=<一个数字 Telegram 用户 ID>
 ```
 
-JAI 所有者使用受 MFA 保护的 owner 账号登录，打开 **设置 → Agent 访问**，填写可识别的令牌名称，仅选择此 profile 所需 scope 后创建。使用一次 **复制密钥并隐藏**，并将密钥直接填入 profile 私有 `.env`；UI 之后无法再次显示。仅凭证 profile 只选 `receipt:intake`。M15 原始完整工作流 profile 使用八项 scope。当前 profile 还需要 SI4 的 `expense:read` scope；见下方当前配置说明。可在同一页面通过 **撤销** 禁用令牌；删除环境变量前先验证后续 MCP 调用失败。不得复用旧 profile 的令牌，也不得把令牌复制到 shell 命令中。
+JAI 所有者使用受 MFA 保护的 owner 账号登录，打开 **设置 → Agent 访问**，填写可识别的令牌名称，仅选择此 profile 所需 scope 后创建。使用一次 **复制密钥并隐藏**，并将密钥直接填入 profile 私有 `.env`；UI 之后无法再次显示。仅凭证 profile 只选 `receipt:intake`。M15 原始完整工作流 profile 使用八项 scope。已发布的 `v0.13.0` 完整工作流增加 SI4 `expense:read`，达到 18 个工具／九项 scope及迁移 `0057`。当前源码树完整工作流还包含 M18 `mileage:create`，达到 21 个工具／十项 scope及迁移 `0058`；该配置须搭配基于本源码构建的 JAI 镜像。可在同一页面通过 **撤销** 禁用令牌；删除环境变量前先验证后续 MCP 调用失败。不得复用旧 profile 的令牌，也不得把令牌复制到 shell 命令中。
 
 创建技能目录并复制仓库中英文运行版技能。中文文件仅供作者阅读，不作为第二个 Hermes 技能安装：
 
@@ -104,7 +104,7 @@ Telegram 相册要求每次更新和重投的规范请求参数完全相同。�
 
 ## 可选完整业务工作流
 
-M15 原始冻结范围为八项 scope、16 个工具；该历史验收保持不变。当前部署请安装[完整工作流 skill](../../../integrations/hermes/jai-ledger/SKILL-full-workflow_zh.md)，并用[当前 SI4 允许列表](../../../integrations/hermes/jai-ledger/config-full_zh.yaml)整体替换 `mcp_servers.jai` 项。当前完整 profile 需要全部九项 scope（含 `expense:read`），并暴露 18 个工具。Expense 能力仅限只读列表／详情；不提供过账、确认或编辑工具。不要在完整配置上叠加角色片段，以免 YAML 映射覆盖悄悄删掉能力。保留 profile 的 provider/model 设置。
+M15 原始冻结范围为八项 scope、16 个工具；该历史验收保持不变。当前部署请安装[完整工作流 skill](../../../integrations/hermes/jai-ledger/SKILL-full-workflow_zh.md)，并用[当前完整工作流允许列表](../../../integrations/hermes/jai-ledger/config-full_zh.yaml)整体替换 `mcp_servers.jai` 项。当前完整 profile 需要全部十项 scope，并暴露 21 个工具，包括 SI4 只读 Expense 列表／详情及 M18 三个受限里程录入工具。`mileage:create` 仅允许选项、预览，以及用户明确确认完整 JAI 预览后的正式里程 Expense 创建；通用 Expense 入账、收据确认和 Expense 编辑仍不可用。参见[客户端通用 M18 工作流](M18-agent-workflow_zh.md)。不要在完整配置上叠加角色片段，以免 YAML 映射覆盖悄悄删掉能力。保留 profile 的 provider/model 设置。
 
 将完整技能与共享助手安装到同一 profile 路径：
 
@@ -116,7 +116,7 @@ install -m 700 "$JAI_REPO/integrations/hermes/jai-ledger/request_id.py" \
   ~/.hermes/profiles/jai-ledger/helpers/request_id.py
 ```
 
-组合任务使用 `/jai-full-workflow`。已有按角色拆分的技能／配置仍可单独安装，但每次只启用一个完整配置项。角色范围 token 只能搭配其对应的角色配置和技能。每次修改均使用精确操作名调用助手，例如 `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" create_quote_draft`；参数改变时生成新 ID，参数不变的重试复用原 ID 与 source。完整工作流技能要求澄清缺失事实和相似客户匹配，以 JAI 返回的金额报告预览，并保留凭证、客户、报价、发票及仅限草稿的边界。
+组合任务使用 `/jai-full-workflow`。已有按角色拆分的技能／配置仍可单独安装，但每次只启用一个完整配置项。角色范围 token 只能搭配其对应的角色配置和技能。普通修改操作按准确操作名调用助手，例如 `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" create_quote_draft`。里程操作应在预览前，从可信发起 Telegram 事件运行一次 `create_mileage_expense` 并保留 ID 和 source，之后确认轮次和完全相同的重试均沿用；不得从之后的确认／重试事件派生。里程输入改变、尝试过期或新增另一程时，需要新的发起事件、ID、预览和确认。完整工作流技能要求澄清缺失事实和相似客户匹配，以 JAI 返回的金额报告预览，并保留凭证、客户、报价、发票及仅限草稿的边界。
 
 ## 作者走查的隔离开发 Compose
 

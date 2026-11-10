@@ -4,7 +4,7 @@
 
 > **Status (2026-11-09)** 🟢 M15 is accepted within the recorded scope and included in v0.12.0. This guide retains deployment configuration steps. Historical real PDF/image intake and current isolated Hermes CLI checks have evidence. New Telegram validation, original hashes and phone links are author-skipped; AI-unavailable testing is deferred. Full scope is in the [M15 acceptance conclusion](M15.md).
 
-> **Current full workflow:** [SI4](../improvements/SI4.md) adds read-only Expense tools. This guide retains M15's historical 16-tool/eight-scope setup and evidence.
+> **Current full workflow:** SI4 adds read-only Expense tools and M18 adds confirmed mileage intake. The published `v0.13.0` image includes SI4 only: 18 tools, nine scopes and migration `0057`. The 21-tool/ten-scope full profile below requires the current source-tree image with migration `0058`. This guide retains M15's historical 16-tool/eight-scope setup and evidence.
 
 This guide documents the receipt-only part of M15 Step 5 using a separate Hermes profile and a distinct Telegram bot. The optional full workflow is described below. Consult the M15 acceptance conclusion for actual evidence and author-approved omissions when deploying a new profile.
 
@@ -35,7 +35,7 @@ TELEGRAM_BOT_TOKEN=<new BotFather bot token>
 TELEGRAM_ALLOWED_USERS=<one numeric Telegram user ID>
 ```
 
-As the JAI owner, sign in with the MFA-protected owner account, open **Settings → Agent access**, enter a descriptive token name, select only the scope required by this profile, and create it. Use **Copy secret and hide** once and place the secret directly into the private profile `.env`; the UI cannot reveal it again. The receipt-only profile selects only `receipt:intake`. The original M15 full-workflow profile used eight scopes. The current profile also needs the SI4 `expense:read` scope; see the current configuration note below. Use the same page's **Revoke** action to disable a token; verify that a subsequent MCP call fails before removing its environment value. Never reuse an old profile token or copy a token into a shell command.
+As the JAI owner, sign in with the MFA-protected owner account, open **Settings → Agent access**, enter a descriptive token name, select only the scope required by this profile, and create it. Use **Copy secret and hide** once and place the secret directly into the private profile `.env`; the UI cannot reveal it again. The receipt-only profile selects only `receipt:intake`. The original M15 full-workflow profile used eight scopes. The published `v0.13.0` full workflow adds SI4 `expense:read`, reaching 18 tools/nine scopes and migration `0057`. The current source-tree full workflow also includes M18 `mileage:create`, reaching 21 tools/ten scopes and migration `0058`; use a JAI image built from this source for that configuration. Use the same page's **Revoke** action to disable a token; verify that a subsequent MCP call fails before removing its environment value. Never reuse an old profile token or copy a token into a shell command.
 
 Create the skill directory and copy the checked-in English runtime skill. The Chinese file is a reading mirror and is not installed as a second Hermes skill:
 
@@ -104,7 +104,7 @@ If the MCP result is an error, or Hermes cannot provide original bytes, say the 
 
 ## Optional full business workflow
 
-M15 originally froze a 16-tool surface across eight scopes; that historical acceptance remains unchanged. For current deployment, install [the full workflow skill](../../../integrations/hermes/jai-ledger/SKILL-full-workflow.md) and replace the full `mcp_servers.jai` entry with [the current SI4 allowlist](../../../integrations/hermes/jai-ledger/config-full.yaml). The current complete profile needs all nine scopes, including `expense:read`, and exposes 18 tools. Expense access is limited to read-only list/detail; there is no posting, confirmation, or edit tool. Do not layer role snippets over the complete block, because YAML mapping overlays can silently remove capabilities. Keep the profile's provider/model settings.
+M15 originally froze a 16-tool surface across eight scopes; that historical acceptance remains unchanged. For current deployment, install [the full workflow skill](../../../integrations/hermes/jai-ledger/SKILL-full-workflow.md) and replace the full `mcp_servers.jai` entry with the [current full-workflow allowlist](../../../integrations/hermes/jai-ledger/config-full.yaml). The current complete profile needs all ten scopes and exposes 21 tools, including SI4's read-only Expense list/detail and M18's three bounded mileage-intake tools. `mileage:create` permits only options, preview, and formal mileage Expense creation after explicit confirmation of the complete JAI preview; general Expense posting, receipt confirmation, and Expense editing remain unavailable. See the [client-neutral M18 workflow](M18-agent-workflow.md). Do not layer role snippets over the complete block, because YAML mapping overlays can silently remove capabilities. Keep the profile's provider/model settings.
 
 Install the full skill and its shared helper at the same profile paths:
 
@@ -116,7 +116,7 @@ install -m 700 "$JAI_REPO/integrations/hermes/jai-ledger/request_id.py" \
   ~/.hermes/profiles/jai-ledger/helpers/request_id.py
 ```
 
-Use `/jai-full-workflow` for a combined task. Existing per-role skills/configs may still be installed separately, but activate one complete config entry at a time. For a role-limited token, pair only its matching role config and skill. Every mutation uses the exact operation-specific helper invocation, such as `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" create_quote_draft`; changed arguments require a new ID, while identical retries reuse the original ID and source. The full workflow requires clarification for missing facts and plausible customer matches, reports all preview amounts from JAI, and retains the receipt, customer, quote, invoice, and draft-only boundaries in its skill.
+Use `/jai-full-workflow` for a combined task. Existing per-role skills/configs may still be installed separately, but activate one complete config entry at a time. For a role-limited token, pair only its matching role config and skill. Each ordinary mutation uses its exact operation-specific helper invocation, such as `"$HOME/.hermes/profiles/jai-ledger/helpers/request_id.py" create_quote_draft`. For mileage, run `create_mileage_expense` once from the trusted initiating Telegram event before preview, then preserve that ID and source through confirmation and identical retries; never derive them from the later confirmation/retry event. Changed mileage input, a stale attempt or another leg requires a new initiating event, ID, preview and confirmation. The full workflow requires clarification for missing facts and plausible customer matches, reports all preview amounts from JAI, and retains the receipt, customer, quote, invoice, and draft-only boundaries in its skill.
 
 ## Isolated development Compose for the author walkthrough
 

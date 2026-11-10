@@ -1,7 +1,7 @@
 # Complete optional MCP tool allowlist for the full M15 workflow.
 # Replace the profile's entire mcp_servers.jai entry with this block; do not
 # merge separate role snippets because YAML mapping overlays can drop tools.
-# The bearer token needs all nine current scopes.
+# The bearer token needs all ten current scopes.
 mcp_servers:
   jai:
     url: "http://127.0.0.1:8000/api/v1/mcp"
@@ -27,5 +27,8 @@ mcp_servers:
         - update_invoice_draft
         - list_expenses
         - get_expense
+        - get_mileage_options
+        - preview_mileage_expense
+        - create_mileage_expense
       prompts: false
       resources: false
