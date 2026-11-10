@@ -2,9 +2,9 @@
 
 > 🌐 **English** · [中文](roadmap_zh.md)
 
-> **Current scheduling (2026-11-10)** M0–M17 are accepted within their recorded scopes. M15 shipped in v0.12.0, with historical checks and skips/deferrals retained in the [M15 acceptance conclusion](milestones/M15.md). 🟢 [SI4 expense MCP reads](improvements/SI4.md) completed independent review and author-delegated real TCP subagent acceptance for v0.13.0. 🟢 [M18 Agent mileage intake](milestones/M18.md) is accepted within the author-delegated backend verification scope for v0.14.0; browser, live maps, Hermes natural-language dialogue and Telegram checks remain unperformed. All planned milestones are accepted within their recorded scopes.
+> **Current scheduling (2026-11-10)** M0–M17 are accepted within their recorded scopes. M15 shipped in v0.12.0, with historical checks and skips/deferrals retained in the [M15 acceptance conclusion](milestones/M15.md). 🟢 [SI4 expense MCP reads](improvements/SI4.md) completed independent review and author-delegated real TCP subagent acceptance for v0.13.0. 🟢 [M18 Agent mileage intake](milestones/M18.md) is accepted within the author-delegated backend verification scope for v0.14.0; browser, live maps, Hermes natural-language dialogue and Telegram checks remain unperformed. ⬜ [M19 Purchase Receipt AI Recognition and VAT Treatment Prefill](milestones/M19.md) is the next milestone. Its design and three atomic task cards are agreed, with implementation pending.
 
-> **What this is** A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the receipt-inbox, agent-accounting, external-bookkeeping/VAT–P&L, Quote PDF appendix and Agent mileage intake follow-ons **M14–M18**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
+> **What this is** A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the receipt-inbox, agent-accounting, external-bookkeeping/VAT–P&L, Quote PDF appendix, Agent mileage intake and purchase-receipt AI classification follow-ons **M14–M19**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
 >
 > **What this is not**: A line-by-line construction guide. This document stays at the level of "milestones + methodology + constraints"; the **atomic step list** for each milestone is written out JIT in `docs/plan/milestones/M<x>.md` (template: `milestones/_TEMPLATE.md`).
 >
@@ -112,7 +112,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4. Milestone Map M0–M18 (including inserted M2.5 · Settings UX refactor / M6.5 · Cost accounting / M11.5 · Quote deposits)
+## 4. Milestone Map M0–M19 (including inserted M2.5 · Settings UX refactor / M6.5 · Cost accounting / M11.5 · Quote deposits)
 
 > Dependencies: **M0 → M1 → M2 → (M2.5) → {M3, M4}**, then two parallelisable tracks:
 > ① **Document track**: M5 → M6 → **M6.5** → M7; ② **Expense track**: M8 (depends only on M2 base currency + M4 dictionaries, optionally M3 customers, **independent of invoices/quotes/payments**). The two tracks converge at M9 → M10, then continue through **M11 (private-transport business mileage) → M11.5 (quote deposits and final-invoice settlement) → M12 (advance/final invoices and credit notes) → M13 (Document Artifact backfill) → M14 (receipt inbox and review) → M15 (agent receipt intake and business drafts)**.
@@ -302,6 +302,15 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **Implementation order** Transaction-compatible mileage creation → permission/options/preview → confirmed creation/replay → generic workflow/isolated acceptance. Historical mileage reads and in-app map integration remain follow-on work.
 - **Deployment self-tests** Creation after a complete preview, transport selection, route suggestions/manual fallback, reconfirmation after settings changes, duplicate-free retries, report projection and token revocation.
 
+### M19 · Purchase receipt AI recognition and VAT treatment prefill | existing purchase extraction and review
+
+- **Status** ⬜ Design agreed on 2026-11-10, implementation pending. See the [full design and three atomic task cards](milestones/M19.md).
+- **Goal** Reduce mistaken manual VAT-treatment selection by recognizing Dutch domestic, EU B2B reverse-charge and EU foreign-VAT purchases in the receipt inbox and Expense attachment workflow.
+- **Contract and behavior** One shared extraction call returns an optional validated dictionary-backed suggestion and evidence. Empty or AI-owned fields may be prefilled, while human and saved values require an explicit apply action. Owner confirmation/save remains the booking boundary.
+- **Boundary** Non-EU/special cases and ambiguous evidence require manual selection. Keep receipt VAT separate from the reverse-charge nominal reporting rate. The scope retains existing VAT dictionaries/reporting and M15 MCP contracts, with no migration or historical backfill.
+- **Implementation order** Prompt/backend validation/additive contract → both purchase forms and human-choice protection → regression, real-provider walkthrough and acceptance.
+- **Deployment self-tests** Three supported types, non-EU/ambiguous fallback, manual override and retry, file/route races, existing Expense apply/save, old suggestions, MCP-to-web review and exactly-once confirmation/report projection.
+
 ---
 
 ## 4.si Small improvements (separate from milestone numbering)
@@ -314,7 +323,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M18)
+## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M19)
 
 > **Status**: Explicitly **not doing** in the current roadmap through M16; this note is kept here so it's easy to pick up later. **No DB schema is reserved now** — any future columns/tables are additive migrations, existing data is unaffected, cost is acceptable, no need to pre-allocate.
 
@@ -330,7 +339,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4.y Beyond the roadmap (vNext) · PDF document/letterhead template customisation (memo only, not in M0–M18)
+## 4.y Beyond the roadmap (vNext) · PDF document/letterhead template customisation (memo only, not in M0–M19)
 
 > **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**. Elaborates on M9's OUT item "custom / multiple PDF template sets → deferred (one template family + CSS interface)". **No schema reserved now** — everything will be additive.
 >
@@ -341,7 +350,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **The big concern is security (guardrail 7)**: User input entering PDF = XSS/SSRF surface; reuse / strengthen sanitisation — reference the two bugs fixed 2026-06-14: `{{ css | safe }}` font escaping and SVG `<style>` inline class sanitisation; body uses "plain text + explicit placeholders + escaping" rather than arbitrary HTML/CSS. Plus template editor UI + preview + built-in defaults when values are absent.
 - **Granularity**: Configured per document type (invoice / quote) × language (EN / ZH), following the email template structure.
 
-## 4.z Beyond the roadmap (vNext) · Customer address free-text block (memo only, not in M0–M18)
+## 4.z Beyond the roadmap (vNext) · Customer address free-text block (memo only, not in M0–M19)
 
 > **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**.
 
@@ -414,7 +423,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 docs/
   insight/btw-aangifte-2026-guide.md # Dutch VAT/BTW filing conventions (authoritative, structured guide to official Tax Authority instructions)
   plan/
-    roadmap.md                       # This document: overview + methodology + constraints + M0–M18
+    roadmap.md                       # This document: overview + methodology + constraints + M0–M19
     milestones/
       _TEMPLATE.md                   # Milestone refinement template
       M0.md, M1.md, ...              # Produced JIT before starting work (atomic step lists)
@@ -460,6 +469,7 @@ Small improvements use the same implementation-plan structure and quality gates,
 | M16 | External sales bookkeeping and VAT / P&L separation (including SI3) | 🟢 Steps 1–9 of 9 completed local automated gates and independent review on 2026-10-31. The author accepted the recorded representative walkthrough scope on 2026-11-01. External sales, Expense/receipt inbox, battery 45%→0% revisions and in-service-date reconfirmation were checked with read-only report/original/history verification. Step 7 reporting reconciles; the author accepted a brief page check. Step 8 was accepted on the author’s confirmation of prior testing, without repeating pending deletion in this round. Recurring-expense walkthrough was explicitly skipped; untested provider, concurrency and second-account UI paths remain distinguished from automated evidence. Prior orchestrated UI refinements passed independent review; the later upload-state/error-display fix passed separate automated checks and author confirmation without another blind review. Known carryovers remain documented. See [M16](milestones/M16.md); M15 was separately accepted within its recorded scope on 2026-11-09. Post-acceptance follow-up: a USER-level Battery Assets navigation preference defaults off; stored data and calculations are unaffected. Local checks and the author UI check passed; release preparation resumed for the same v0.10.0. |
 | M17 | Quote PDF appendices (shared library + Quote-specific uploads) | 🟢 All six implementation steps passed local gates and independent review. The author walkthrough was completed on 2026-11-06 within the recorded scope; [design and acceptance](milestones/M17.md); M15 evaluation resumes separately on 2026-11-06 |
 | M18 | Agent mileage intake through MCP | 🟢 Accepted on 2026-11-10 within the author-delegated backend verification scope for v0.14.0. All four steps passed local gates and independent review; real-client MCP and isolated database/report checks passed. Unperformed client/UI paths are recorded in M18. Client-neutral preview/confirmation/idempotent creation. [Design and four atomic task cards](milestones/M18.md) |
+| M19 | Purchase receipt AI recognition and VAT treatment prefill | ⬜ Design agreed on 2026-11-10, implementation pending. Three supported purchase types, both purchase entry points, human-choice protection and reverse-charge rate separation. [Design and three atomic task cards](milestones/M19.md) |
 
 Separately numbered improvements:
 

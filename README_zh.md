@@ -133,9 +133,13 @@ SI1（单据排序、Quote 复制和服务器侧 Sent 副本）已于2026-10-25�
 
 [M18 里程 MCP 录入](docs/plan/milestones/M18_zh.md)已于 2026-11-10 按作者委托的后端验证范围验收，交付版本为 v0.14.0。四步均通过自动化门禁及独立审查；实际 Codex CLI、Hermes CLI 发现／原生 MCP 调用及隔离数据库／报表核验通过。浏览器、真实地图、Hermes 自然语言对话和 Telegram 检查未执行。功能提供客户端通用的交通工具选项、用户确认的预览及幂等创建，并使用 `mileage:create` 权限。路线建议由 Agent 自身可用的搜索／地图能力提供。
 
+⬜ **下一里程碑 M19。** [采购票据 AI 类型识别设计](docs/plan/milestones/M19_zh.md)已于 2026-11-10 确认，待开发。它将在收件箱和 Expense 附件识别中，为荷兰本地、EU B2B 反向征税及 EU 外国 VAT 采购提供可复核的类型建议。三张原子任务卡覆盖提示词／契约校验、两个采购表单及人工选择保护、回归与验收。
+
 ## 文档
 
 文档英文优先，并配同步的中文镜像（`*_zh.md`）。从 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md) 入手；荷兰 VAT/BTW 申报口径见 [`docs/insight/btw-aangifte-2026-guide_zh.md`](docs/insight/btw-aangifte-2026-guide_zh.md)。
+
+下一里程碑的实施设计和三张原子任务卡见 [M19 采购票据 AI 识别与 VAT 类型预填](docs/plan/milestones/M19_zh.md)。
 
 ## 许可证
 
