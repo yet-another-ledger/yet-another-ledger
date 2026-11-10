@@ -1,4 +1,4 @@
-# Complete optional MCP tool allowlist for the full M15 workflow.
+# Complete optional MCP tool allowlist for v0.14.0 (M15 + SI4 + M18).
 # Replace the profile's entire mcp_servers.jai entry with this block; do not
 # merge separate role snippets because YAML mapping overlays can drop tools.
 # The bearer token needs all ten current scopes.

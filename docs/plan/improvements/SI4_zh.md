@@ -4,7 +4,7 @@
 
 > **状态（2026-11-10）** 🟢 实现、独立盲审及作者委托的真实 TCP subagent 验收完成。两个只读工具及 `expense:read` 已交付，版本为 0.13.0。M15 的历史验收保留，人工网页／Telegram／Hermes 检查与本轮自动化证据分开记录。
 
-> **当前源码扩展（2026-11-10）** [M18 里程 MCP 录入](../milestones/M18_zh.md)已实现在当前源码树中，使用独立 `mileage:create` 权限。完整集成门禁和作者走查仍待完成；当前交付状态见 [M18](../milestones/M18_zh.md) 和[路线图](../roadmap_zh.md)。已发布的 `v0.13.0` 仍为 18 个工具／九项 scope；M18 源码 profile 为 21 个工具／十项 scope。
+> **当前扩展（2026-11-10）** [M18 里程 MCP 录入](../milestones/M18_zh.md)已在 v0.14.0 交付，使用独立 `mileage:create` 权限。自动化门禁及作者委托的后端验收已通过；当前交付状态见 [M18](../milestones/M18_zh.md) 和[路线图](../roadmap_zh.md)。已发布的 `v0.13.0` 仍为 18 个工具／九项 scope；v0.14.0 M18 profile 为 21 个工具／十项 scope。
 
 ## 契约与边界
 

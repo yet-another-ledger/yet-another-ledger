@@ -1,4 +1,4 @@
-# M15 完整可选工作流的 MCP 工具允许列表。
+# v0.14.0（M15 + SI4 + M18）完整可选工作流的 MCP 工具允许列表。
 # 用此块整体替换 profile 的 mcp_servers.jai 项；不要合并多个角色片段，
 # 因为 YAML 映射覆盖可能会丢失工具。Bearer token 需要当前完整的十项 scope。
 mcp_servers:

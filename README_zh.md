@@ -6,7 +6,7 @@
 
 技术栈 **FastAPI + Vue 3 + PostgreSQL**。
 
-> **状态——1.0 前版本（`v0.13.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
+> **状态——1.0 前版本（`v0.14.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
 
 ## 功能
 
@@ -59,7 +59,7 @@ docker compose up -d
 
 停止：`docker compose down`（加 `-v` 同时删除数据库卷）。
 
-> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.13.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
+> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.14.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
 
 ## 配置
 
@@ -99,17 +99,17 @@ SMTP 测试失败仍返回通用的 `SMTP_SEND_FAILED` API 错误。服务端日
 
 附录原件及其元数据通过事务存储在 PostgreSQL（`BYTEA`），不存入 `STORAGE_DIR`。备份和恢复流程必须包含数据库；只备份存储卷并不包含这些原件。既有正式 Invoice／Refund `DocumentArtifact` 历史保持不变：M17 不会留存精确的历史报价邮件 PDF，也不会冻结报价正文。
 
-M17 在 v0.11.0 引入 `0053` 和 `0054` 迁移。从 v0.10.0 升级时，既有报价的附录清单初始为空。每次升级前先备份 PostgreSQL 和票据存储。如果 `.env` 显式设置 `APP_VERSION`，本次发版请更新为 `0.13.0`。
+M17 在 v0.11.0 引入 `0053` 和 `0054` 迁移。从 v0.10.0 升级时，既有报价的附录清单初始为空。每次升级前先备份 PostgreSQL 和票据存储。如果 `.env` 显式设置 `APP_VERSION`，本次发版请更新为 `0.14.0`。
 
-## Agent 接入与 M15 升级
+## Agent 接入与升级
 
-已发布的 `v0.13.0` 镜像在现有应用镜像内通过 `/api/v1/mcp` 提供 Streamable HTTP MCP，包含 18 个工具、九项 scope，迁移最高到 `0057`（SI4 开支只读）。当前源码树另外包含 M18 里程录入：其完整 profile 需要使用本源码构建的镜像并应用迁移 `0058`，提供 21 个工具和十项 scope。M18 已在源码中，但不属于已发布的 `v0.13.0` 镜像。通过 MFA 登录的 owner 在**设置 → Agent access** 创建具名令牌、选择权限、将只显示一次的密钥保存到客户端私有环境，之后可随时撤销。客户端 HTTP 地址填写 `http://127.0.0.1:<JAI端口>/api/v1/mcp`，通过客户端私有密钥配置传入 `Authorization: Bearer <token>`。端点保持同机／私网使用，浏览器审阅链接单独配置 JAI 的 `BASE_URL`。
+`v0.14.0` 镜像在现有应用镜像内通过 `/api/v1/mcp` 提供 Streamable HTTP MCP，包含 21 个工具、十项 scope，迁移最高到 `0058`，包括 M18 里程录入。通过 MFA 登录的 owner 在**设置 → Agent access** 创建具名令牌、选择权限、将只显示一次的密钥保存到客户端私有环境，之后可随时撤销。客户端 HTTP 地址填写 `http://127.0.0.1:<JAI端口>/api/v1/mcp`，通过客户端私有密钥配置传入 `Authorization: Bearer <token>`。端点保持同机／私网使用，浏览器审阅链接单独配置 JAI 的 `BASE_URL`。
 
-当前源码树的 scope 为 `receipt:intake`、`customer:read`、`customer:create`、`catalog:read`、`quote:read`、`quote:write_draft`、`invoice:read`、`invoice:write_draft`、`expense:read` 和 `mileage:create`。现有令牌保留原有授权；新增权限需创建替代令牌。仅收据接入使用 `receipt:intake`。当前源码树完整工作流包含十项 scope、21 个工具，包括只读开支列表／详情和三个受限里程录入工具。已发布的 `v0.13.0` 镜像仍为 18 个工具／九项 scope，迁移最高到 `0057`；历史 M15 范围仍为八项 scope／16 个工具，SI4 扩展另有记录。参见 [M15](docs/plan/milestones/M15_zh.md)、[SI4](docs/plan/improvements/SI4_zh.md) 和[客户端通用 M18 工作流](docs/plan/milestones/M18-agent-workflow_zh.md)。每次调用（包括重放）都会检查授权。每次修改都需要调用方生成稳定 `request_id`；完全相同参数的重试使用相同 ID，新操作使用新 ID。普通 CLI 客户端省略 Telegram `source` 元数据。
+v0.14.0 的 scope 为 `receipt:intake`、`customer:read`、`customer:create`、`catalog:read`、`quote:read`、`quote:write_draft`、`invoice:read`、`invoice:write_draft`、`expense:read` 和 `mileage:create`。现有令牌保留原有授权；新增权限需创建替代令牌。仅收据接入使用 `receipt:intake`。v0.14.0 完整工作流包含十项 scope、21 个工具，包括只读开支列表／详情和三个受限里程录入工具。较早的 `v0.13.0` 镜像仍为 18 个工具／九项 scope，迁移最高到 `0057`；历史 M15 范围仍为八项 scope／16 个工具，SI4 扩展另有记录。参见 [M15](docs/plan/milestones/M15_zh.md)、[SI4](docs/plan/improvements/SI4_zh.md) 和[客户端通用 M18 工作流](docs/plan/milestones/M18-agent-workflow_zh.md)。每次调用（包括重放）都会检查授权。每次修改都需要调用方生成稳定 `request_id`；完全相同参数的重试使用相同 ID，新操作使用新 ID。普通 CLI 客户端省略 Telegram `source` 元数据。
 
-Hermes 配置、分角色 skill 及完整 MCP 允许列表见[客户端指南](docs/plan/milestones/M15-hermes-telegram_zh.md)。完整 profile 的 21 个工具／十项 scope 需要带迁移 `0058` 的当前源码树镜像；已发布的 `v0.13.0` 仍为 18 个工具／九项 scope及迁移 `0057`。Skill 是安装到所选 Hermes profile 的文件。原始 Telegram 附件在远程 Base64 传输不可靠时使用[本地流式适配器](docs/plan/milestones/M15-local-receipt-adapter_zh.md)。可选 stdio 适配器在 Hermes 一侧运行，需要批准的附件缓存根目录、本地 JAI 地址与令牌。MCP 端点与上传路由均包含在同一个 JAI 镜像中，替换 skill 后开启新会话加载当前规则。
+Hermes 配置、分角色 skill 及完整 MCP 允许列表见[客户端指南](docs/plan/milestones/M15-hermes-telegram_zh.md)。完整 profile 的 21 个工具／十项 scope 需要带迁移 `0058` 的 v0.14.0；较早的 `v0.13.0` 仍为 18 个工具／九项 scope及迁移 `0057`。Skill 是安装到所选 Hermes profile 的文件。原始 Telegram 附件在远程 Base64 传输不可靠时使用[本地流式适配器](docs/plan/milestones/M15-local-receipt-adapter_zh.md)。可选 stdio 适配器在 Hermes 一侧运行，需要批准的附件缓存根目录、本地 JAI 地址与令牌。MCP 端点与上传路由均包含在同一个 JAI 镜像中，替换 skill 后开启新会话加载当前规则。
 
-升级前先成套备份 PostgreSQL 和存储。正常的 `v0.12.0` 数据库迁移 head 为 `0056`。从该数据库升级到已发布的 `v0.13.0` 镜像时，仅会新执行 `0057`；其降级保护覆盖任何含 `expense:read` 的存量 scope，包括已撤销令牌。从 `v0.13.0` 的 `0057` head 升级到当前源码构建的 M18 镜像时，仅会新执行 `0058`，扩展 Agent 令牌 scope 约束以支持里程录入。从 `v0.12.0` 的 `0056` head 直接升级到 M18 源码镜像时，会依次新执行 `0057` 和 `0058`。若存量令牌行仍含 `mileage:create`，从 `0058` 降级会被阻止，已撤销令牌也包括在内；撤销不会清除 scope。若任一保护阻止回退到较旧版本，应成套恢复相匹配的升级前 PostgreSQL 与存储备份。旧 M15 预览库可能存在含糊的 `0044`／`0045` 或 `0053`／`0054` 历史。存在 Agent 表时迁移会拒绝此类历史，须保留备份后单独协调，或准备全新的隔离测试库，绝不能盲目 stamp。[M15 计划](docs/plan/milestones/M15_zh.md)记录实际验收范围及跳过／暂缓项目。
+升级前先成套备份 PostgreSQL 和存储。正常的 `v0.12.0` 数据库迁移 head 为 `0056`。从该数据库升级到已发布的 `v0.13.0` 镜像时，仅会新执行 `0057`；其降级保护覆盖任何含 `expense:read` 的存量 scope，包括已撤销令牌。从 `v0.13.0` 的 `0057` head 升级到 v0.14.0 镜像时，仅会新执行 `0058`，扩展 Agent 令牌 scope 约束以支持里程录入。从 `v0.12.0` 的 `0056` head 直接升级到 v0.14.0 镜像时，会依次新执行 `0057` 和 `0058`。若存量令牌行仍含 `mileage:create`，从 `0058` 降级会被阻止，已撤销令牌也包括在内；撤销不会清除 scope。若任一保护阻止回退到较旧版本，应成套恢复相匹配的升级前 PostgreSQL 与存储备份。旧 M15 预览库可能存在含糊的 `0044`／`0045` 或 `0053`／`0054` 历史。存在 Agent 表时迁移会拒绝此类历史，须保留备份后单独协调，或准备全新的隔离测试库，绝不能盲目 stamp。[M15 计划](docs/plan/milestones/M15_zh.md)记录实际验收范围及跳过／暂缓项目。
 
 ## 开发
 
@@ -123,7 +123,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 路线图
 
-M0–M17 均已按各自记录范围验收。**M15 于 2026-11-09 验收并纳入 v0.12.0**，证据包括历史真实收据接收、自动化 Codex MCP 验收与隔离真实 Hermes CLI 验证。作者跳过及暂缓的检查继续保留在 [M15 验收结论](docs/plan/milestones/M15_zh.md)和[路线图](docs/plan/roadmap_zh.md)。
+M0–M18 均已按各自记录范围验收。**M15 于 2026-11-09 验收并纳入 v0.12.0**，证据包括历史真实收据接收、自动化 Codex MCP 验收与隔离真实 Hermes CLI 验证。作者跳过及暂缓的检查继续保留在 [M15 验收结论](docs/plan/milestones/M15_zh.md)和[路线图](docs/plan/roadmap_zh.md)。
 
 作者已于 2026-11-01 按记录的代表性走查范围验收 [M16](docs/plan/milestones/M16_zh.md)，外部销售凭证记账、VAT／P&L 分离、储能年度私用调整及并入的 SI3 里程利润拆分已交付；跳过／未重测路径及已知遗留仍明确记录。
 
@@ -131,7 +131,7 @@ M0–M17 均已按各自记录范围验收。**M15 于 2026-11-09 验收并纳�
 
 SI1（单据排序、Quote 复制和服务器侧 Sent 副本）已于2026-10-25按代表性走查范围验收；未实际执行的邮件类型和失败分支明确记录为自动化覆盖。参见 [SI1 计划与验收](docs/plan/improvements/SI1_zh.md)。
 
-[M18 里程 MCP 录入](docs/plan/milestones/M18_zh.md)设计已于 2026-11-10 确认。实现已存在于当前源码树；完整集成门禁和作者走查仍待完成，因此该能力尚未验收或发版。功能提供客户端通用的交通工具选项、用户确认的预览及幂等创建，并新增显式 `mileage:create` 权限。路线建议由 Agent 自身可用的搜索／地图能力提供。
+[M18 里程 MCP 录入](docs/plan/milestones/M18_zh.md)已于 2026-11-10 按作者委托的后端验证范围验收，交付版本为 v0.14.0。四步均通过自动化门禁及独立审查；实际 Codex CLI、Hermes CLI 发现／原生 MCP 调用及隔离数据库／报表核验通过。浏览器、真实地图、Hermes 自然语言对话和 Telegram 检查未执行。功能提供客户端通用的交通工具选项、用户确认的预览及幂等创建，并使用 `mileage:create` 权限。路线建议由 Agent 自身可用的搜索／地图能力提供。
 
 ## 文档
 

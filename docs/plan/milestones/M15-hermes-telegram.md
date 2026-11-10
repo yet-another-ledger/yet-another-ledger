@@ -4,7 +4,7 @@
 
 > **Status (2026-11-09)** 🟢 M15 is accepted within the recorded scope and included in v0.12.0. This guide retains deployment configuration steps. Historical real PDF/image intake and current isolated Hermes CLI checks have evidence. New Telegram validation, original hashes and phone links are author-skipped; AI-unavailable testing is deferred. Full scope is in the [M15 acceptance conclusion](M15.md).
 
-> **Current full workflow:** SI4 adds read-only Expense tools and M18 adds confirmed mileage intake. The published `v0.13.0` image includes SI4 only: 18 tools, nine scopes and migration `0057`. The 21-tool/ten-scope full profile below requires the current source-tree image with migration `0058`. This guide retains M15's historical 16-tool/eight-scope setup and evidence.
+> **Current full workflow:** SI4 adds read-only Expense tools and M18 adds confirmed mileage intake. The published `v0.13.0` image includes SI4 only: 18 tools, nine scopes and migration `0057`. The 21-tool/ten-scope full profile below requires the v0.14.0 image with migration `0058`. This guide retains M15's historical 16-tool/eight-scope setup and evidence.
 
 This guide documents the receipt-only part of M15 Step 5 using a separate Hermes profile and a distinct Telegram bot. The optional full workflow is described below. Consult the M15 acceptance conclusion for actual evidence and author-approved omissions when deploying a new profile.
 
@@ -35,7 +35,7 @@ TELEGRAM_BOT_TOKEN=<new BotFather bot token>
 TELEGRAM_ALLOWED_USERS=<one numeric Telegram user ID>
 ```
 
-As the JAI owner, sign in with the MFA-protected owner account, open **Settings → Agent access**, enter a descriptive token name, select only the scope required by this profile, and create it. Use **Copy secret and hide** once and place the secret directly into the private profile `.env`; the UI cannot reveal it again. The receipt-only profile selects only `receipt:intake`. The original M15 full-workflow profile used eight scopes. The published `v0.13.0` full workflow adds SI4 `expense:read`, reaching 18 tools/nine scopes and migration `0057`. The current source-tree full workflow also includes M18 `mileage:create`, reaching 21 tools/ten scopes and migration `0058`; use a JAI image built from this source for that configuration. Use the same page's **Revoke** action to disable a token; verify that a subsequent MCP call fails before removing its environment value. Never reuse an old profile token or copy a token into a shell command.
+As the JAI owner, sign in with the MFA-protected owner account, open **Settings → Agent access**, enter a descriptive token name, select only the scope required by this profile, and create it. Use **Copy secret and hide** once and place the secret directly into the private profile `.env`; the UI cannot reveal it again. The receipt-only profile selects only `receipt:intake`. The original M15 full-workflow profile used eight scopes. The published `v0.13.0` full workflow adds SI4 `expense:read`, reaching 18 tools/nine scopes and migration `0057`. The v0.14.0 full workflow also includes M18 `mileage:create`, reaching 21 tools/ten scopes and migration `0058`; use JAI v0.14.0 for that configuration. Use the same page's **Revoke** action to disable a token; verify that a subsequent MCP call fails before removing its environment value. Never reuse an old profile token or copy a token into a shell command.
 
 Create the skill directory and copy the checked-in English runtime skill. The Chinese file is a reading mirror and is not installed as a second Hermes skill:
 

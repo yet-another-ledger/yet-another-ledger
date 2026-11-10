@@ -2,6 +2,8 @@
 
 > 🌐 **English** · [中文](M18-agent-workflow_zh.md)
 
+> **Version requirement:** JAI v0.14.0 or later, migration `0058`, and `mileage:create`. Start a fresh client session after updating the allowlist/workflow; existing tokens do not gain this scope automatically.
+
 This guide describes the shared workflow for any client connected to JAI's authenticated Streamable HTTP MCP endpoint. It complements the [M18 design and acceptance record](M18.md); it does not require Hermes, Telegram, or a particular route-search provider.
 
 ## Permission and effect

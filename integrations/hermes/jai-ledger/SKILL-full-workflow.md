@@ -7,7 +7,7 @@ description: File original receipts, record user-confirmed mileage trips in JAI,
 
 > 🌐 **English** · [中文](SKILL-full-workflow_zh.md)
 
-Use this workflow only for tasks the user explicitly asks you to perform in JAI. The complete tool surface in the current source tree is the 21 tools in `config-full.yaml`; it contains no generic database or CRUD access. The published `v0.13.0` image provides 18 tools, nine scopes, and migration `0057`; the current source-tree workflow requires an image built from this source, with migration `0058`, 21 tools and ten scopes. Expense access is read-only under `expense:read`. The separate `mileage:create` scope permits only the three confirmed mileage-intake tools described below.
+Use this workflow only for tasks the user explicitly asks you to perform in JAI. The complete tool surface in v0.14.0 is the 21 tools in `config-full.yaml`; it contains no generic database or CRUD access. The published `v0.13.0` image provides 18 tools, nine scopes, and migration `0057`; the v0.14.0 workflow requires migration `0058` and provides 21 tools and ten scopes. Expense access is read-only under `expense:read`. The separate `mileage:create` scope permits only the three confirmed mileage-intake tools described below.
 
 ## Authorization and required facts
 

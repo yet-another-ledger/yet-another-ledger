@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     static_dir: str | None = None
 
     # -- Application metadata -----------------------------------------------
-    app_version: str = "0.13.0"
+    app_version: str = "0.14.0"
 
     # -- Base URL (for generating absolute links in emails) -----------------
     # Must be set in production (e.g. ``https://invoice.example.com``).

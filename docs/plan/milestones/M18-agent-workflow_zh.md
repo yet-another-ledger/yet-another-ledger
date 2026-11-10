@@ -2,6 +2,8 @@
 
 > 🌐 [English](M18-agent-workflow.md) · **中文**
 
+> **版本要求：** JAI v0.14.0 或更新版本、迁移 `0058` 及 `mileage:create` 权限。更新客户端允许列表／工作流后开启新会话；现有令牌不会自动获得该权限。
+
 本指南说明任何连接到 JAI 认证 Streamable HTTP MCP 端点的客户端都可采用的通用工作流。它补充 [M18 设计与验收记录](M18_zh.md)，不要求使用 Hermes、Telegram 或特定路线查询服务。
 
 ## 权限与效果
