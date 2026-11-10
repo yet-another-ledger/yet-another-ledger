@@ -43,6 +43,9 @@ export const useReceiptInboxStore = defineStore('receiptInbox', () => {
   const removeFile = (id: string, fileId: string) => del<Inbox>(`/api/v1/receipt-inbox/${id}/files/${fileId}`)
   const discard = (id: string) => del<null>(`/api/v1/receipt-inbox/${id}`)
   const retry = (id: string, language: string) => post<Inbox>(`/api/v1/receipt-inbox/${id}/extract`, { language })
-  const confirm = (id: string, body: ExpenseInput) => post<Confirmation>(`/api/v1/receipt-inbox/${id}/confirm`, body)
+  const confirm = (id: string, body: ExpenseInput, expectedFileRevision?: number) => post<Confirmation>(
+    `/api/v1/receipt-inbox/${id}/confirm${expectedFileRevision == null ? '' : `?expected_file_revision=${expectedFileRevision}`}`,
+    body,
+  )
   return { items, total, loading, error, fetch, detail, upload, append, removeFile, discard, retry, confirm }
 })

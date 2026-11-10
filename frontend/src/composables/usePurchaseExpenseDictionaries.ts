@@ -6,6 +6,7 @@ type Category = components['schemas']['ExpenseCategoryRead']
 type Treatments = components['schemas']['VatTreatmentListResponse']
 type Rates = components['schemas']['VatRateListResponse']
 type Categories = components['schemas']['ExpenseCategoryListResponse']
+export type PurchaseTreatmentSuggestion = components['schemas']['ExpenseVatTreatmentSuggestion']
 export type PurchaseExpenseFields = {
   expense_date: string; category_id: string; supplier_name: string | null; vat_treatment_id: string; vat_rate_id: string
   net_amount: number | string; vat_amount: number | string; deductible?: boolean | null; reference: string | null; note: string | null
@@ -16,6 +17,18 @@ export type PurchaseExpenseFields = {
 /** Build the raw contract payload shared by the Expense editor and inbox review form. */
 export function toExpenseInput(fields: PurchaseExpenseFields): components['schemas']['ExpenseInput'] {
   return { ...fields }
+}
+
+/** Resolve a model suggestion only against an active, semantically matching purchase dictionary record. */
+export function resolvePurchaseTreatmentSuggestion(
+  suggestion: PurchaseTreatmentSuggestion | null | undefined,
+  treatments: components['schemas']['VatTreatmentRead'][],
+) {
+  if (!suggestion) return null
+  const expectedEffect = suggestion.code === 'NL_DOMESTIC_PURCH' || suggestion.code === 'EU_B2C_PURCH' ? 'APPLY_RATE'
+    : suggestion.code === 'EU_B2B_REVERSE_PURCH' ? 'ZERO_REVERSE' : null
+  if (!expectedEffect) return null
+  return treatments.find(x => x.id === suggestion.id && x.code === suggestion.code && x.active && x.side === 'PURCHASE' && x.effect === expectedEffect) ?? null
 }
 
 /** Shared PURCHASE dictionary loading and option construction for Expense and inbox forms. */

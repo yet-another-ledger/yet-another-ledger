@@ -10817,7 +10817,7 @@ export interface components {
          * ReceiptInboxErrorCode
          * @enum {string}
          */
-        ReceiptInboxErrorCode: "INBOX_NOT_PENDING" | "FILE_LIMIT_REACHED" | "LAST_FILE" | "ALREADY_CONFIRMED" | "AI_DISABLED" | "AI_NOT_CONFIGURED" | "AI_TIMEOUT" | "AI_PROVIDER_ERROR" | "AI_INVALID_RESPONSE";
+        ReceiptInboxErrorCode: "INBOX_NOT_PENDING" | "FILE_LIMIT_REACHED" | "LAST_FILE" | "ALREADY_CONFIRMED" | "FILE_GROUP_CHANGED" | "AI_DISABLED" | "AI_NOT_CONFIGURED" | "AI_TIMEOUT" | "AI_PROVIDER_ERROR" | "AI_INVALID_RESPONSE";
         /** ReceiptInboxExtractRequest */
         ReceiptInboxExtractRequest: {
             /**
@@ -10867,6 +10867,11 @@ export interface components {
             status: components["schemas"]["ReceiptInboxStatus"];
             /** Files */
             files: components["schemas"]["ReceiptInboxFileRead"][];
+            /**
+             * File Revision
+             * @description File-group version. Use a coherent detail or mutation response revision when confirming; list rows are for navigation.
+             */
+            file_revision: number;
             ai_state: components["schemas"]["ReceiptInboxAIState"];
             ai_suggestion: components["schemas"]["ExpenseAIPrefill"] | null;
             ai_error_code: components["schemas"]["ReceiptInboxErrorCode"] | null;
@@ -20746,7 +20751,9 @@ export interface operations {
     };
     confirm_receipt_inbox_api_v1_receipt_inbox__inbox_id__confirm_post: {
         parameters: {
-            query?: never;
+            query?: {
+                expected_file_revision?: number | null;
+            };
             header?: never;
             path: {
                 inbox_id: string;

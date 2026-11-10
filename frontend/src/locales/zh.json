@@ -1505,7 +1505,17 @@
       "extracting": "识别中…",
       "disabled": "AI 未启用，请在设置 → AI 中开启。",
       "modelFailed": "AI 模型调用失败，请重试或手动填写。",
-      "note": "模型备注"
+      "note": "模型备注",
+      "treatmentOrigin": "AI 建议",
+      "humanTreatmentOrigin": "你的选择",
+      "savedTreatmentOrigin": "已保存的选择",
+      "applyTreatment": "采用建议",
+      "nominalRateReview": "请核对或选择适用的荷兰名义增值税税率。票面增值税金额保持原样。",
+      "reverseVatRequired": "保存前请输入票面增值税金额；票面未列 VAT 时请填写 0。",
+      "withdrawnNetRequired": "用于此净额的票据已删除。请重新填写并核对净额后再保存。",
+      "withdrawnVatRequired": "用于此 VAT 金额的票据已删除。请重新填写并核对 VAT 金额后再保存；票面未列 VAT 时请填写 0。",
+      "attachmentStatusUncertain": "无法确认附件删除结果。核对附件列表前，暂不可采用其 AI 建议或保存来源于该附件的金额。",
+      "recheckAttachments": "重新核对附件列表"
     }
   },
   "mileage": {
@@ -1836,7 +1846,8 @@
       "INBOX_NOT_PENDING": "此项目已不在待处理状态",
       "FILE_LIMIT_REACHED": "每个项目最多包含五个文件",
       "LAST_FILE": "至少保留一个文件；如需全部移除，请丢弃项目",
-      "ALREADY_CONFIRMED": "此项目已确认"
+      "ALREADY_CONFIRMED": "此项目已确认",
+      "FILE_GROUP_CHANGED": "票据附件已变化。请先审核当前文件组，再次确认。"
     },
     "missingFields": "部分票据字段缺失或不确定。确认前请逐项审核。",
     "retry": "重试提取",
@@ -1847,6 +1858,10 @@
     "addFiles": "选择更多文件",
     "append": "添加文件",
     "reviewTitle": "审核并确认开支",
+    "treatmentUnavailable": "当前采购字典中没有可用的建议 VAT 处理方式，请手动选择。",
+    "fileGroupUnverified": "附件变更结果未知。当前文件组重新加载成功前，确认和后续文件操作会保持暂停。",
+    "fileGroupChanged": "确认前票据附件已变化。当前文件组已重新加载，请审核后再次确认。",
+    "reloadBeforeConfirm": "请重新加载票据详情后再确认此项目。",
     "confirm": "确认开支",
     "confirming": "正在确认…",
     "confirmed": "开支已确认。",

@@ -1505,7 +1505,17 @@
       "extracting": "Extracting…",
       "disabled": "AI is disabled. Enable it in Settings → AI.",
       "modelFailed": "AI model call failed. Please try again or fill in manually.",
-      "note": "Model note"
+      "note": "Model note",
+      "treatmentOrigin": "AI suggestion",
+      "humanTreatmentOrigin": "Your choice",
+      "savedTreatmentOrigin": "Saved choice",
+      "applyTreatment": "Apply suggestion",
+      "nominalRateReview": "Review or select the applicable Dutch nominal VAT rate. The receipt VAT amount remains as shown.",
+      "reverseVatRequired": "Enter the VAT amount shown on the receipt before saving. Enter 0 when the receipt shows no VAT.",
+      "withdrawnNetRequired": "The receipt used for this net amount was removed. Enter the net amount to review it before saving.",
+      "withdrawnVatRequired": "The receipt used for this VAT amount was removed. Enter the VAT amount to review it before saving; enter 0 if the receipt shows no VAT.",
+      "attachmentStatusUncertain": "The attachment deletion could not be verified. Its AI suggestion and sourced amounts remain unavailable until the attachment list is checked.",
+      "recheckAttachments": "Check attachment list"
     }
   },
   "mileage": {
@@ -1836,7 +1846,8 @@
       "INBOX_NOT_PENDING": "This item is no longer pending",
       "FILE_LIMIT_REACHED": "The item can contain at most five files",
       "LAST_FILE": "Keep at least one file; discard the item to remove all files",
-      "ALREADY_CONFIRMED": "This item was already confirmed"
+      "ALREADY_CONFIRMED": "This item was already confirmed",
+      "FILE_GROUP_CHANGED": "The receipt files changed. Review the current group before confirming."
     },
     "missingFields": "Some receipt details are missing or uncertain. Review every field before confirming.",
     "retry": "Retry extraction",
@@ -1847,6 +1858,10 @@
     "addFiles": "Choose more files",
     "append": "Add files",
     "reviewTitle": "Review and confirm expense",
+    "treatmentUnavailable": "The suggested VAT treatment is not available in the current purchase dictionary. Select a treatment manually.",
+    "fileGroupUnverified": "The file change result is unknown. Confirmation and further file changes stay paused until the current group can be reloaded.",
+    "fileGroupChanged": "The receipt files changed before confirmation. The current group has been reloaded; review it before confirming again.",
+    "reloadBeforeConfirm": "Reload the receipt details before confirming this item.",
     "confirm": "Confirm expense",
     "confirming": "Confirming…",
     "confirmed": "Expense confirmed.",

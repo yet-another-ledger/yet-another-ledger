@@ -144,6 +144,7 @@ def _read(item: ReceiptInbox, files: list[ExpenseAttachment]) -> ReceiptInboxRea
             )
             for f in files
         ],
+        file_revision=item.file_revision,
         ai_state=ReceiptInboxAIState(item.ai_state),
         ai_suggestion=(
             ExpenseAIPrefill.model_validate(item.ai_suggestion)
@@ -394,6 +395,7 @@ async def list_items(
     limit: int,
     offset: int,
 ) -> ReceiptInboxListResponse:
+    """List navigation rows; clients must fetch coherent detail before review."""
     await set_rls_company(session, company_id)
     stmt = select(ReceiptInbox).where(ReceiptInbox.company_id == company_id)
     count_stmt = (
@@ -415,6 +417,8 @@ async def list_items(
         .all()
     )
     return ReceiptInboxListResponse(
+        # These row/file pairs are navigation summaries only. Confirmation
+        # versions come from get_item(), which locks the parent across both reads.
         items=[_read(row, await _files(session, row.id)) for row in rows],
         total=total,
         limit=limit,
@@ -426,7 +430,10 @@ async def get_item(
     session: AsyncSession, inbox_id: uuid.UUID, company_id: uuid.UUID
 ) -> ReceiptInboxRead:
     await set_rls_company(session, company_id)
-    item = await _owned(session, inbox_id, company_id)
+    # Every file-group mutation takes this row lock before touching attachments.
+    # Holding it across the second query makes the record and file list one
+    # coherent snapshot even at READ COMMITTED, and refreshes identity-map data.
+    item = await _owned(session, inbox_id, company_id, lock=True)
     return _read(item, await _files(session, item.id))
 
 
@@ -436,6 +443,7 @@ async def confirm_item(
     company_id: uuid.UUID,
     creator_id: uuid.UUID,
     body: ExpenseInput,
+    expected_file_revision: int | None = None,
 ) -> ReceiptInboxConfirmationRead:
     """Confirm one pending group atomically with its Expense and attachments."""
     await set_rls_company(session, company_id)
@@ -443,6 +451,8 @@ async def confirm_item(
         item = await _owned(session, inbox_id, company_id, lock=True)
         if item.status != "PENDING":
             raise InboxConflict("ALREADY_CONFIRMED", item.expense_id)
+        if expected_file_revision is not None and item.file_revision != expected_file_revision:
+            raise InboxConflict("FILE_GROUP_CHANGED")
 
         attachments = await _files(session, inbox_id)
         expense = await create_expense_record(session, company_id, body, creator_id)

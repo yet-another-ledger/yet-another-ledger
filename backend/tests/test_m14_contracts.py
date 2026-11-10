@@ -38,6 +38,14 @@ def test_receipt_inbox_openapi_contract_is_present_and_has_no_storage_key() -> N
     assert schemas["ReceiptInboxRead"]["properties"]["status"]["$ref"].endswith(
         "/ReceiptInboxStatus"
     )
+    assert schemas["ReceiptInboxRead"]["properties"]["file_revision"]["type"] == "integer"
+    confirm_parameters = paths["/api/v1/receipt-inbox/{inbox_id}/confirm"]["post"][
+        "parameters"
+    ]
+    revision_parameter = next(
+        p for p in confirm_parameters if p["name"] == "expected_file_revision"
+    )
+    assert revision_parameter["in"] == "query" and revision_parameter["required"] is False
     treatment = schemas["ExpenseAIPrefill"]["properties"]["suggested_vat_treatment"]
     assert treatment["anyOf"]
     assert schemas["ExpenseVatTreatmentSuggestion"]["properties"]["reason"]["maxLength"] == 240
@@ -57,6 +65,7 @@ def test_receipt_inbox_enums_match_frozen_codes() -> None:
         "FILE_LIMIT_REACHED",
         "LAST_FILE",
         "ALREADY_CONFIRMED",
+        "FILE_GROUP_CHANGED",
         "AI_DISABLED",
         "AI_NOT_CONFIGURED",
         "AI_TIMEOUT",

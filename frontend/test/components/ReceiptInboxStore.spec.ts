@@ -39,4 +39,16 @@ describe('receipt inbox upload contract', () => {
     expect(store.items.map(item => item.id)).toEqual(['oldest'])
     expect(store.total).toBe(101)
   })
+
+  it('sends the reviewed file revision as an optional query while keeping the Expense body intact', async () => {
+    const store = useReceiptInboxStore()
+    const body = { expense_date: '2026-11-14', net_amount: '10.000' }
+    api.post.mockResolvedValue({})
+    await store.confirm('inbox-1', body as never, 7)
+    await store.confirm('inbox-2', body as never)
+    expect(api.post.mock.calls).toEqual([
+      ['/api/v1/receipt-inbox/inbox-1/confirm?expected_file_revision=7', body],
+      ['/api/v1/receipt-inbox/inbox-2/confirm', body],
+    ])
+  })
 })

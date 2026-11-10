@@ -14,12 +14,12 @@
  * - Prod-build button safety: avoid dynamic :loading on buttons inside v-if
  *   branches. Use v-if/v-else pattern for loading states.
  */
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { localDateStr } from '../../utils/date'
 import { useExpenseCostPreview } from '../../composables/useExpenseCostPreview'
-import { toExpenseInput, usePurchaseExpenseDictionaries } from '../../composables/usePurchaseExpenseDictionaries'
+import { resolvePurchaseTreatmentSuggestion, toExpenseInput, usePurchaseExpenseDictionaries } from '../../composables/usePurchaseExpenseDictionaries'
 import {
   NForm, NFormItem, NInput, NInputNumber, NSelect, NCheckbox,
   NButton, NSpace, NAlert, NSpin, NText, NTag,
@@ -55,6 +55,20 @@ const vatTreatmentId = ref<string | null>(null)
 const vatRateId = ref<string | null>(null)
 const netAmount = ref<number | null>(null)
 const vatAmount = ref<number | null>(null)
+// Keep the receipt/saved VAT amount separate from ordinary-rate preview output.
+const receiptVatBaseline = ref<number | null>(null)
+const ordinaryVatPreview = ref<{
+  netAmount: number
+  vatRateId: string
+  netAttachmentId: string | null
+} | null>(null)
+const vatManuallyEdited = ref(false)
+const netAmountNeedsReview = ref(false)
+const vatAmountNeedsReview = ref(false)
+const receiptVatSource = ref<'none' | 'saved' | 'ai' | 'human'>('none')
+const receiptVatAttachmentId = ref<string | null>(null)
+const aiNetAmountAttachmentId = ref<string | null>(null)
+const currentExtractionVatMissing = ref(false)
 const deductible = ref<boolean | null>(null)
 const reference = ref('')
 const note = ref('')
@@ -88,7 +102,14 @@ const isDraft = ref(false)
 const recurringExpenseId = ref<string | null>(null)
 
 // ---- Dictionary data ----
-const { categories, rates: vatRates, categoryOptions, purchaseTreatmentOptions, vatRateOptions, load: loadDictionaries } = usePurchaseExpenseDictionaries()
+const { categories, treatments: purchaseTreatments, rates: vatRates, categoryOptions, purchaseTreatmentOptions, vatRateOptions, load: loadDictionaries } = usePurchaseExpenseDictionaries()
+const treatmentOrigin = ref<'none' | 'ai' | 'human' | 'saved'>('none')
+const rateOrigin = ref<'none' | 'ai' | 'human' | 'saved'>('none')
+const treatmentSuggestion = ref<components['schemas']['ExpenseVatTreatmentSuggestion'] | null>(null)
+let aiRequestVersion = 0
+let vatPreviewVersion = 0
+let pageVersion = 0
+let dictionariesPromise: Promise<void> | null = null
 
 // ---- Page state ----
 const loading = ref(false)
@@ -102,24 +123,40 @@ const attachLoading = ref(false)
 const attachUploading = ref(false)
 const attachError = ref<string | null>(null)
 const deletingAttachId = ref<string | null>(null)
+const uncertainAttachmentId = ref<string | null>(null)
+const recheckingAttachments = ref(false)
 
 // ---- AI state ----
 const aiExtracting = ref(false)
 const aiError = ref<string | null>(null)
 const aiNote = ref<string | null>(null)
 const lastAiAttachmentId = ref<string | null>(null)
+const lastAiExtractedAttachmentId = ref<string | null>(null)
+const lastAiSuccessfulAttachmentId = ref<string | null>(null)
 
 // ---- Options ----
 // ---- Load data ----
-function fillFromExpense(expense: ExpenseRead) {
+function fillFromExpense(expense: ExpenseRead, preserveExtractionVatMissing = false) {
+  const preserveManualVat = receiptVatSource.value === 'human' || vatManuallyEdited.value
   resetCostPreview()
   expenseDate.value = expense.expense_date
   categoryId.value = expense.category_id ?? null
   supplierName.value = expense.supplier_name ?? ''
   vatTreatmentId.value = expense.vat_treatment_id ?? null
   vatRateId.value = expense.vat_rate_id ?? null
+  treatmentOrigin.value = 'saved'
+  rateOrigin.value = 'saved'
   netAmount.value = Number(expense.net_amount)
   vatAmount.value = Number(expense.vat_amount)
+  receiptVatBaseline.value = vatAmount.value
+  ordinaryVatPreview.value = null
+  vatManuallyEdited.value = preserveManualVat
+  receiptVatSource.value = preserveManualVat ? 'human' : 'saved'
+  receiptVatAttachmentId.value = null
+  aiNetAmountAttachmentId.value = null
+  netAmountNeedsReview.value = false
+  vatAmountNeedsReview.value = false
+  currentExtractionVatMissing.value = preserveExtractionVatMissing && currentExtractionVatMissing.value
   deductible.value = expense.deductible
   reference.value = expense.reference ?? ''
   note.value = expense.note ?? ''
@@ -135,6 +172,60 @@ function fillFromExpense(expense: ExpenseRead) {
   recurringExpenseId.value = expense.recurring_expense_id ?? null
 }
 
+type VatEvidenceTransition = {
+  /** Drop an AI receipt baseline when its source is superseded or removed. */
+  invalidateAiReceipt?: boolean
+  /** Invalidate a preview only when it depends on this attachment. */
+  removedAttachmentId?: string
+  /** Attachment-backed previews are stale when extraction moves to a new source. */
+  switchAttachmentSource?: boolean
+  /** Reverse charge never uses the ordinary overlay, including over a human clear. */
+  enteringReverseCharge?: boolean
+  /** A completed extraction with no receipt VAT invalidates a saved non-human baseline. */
+  missingReverseReceipt?: boolean
+  /** Preview inputs expected after an automated form update. */
+  previewInputs?: { netAmount: number | null; vatRateId: string | null; netAttachmentId: string | null }
+}
+
+function transitionVatEvidence(change: VatEvidenceTransition) {
+  const hadVisibleAmount = vatAmount.value !== null
+  const invalidateReceipt = (change.invalidateAiReceipt === true && receiptVatSource.value === 'ai')
+    || (change.removedAttachmentId !== undefined && receiptVatSource.value === 'ai'
+      && receiptVatAttachmentId.value === change.removedAttachmentId)
+    || (change.missingReverseReceipt === true && receiptVatSource.value !== 'human'
+      && !vatManuallyEdited.value && currentExtractionVatMissing.value)
+  const previewSource = ordinaryVatPreview.value?.netAttachmentId ?? null
+  const invalidatePreview = ordinaryVatPreview.value !== null && (
+    change.enteringReverseCharge === true
+    || (change.removedAttachmentId !== undefined && previewSource === change.removedAttachmentId)
+    || (change.switchAttachmentSource === true && previewSource !== null)
+    || (change.previewInputs !== undefined && (
+      ordinaryVatPreview.value.netAmount !== change.previewInputs.netAmount
+      || ordinaryVatPreview.value.vatRateId !== change.previewInputs.vatRateId
+      || ordinaryVatPreview.value.netAttachmentId !== change.previewInputs.netAttachmentId
+    ))
+  )
+
+  if (invalidateReceipt) {
+    receiptVatBaseline.value = null
+    receiptVatSource.value = 'none'
+    receiptVatAttachmentId.value = null
+  }
+  if (invalidatePreview) ordinaryVatPreview.value = null
+
+  // The visible VAT is an overlay on the receipt baseline. When either source
+  // is withdrawn, restore the surviving baseline; if both sources disappeared,
+  // require review instead of leaving a stale calculated number in the form.
+  if ((invalidateReceipt || invalidatePreview) && ordinaryVatPreview.value === null) {
+    if (receiptVatSource.value !== 'none' && receiptVatBaseline.value !== null) {
+      vatAmount.value = receiptVatBaseline.value
+    } else {
+      vatAmount.value = null
+      if (hadVisibleAmount) vatAmountNeedsReview.value = true
+    }
+  }
+}
+
 // 仅在用户主动切换分类时触发：把可抵扣默认设为该分类的 default_deductible（为 null 则回落 true）。
 // 编程式赋值（fillFromExpense 里的 categoryId.value = ...）不会触发 @update:value，
 // 因此初始载入不会覆盖已保存的 deductible。
@@ -143,41 +234,101 @@ function onCategoryChange(newCatId: string | null) {
   deductible.value = cat && cat.default_deductible !== null ? cat.default_deductible : true
 }
 
-async function loadAttachments() {
-  if (!expenseId.value) return
+async function loadAttachments(targetId = expenseId.value, version = pageVersion) {
+  if (!targetId) return
   attachLoading.value = true
   try {
-    attachments.value = await store.listAttachments(expenseId.value)
+    const result = await store.listAttachments(targetId)
+    if (version === pageVersion && targetId === expenseId.value) attachments.value = result
   } catch {
     // silently ignore
   } finally {
-    attachLoading.value = false
+    if (version === pageVersion) attachLoading.value = false
   }
 }
 
 onMounted(async () => {
+  const version = ++pageVersion
+  const targetId = expenseId.value
   loading.value = true
   try {
-    await loadDictionaries()
-    if (isEdit.value && expenseId.value) {
-      const expense = await store.getExpense(expenseId.value)
+    dictionariesPromise ??= loadDictionaries()
+    await dictionariesPromise
+    if (version !== pageVersion || targetId !== expenseId.value) return
+    if (targetId) {
+      const expense = await store.getExpense(targetId)
+      if (version !== pageVersion || targetId !== expenseId.value) return
       fillFromExpense(expense)
-      await loadAttachments()
+      await loadAttachments(targetId, version)
     }
   } catch (e: unknown) {
-    pageError.value = e instanceof ApiError ? e.message : String(e)
+    if (version === pageVersion) pageError.value = e instanceof ApiError ? e.message : String(e)
   } finally {
-    loading.value = false
+    if (version === pageVersion) loading.value = false
   }
+})
+watch(expenseId, (targetId, previousId) => {
+  if (targetId === previousId) return
+  const version = ++pageVersion
+  ++aiRequestVersion; clearTreatmentSuggestion(); invalidateVatPreview()
+  pageError.value = null; saveSuccess.value = false; saving.value = false; attachLoading.value = false; attachUploading.value = false; attachments.value = []; lastAiAttachmentId.value = null; lastAiExtractedAttachmentId.value = null; lastAiSuccessfulAttachmentId.value = null
+  expenseDate.value = localDateStr(new Date()); categoryId.value = null; supplierName.value = ''; vatTreatmentId.value = null; vatRateId.value = null
+  netAmount.value = null; vatAmount.value = null; deductible.value = null; note.value = ''; reference.value = ''; grossAmountDisplay.value = null
+  receiptVatBaseline.value = null; ordinaryVatPreview.value = null
+  vatManuallyEdited.value = false
+  receiptVatSource.value = 'none'; currentExtractionVatMissing.value = false
+  receiptVatAttachmentId.value = null; aiNetAmountAttachmentId.value = null
+  netAmountNeedsReview.value = false; vatAmountNeedsReview.value = false
+  uncertainAttachmentId.value = null; recheckingAttachments.value = false
+  paidBy.value = 'BUSINESS'; businessPercentage.value = 100; depreciationYears.value = 1; includeInPl.value = true; plCostBasis.value = 'AUTO'
+  aiError.value = null; aiNote.value = null; attachError.value = null; deletingAttachId.value = null; isDraft.value = false; recurringExpenseId.value = null
+  treatmentOrigin.value = 'none'; rateOrigin.value = 'none'
+  if (!targetId) {
+    loading.value = false
+    return
+  }
+  loading.value = true
+  void (async () => {
+    try {
+      dictionariesPromise ??= loadDictionaries()
+      await dictionariesPromise
+      const expense = await store.getExpense(targetId)
+      if (version !== pageVersion || targetId !== expenseId.value) return
+      fillFromExpense(expense)
+      await loadAttachments(targetId, version)
+    } catch (e: unknown) {
+      if (version === pageVersion) pageError.value = e instanceof ApiError ? e.message : String(e)
+    } finally {
+      if (version === pageVersion) loading.value = false
+    }
+  })()
 })
 
 // ---- Save ----
 async function handleSave() {
+  if (deletingAttachmentHasAiValues.value) return
+  if (isReverseCharge.value && vatAmount.value === null) {
+    pageError.value = t('expenses.ai.reverseVatRequired')
+    return
+  }
+  if (netAmountNeedsReview.value && netAmount.value === null) {
+    pageError.value = t('expenses.ai.withdrawnNetRequired')
+    return
+  }
+  if (vatAmountNeedsReview.value && vatAmount.value === null) {
+    pageError.value = t('expenses.ai.withdrawnVatRequired')
+    return
+  }
   if (!categoryId.value || !vatTreatmentId.value || !vatRateId.value) {
     pageError.value = t('expenses.validationError')
     return
   }
   resetCostPreview()
+  const version = pageVersion
+  const targetId = expenseId.value
+  ++aiRequestVersion
+  aiExtracting.value = false
+  invalidateVatPreview()
   saving.value = true
   saveSuccess.value = false
   pageError.value = null
@@ -202,55 +353,158 @@ async function handleSave() {
       pl_cost_basis: plCostBasis.value,
     })
     let result: ExpenseRead
-    if (isEdit.value && expenseId.value) {
-      result = await store.updateExpense(expenseId.value, body)
+    if (targetId) {
+      result = await store.updateExpense(targetId, body)
     } else {
       result = await store.createExpense(body)
     }
     // Update display from backend response (red-line 1: gross comes from backend)
-    fillFromExpense(result)
+    if (version !== pageVersion || targetId !== expenseId.value) return
+    fillFromExpense(result, lastAiAttachmentId.value !== null
+      && lastAiAttachmentId.value === lastAiSuccessfulAttachmentId.value)
     saveSuccess.value = true
     if (!isEdit.value) {
       // Navigate to edit mode after create
       void router.replace({ path: `/expenses/${result.id}/edit`, query: { tab: 'purchase' } })
     }
   } catch (e: unknown) {
-    pageError.value = e instanceof ApiError ? e.message : String(e)
+    if (version === pageVersion) pageError.value = e instanceof ApiError ? e.message : String(e)
   } finally {
-    saving.value = false
+    if (version === pageVersion) saving.value = false
   }
 }
 
 // ---- Attachment upload ----
 async function handleFileUpload(options: { file: UploadFileInfo }) {
   const rawFile = options.file.file
-  if (!rawFile || !expenseId.value) return
+  if (!rawFile || !expenseId.value || attachmentListBusy.value) return false
+  const targetId = expenseId.value, version = pageVersion
   attachUploading.value = true
   attachError.value = null
   try {
-    const newAttach = await store.uploadAttachment(expenseId.value, rawFile)
+    const newAttach = await store.uploadAttachment(targetId, rawFile)
+    if (version !== pageVersion || targetId !== expenseId.value) return false
     attachments.value.push(newAttach)
     // After upload, offer AI extraction on this attachment
     lastAiAttachmentId.value = newAttach.id
+    lastAiExtractedAttachmentId.value = null
+    lastAiSuccessfulAttachmentId.value = null
+    transitionVatEvidence({
+      invalidateAiReceipt: true,
+      switchAttachmentSource: true,
+      previewInputs: {
+        netAmount: netAmount.value,
+        vatRateId: rateOrigin.value === 'ai' ? null : vatRateId.value,
+        netAttachmentId: aiNetAmountAttachmentId.value,
+      },
+    })
+    currentExtractionVatMissing.value = false
+    ++aiRequestVersion; clearTreatmentSuggestion()
   } catch (e: unknown) {
-    attachError.value = e instanceof ApiError ? e.message : String(e)
+    if (version === pageVersion && targetId === expenseId.value) attachError.value = e instanceof ApiError ? e.message : String(e)
   } finally {
-    attachUploading.value = false
+    if (version === pageVersion && targetId === expenseId.value) attachUploading.value = false
   }
   // Return false to prevent naive-ui default upload behaviour
   return false
 }
 
 async function handleDeleteAttachment(id: string) {
+  if (attachmentListBusy.value) return
+  const version = pageVersion, targetExpense = expenseId.value
   deletingAttachId.value = id
   try {
     await store.deleteAttachment(id)
+    if (version !== pageVersion || targetExpense !== expenseId.value) return
     attachments.value = attachments.value.filter(a => a.id !== id)
-    if (lastAiAttachmentId.value === id) lastAiAttachmentId.value = null
+    withdrawAttachmentValues(id)
   } catch (e: unknown) {
-    attachError.value = e instanceof ApiError ? e.message : String(e)
+    if (version === pageVersion && targetExpense === expenseId.value) {
+      // A transport error, server error, or 404 does not prove that deletion
+      // failed: the server may have committed before the response was lost.
+      try {
+        const current = await store.listAttachments(targetExpense!)
+        if (version !== pageVersion || targetExpense !== expenseId.value) return
+        reconcileAttachments(current)
+        if (current.some(attachment => attachment.id === id)) {
+          uncertainAttachmentId.value = null
+          attachError.value = e instanceof ApiError ? e.message : String(e)
+        } else {
+          uncertainAttachmentId.value = null
+          attachError.value = null
+        }
+      } catch {
+        if (version === pageVersion && targetExpense === expenseId.value) {
+          uncertainAttachmentId.value = id
+          attachError.value = t('expenses.ai.attachmentStatusUncertain')
+        }
+      }
+    }
   } finally {
-    deletingAttachId.value = null
+    if (version === pageVersion && targetExpense === expenseId.value) deletingAttachId.value = null
+  }
+}
+
+function withdrawAttachmentValues(id: string) {
+  uncertainAttachmentId.value = null
+  attachments.value = attachments.value.filter(attachment => attachment.id !== id)
+  if (lastAiAttachmentId.value === id) {
+    ++aiRequestVersion
+    aiExtracting.value = false
+    lastAiAttachmentId.value = null
+    lastAiExtractedAttachmentId.value = null
+    lastAiSuccessfulAttachmentId.value = null
+    currentExtractionVatMissing.value = false
+    clearTreatmentSuggestion()
+  }
+  const previewSourceRemoved = ordinaryVatPreview.value?.netAttachmentId === id
+  transitionVatEvidence({
+    removedAttachmentId: id,
+    previewInputs: {
+      netAmount: netAmount.value,
+      vatRateId: vatRateId.value,
+      netAttachmentId: aiNetAmountAttachmentId.value,
+    },
+  })
+  if (previewSourceRemoved) invalidateVatPreview()
+  if (aiNetAmountAttachmentId.value === id) {
+    netAmount.value = null
+    aiNetAmountAttachmentId.value = null
+    netAmountNeedsReview.value = true
+    invalidateVatPreview()
+  }
+}
+
+function reconcileAttachments(current: ExpenseAttachmentRead[]) {
+  attachments.value = current
+  const presentIds = new Set(current.map(attachment => attachment.id))
+  const sourceIds = new Set([
+    lastAiAttachmentId.value,
+    ...amountSourceAttachmentIds.value,
+  ])
+  for (const id of sourceIds) {
+    if (id && !presentIds.has(id)) withdrawAttachmentValues(id)
+  }
+}
+
+async function recheckAttachments() {
+  const id = uncertainAttachmentId.value
+  const targetExpense = expenseId.value
+  const version = pageVersion
+  if (!id || !targetExpense || attachmentListOperationBusy.value) return
+  recheckingAttachments.value = true
+  try {
+    const current = await store.listAttachments(targetExpense)
+    if (version !== pageVersion || targetExpense !== expenseId.value) return
+    reconcileAttachments(current)
+    uncertainAttachmentId.value = null
+    attachError.value = null
+  } catch {
+    if (version === pageVersion && targetExpense === expenseId.value) {
+      attachError.value = t('expenses.ai.attachmentStatusUncertain')
+    }
+  } finally {
+    if (version === pageVersion && targetExpense === expenseId.value) recheckingAttachments.value = false
   }
 }
 
@@ -275,15 +529,82 @@ function formatBytes(bytes: number) {
 // ---- VAT auto-compute (calls backend calculate endpoint, non-blocking) ----
 let vatDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
+const treatmentSuggestionRecord = computed(() => resolvePurchaseTreatmentSuggestion(treatmentSuggestion.value, purchaseTreatments.value))
+const attachmentListOperationBusy = computed(() => attachUploading.value || deletingAttachId.value !== null || recheckingAttachments.value)
+const attachmentListBusy = computed(() => attachmentListOperationBusy.value || uncertainAttachmentId.value !== null)
+const deletingCurrentAiAttachment = computed(() => (deletingAttachId.value !== null && deletingAttachId.value === lastAiAttachmentId.value)
+  || (uncertainAttachmentId.value !== null && uncertainAttachmentId.value === lastAiAttachmentId.value))
+const amountSourceAttachmentIds = computed(() => new Set([
+  aiNetAmountAttachmentId.value,
+  receiptVatAttachmentId.value,
+  ordinaryVatPreview.value?.netAttachmentId ?? null,
+].filter((id): id is string => id !== null)))
+const deletingAttachmentHasAiValues = computed(() => {
+  const changingId = deletingAttachId.value ?? uncertainAttachmentId.value
+  return deletingCurrentAiAttachment.value || (changingId !== null && amountSourceAttachmentIds.value.has(changingId))
+})
+const isReverseCharge = computed(() => purchaseTreatments.value.find(x => x.id === vatTreatmentId.value)?.effect === 'ZERO_REVERSE')
+
+function clearTreatmentSuggestion(preserveOrdinaryRate = false) {
+  aiExtracting.value = false
+  aiError.value = null; aiNote.value = null
+  treatmentSuggestion.value = null
+  if (treatmentOrigin.value === 'ai') { vatTreatmentId.value = null; treatmentOrigin.value = 'none' }
+  if (!preserveOrdinaryRate && rateOrigin.value === 'ai') { vatRateId.value = null; rateOrigin.value = 'none' }
+  invalidateVatPreview()
+}
+function onTreatmentChange(value: string | null) {
+  vatTreatmentId.value = value
+  treatmentOrigin.value = 'human'
+  enterReverseChargeIfSelected()
+  invalidateVatPreview()
+  if (isReverseCharge.value && rateOrigin.value === 'ai') { vatRateId.value = null; rateOrigin.value = 'none' }
+}
+function applyTreatmentSuggestion() {
+  if (saving.value || deletingCurrentAiAttachment.value || !treatmentSuggestionRecord.value) return
+  vatTreatmentId.value = treatmentSuggestionRecord.value.id
+  treatmentOrigin.value = 'human'
+  enterReverseChargeIfSelected()
+  if (treatmentSuggestion.value?.code === 'EU_B2B_REVERSE_PURCH' && rateOrigin.value === 'ai') { vatRateId.value = null; rateOrigin.value = 'none' }
+  invalidateVatPreview()
+}
+function onRateChange(value: string | null) {
+  vatRateId.value = value; rateOrigin.value = 'human'; invalidateVatPreview(); onVatRateChange()
+}
+function onVatInput() {
+  vatManuallyEdited.value = true
+  receiptVatBaseline.value = vatAmount.value
+  ordinaryVatPreview.value = null
+  receiptVatSource.value = 'human'
+  receiptVatAttachmentId.value = null
+  invalidateVatPreview()
+}
+function enterReverseChargeIfSelected() {
+  if (!isReverseCharge.value) return
+  transitionVatEvidence({ enteringReverseCharge: true, missingReverseReceipt: true })
+}
+function invalidateVatPreview() {
+  vatPreviewVersion++
+  if (vatDebounceTimer) { clearTimeout(vatDebounceTimer); vatDebounceTimer = null }
+  grossAmountDisplay.value = null
+}
+
 async function recomputeVat() {
-  if (netAmount.value === null || !vatRateId.value) return
+  const version = ++vatPreviewVersion
+  const targetExpense = expenseId.value
+  const net = netAmount.value, rate = vatRateId.value
+  const netAttachmentId = aiNetAmountAttachmentId.value
+  if (isReverseCharge.value || net === null || !rate) { grossAmountDisplay.value = null; return }
   try {
     const result = await post<ExpenseCalculateResult>('/api/v1/expenses/calculate', {
-      net_amount: netAmount.value,
-      vat_rate_id: vatRateId.value,
+      net_amount: net,
+      vat_rate_id: rate,
     })
-    vatAmount.value = Number(result.vat_amount)
-    grossAmountDisplay.value = result.gross_amount   // 顺带实时显示 gross
+    if (version === vatPreviewVersion && targetExpense === expenseId.value && net === netAmount.value && rate === vatRateId.value && !isReverseCharge.value) {
+      vatAmount.value = Number(result.vat_amount)
+      ordinaryVatPreview.value = { netAmount: net, vatRateId: rate, netAttachmentId }
+      grossAmountDisplay.value = result.gross_amount
+    }
   } catch {
     /* 非致命：保持现状，不打断手动录入 */
   }
@@ -292,32 +613,74 @@ async function recomputeVat() {
 function onVatRateChange() { void recomputeVat() }            // 选税率：立即
 
 function onNetInput() {                                        // 改净额：防抖
-  grossAmountDisplay.value = null
+  aiNetAmountAttachmentId.value = null
+  invalidateVatPreview()
   if (vatDebounceTimer) clearTimeout(vatDebounceTimer)
-  vatDebounceTimer = setTimeout(() => { void recomputeVat() }, 300)
+  vatDebounceTimer = setTimeout(() => { vatDebounceTimer = null; void recomputeVat() }, 300)
 }
 
 // ---- AI extraction ----
 async function handleAiExtract(attachmentId: string) {
+  if (saving.value || deletingAttachId.value === attachmentId) return
+  const preserveOrdinaryRate = lastAiExtractedAttachmentId.value === attachmentId
+  if (!preserveOrdinaryRate) {
+    currentExtractionVatMissing.value = false
+    lastAiSuccessfulAttachmentId.value = null
+  }
+  if (lastAiExtractedAttachmentId.value !== attachmentId) {
+    transitionVatEvidence({
+      invalidateAiReceipt: true,
+      switchAttachmentSource: true,
+      previewInputs: {
+        netAmount: netAmount.value,
+        vatRateId: rateOrigin.value === 'ai' ? null : vatRateId.value,
+        netAttachmentId: aiNetAmountAttachmentId.value,
+      },
+    })
+  }
+  lastAiExtractedAttachmentId.value = attachmentId
+  clearTreatmentSuggestion(preserveOrdinaryRate)
+  const version = ++aiRequestVersion
+  const targetExpense = expenseId.value
   aiExtracting.value = true
   aiError.value = null
   aiNote.value = null
   try {
     const prefill = await store.aiExtract(attachmentId, locale.value)
+    if (version !== aiRequestVersion || targetExpense !== expenseId.value || attachmentId !== lastAiAttachmentId.value) return
+    lastAiSuccessfulAttachmentId.value = attachmentId
+    // A new extraction can replace receipt VAT; invalidate both active and debounced previews first.
+    invalidateVatPreview()
+    treatmentSuggestion.value = prefill.suggested_vat_treatment ?? null
     // Populate form fields from prefill — user confirms before saving
     if (prefill.expense_date) expenseDate.value = prefill.expense_date
     if (prefill.supplier_name) supplierName.value = prefill.supplier_name
     if (prefill.net_amount !== null && prefill.net_amount !== undefined) {
       netAmount.value = Number(prefill.net_amount)
+      aiNetAmountAttachmentId.value = attachmentId
     }
-    if (prefill.vat_amount !== null && prefill.vat_amount !== undefined) {
-      vatAmount.value = Number(prefill.vat_amount)
+    currentExtractionVatMissing.value = prefill.vat_amount === null || prefill.vat_amount === undefined
+    if (!vatManuallyEdited.value) {
+      if (prefill.vat_amount !== null && prefill.vat_amount !== undefined) {
+        receiptVatBaseline.value = Number(prefill.vat_amount)
+        vatAmount.value = Number(prefill.vat_amount)
+        receiptVatSource.value = 'ai'
+        receiptVatAttachmentId.value = attachmentId
+        ordinaryVatPreview.value = null
+      }
     }
     // Try to match VAT rate by percent
-    if (prefill.vat_rate_percent) {
+    const currentSuggestion = treatmentSuggestionRecord.value
+    if (currentSuggestion && (treatmentOrigin.value === 'none' || treatmentOrigin.value === 'ai')) {
+      vatTreatmentId.value = currentSuggestion.id; treatmentOrigin.value = 'ai'
+    }
+    const reverseSuggestion = prefill.suggested_vat_treatment?.code === 'EU_B2B_REVERSE_PURCH'
+    if (reverseSuggestion || isReverseCharge.value) {
+      if (rateOrigin.value === 'ai') { vatRateId.value = null; rateOrigin.value = 'none' }
+    } else if (prefill.vat_rate_percent) {
       const pct = Number(prefill.vat_rate_percent)
       const matchedRate = vatRates.value.find(r => Math.abs(Number(r.percent) - pct) < 0.01)
-      if (matchedRate) vatRateId.value = matchedRate.id
+      if (matchedRate) { vatRateId.value = matchedRate.id; rateOrigin.value = 'ai' }
     }
     // Category suggestion
     if (prefill.suggested_category_id) {
@@ -328,6 +691,12 @@ async function handleAiExtract(attachmentId: string) {
       const match = categories.value.find(c => c.name.toLowerCase() === lower)
       if (match) categoryId.value = match.id
     }
+    enterReverseChargeIfSelected()
+    transitionVatEvidence({ previewInputs: {
+      netAmount: netAmount.value,
+      vatRateId: vatRateId.value,
+      netAttachmentId: aiNetAmountAttachmentId.value,
+    } })
     if (prefill.raw_model_note) aiNote.value = prefill.raw_model_note
     // Fill note with AI summary only if user hasn't typed anything yet
     if (prefill.summary && !note.value) {
@@ -336,6 +705,7 @@ async function handleAiExtract(attachmentId: string) {
     // After prefill, clear grossAmountDisplay so user knows to save to get backend value
     grossAmountDisplay.value = null
   } catch (e: unknown) {
+    if (version !== aiRequestVersion || targetExpense !== expenseId.value || attachmentId !== lastAiAttachmentId.value) return
     if (e instanceof ApiError) {
       if (e.status === 409) {
         aiError.value = t('expenses.ai.disabled')
@@ -348,7 +718,7 @@ async function handleAiExtract(attachmentId: string) {
       aiError.value = String(e)
     }
   } finally {
-    aiExtracting.value = false
+    if (version === aiRequestVersion) aiExtracting.value = false
   }
 }
 </script>
@@ -411,21 +781,33 @@ async function handleAiExtract(attachmentId: string) {
                   <!-- VAT Treatment (PURCHASE side only) -->
                   <n-form-item :label="t('expenses.vatTreatment')">
                     <n-select
-                      v-model:value="vatTreatmentId"
+                      :value="vatTreatmentId"
                       :options="purchaseTreatmentOptions"
                       :placeholder="t('expenses.vatTreatmentPlaceholder')"
                       clearable
+                      @update:value="onTreatmentChange"
                     />
+                    <div v-if="treatmentSuggestion" class="treatment-suggestion">
+                      <span>{{ t('expenses.ai.treatmentOrigin') }} · {{ treatmentSuggestionRecord?.label ?? treatmentSuggestion.code }}: {{ treatmentSuggestion.reason }}</span>
+                      <n-button v-if="!saving && treatmentSuggestionRecord && treatmentSuggestionRecord.id !== vatTreatmentId" size="tiny" attr-type="button" :disabled="deletingCurrentAiAttachment" @click="applyTreatmentSuggestion">{{ t('expenses.ai.applyTreatment') }}</n-button>
+                    </div>
+                    <n-text v-if="treatmentSuggestion && !treatmentSuggestionRecord" depth="3" style="font-size: 13px">{{ t('receiptInbox.treatmentUnavailable') }}</n-text>
+                    <n-text v-if="vatTreatmentId" depth="3" style="font-size: 12px">
+                      {{ t(treatmentOrigin === 'saved' ? 'expenses.ai.savedTreatmentOrigin' : treatmentOrigin === 'human' ? 'expenses.ai.humanTreatmentOrigin' : 'expenses.ai.treatmentOrigin') }}
+                    </n-text>
+                    <n-text v-if="treatmentSuggestion?.code === 'EU_B2B_REVERSE_PURCH' || isReverseCharge" depth="3" style="font-size: 13px">
+                      {{ t('expenses.ai.nominalRateReview') }}
+                    </n-text>
                   </n-form-item>
 
                   <!-- VAT Rate -->
                   <n-form-item :label="t('expenses.vatRate')">
                     <n-select
-                      v-model:value="vatRateId"
+                      :value="vatRateId"
                       :options="vatRateOptions"
                       :placeholder="t('expenses.vatRatePlaceholder')"
                       clearable
-                      @update:value="onVatRateChange"
+                      @update:value="onRateChange"
                     />
                   </n-form-item>
 
@@ -439,6 +821,7 @@ async function handleAiExtract(attachmentId: string) {
                       style="width: 100%"
                       @update:value="onNetInput"
                     />
+                    <n-text v-if="netAmountNeedsReview" type="warning">{{ t('expenses.ai.withdrawnNetRequired') }}</n-text>
                   </n-form-item>
 
                   <!-- VAT amount -->
@@ -449,8 +832,9 @@ async function handleAiExtract(attachmentId: string) {
                       :min="0"
                       :placeholder="t('expenses.amountPlaceholder')"
                       style="width: 100%"
-                      @update:value="grossAmountDisplay = null"
+                      @update:value="onVatInput"
                     />
+                    <n-text v-if="vatAmountNeedsReview && !isReverseCharge" type="warning">{{ t('expenses.ai.withdrawnVatRequired') }}</n-text>
                   </n-form-item>
 
                   <!-- Gross (read-only, from backend) -->
@@ -550,7 +934,7 @@ async function handleAiExtract(attachmentId: string) {
                   <n-space>
                     <!-- Save button: prod-build safe using v-if/v-else -->
                     <n-button v-if="saving" type="primary" loading>{{ t('expenses.save') }}</n-button>
-                    <n-button v-else type="primary" attr-type="submit">{{ t('expenses.save') }}</n-button>
+                    <n-button v-else type="primary" attr-type="submit" :disabled="deletingAttachmentHasAiValues">{{ t('expenses.save') }}</n-button>
                     <n-button @click="router.push({ path: '/expenses', query: { tab: 'purchase' } })">{{ t('expenses.cancel') }}</n-button>
                   </n-space>
                 </n-form>
@@ -562,11 +946,12 @@ async function handleAiExtract(attachmentId: string) {
                   <!-- Upload -->
                   <n-upload
                     :custom-request="handleFileUpload"
+                    :disabled="attachmentListBusy"
                     :show-file-list="false"
                     accept="image/png,image/jpeg,image/webp,application/pdf"
                     style="margin-bottom: 12px"
                   >
-                    <n-button :disabled="attachUploading">
+                    <n-button :disabled="attachmentListBusy">
                       <template #icon>
                         <n-icon v-if="!attachUploading"><CloudUploadOutline /></n-icon>
                         <n-spin v-else size="small" />
@@ -578,6 +963,9 @@ async function handleAiExtract(attachmentId: string) {
                   <n-alert v-if="attachError" type="error" size="small" closable style="margin-bottom: 8px">
                     {{ attachError }}
                   </n-alert>
+                  <n-button v-if="uncertainAttachmentId" size="tiny" :loading="recheckingAttachments" :disabled="attachUploading || deletingAttachId !== null || recheckingAttachments" @click="recheckAttachments">
+                    {{ t('expenses.ai.recheckAttachments') }}
+                  </n-button>
 
                   <!-- AI extract button for last uploaded attachment -->
                   <div v-if="lastAiAttachmentId" style="margin-bottom: 12px">
@@ -601,6 +989,7 @@ async function handleAiExtract(attachmentId: string) {
                       v-else
                       type="info"
                       size="small"
+                      :disabled="saving || deletingAttachId === lastAiAttachmentId"
                       @click="handleAiExtract(lastAiAttachmentId!)"
                     >
                       <template #icon><n-icon><SparklesOutline /></n-icon></template>
@@ -636,6 +1025,7 @@ async function handleAiExtract(attachmentId: string) {
                           v-if="!aiExtracting"
                           size="tiny"
                           type="info"
+                          :disabled="saving || deletingAttachId === attach.id"
                           @click="() => { lastAiAttachmentId = attach.id; void handleAiExtract(attach.id) }"
                         >
                           <template #icon><n-icon><SparklesOutline /></n-icon></template>
@@ -664,6 +1054,7 @@ async function handleAiExtract(attachmentId: string) {
                               v-else
                               size="tiny"
                               type="error"
+                              :disabled="attachUploading || deletingAttachId !== null || recheckingAttachments || uncertainAttachmentId !== null"
                             >
                               <template #icon><n-icon><TrashOutline /></n-icon></template>
                               {{ t('receipt.delete') }}

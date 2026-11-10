@@ -8,13 +8,14 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jai.models._enums import VatTreatmentEffect, VatTreatmentSide
 from jai.models.dictionary import ExpenseCategory
 from jai.models.expense import Expense
 from jai.models.expense_attachment import ExpenseAttachment
+from jai.models.receipt_inbox import ReceiptInbox
 from jai.models.vat import VatRate, VatTreatment
 from jai.schemas.expense import ExpenseAIPrefill, ExpenseInput
 from jai.services import ai as ai_service
@@ -22,6 +23,7 @@ from jai.services import receipt_inbox as inbox_service
 from jai.services.expense import delete_expense, list_expenses
 from jai.services.receipt_inbox import (
     InboxConflict,
+    append_files,
     confirm_item,
     create_item,
     extract_item,
@@ -186,6 +188,112 @@ async def test_validation_and_transfer_failures_leave_pending_group_untouched(
         assert len(current.files) == 1
         attachment = (await session.execute(select(ExpenseAttachment))).scalar_one()
         assert attachment.receipt_inbox_id == pending.id and attachment.expense_id is None
+
+
+@pytest.mark.asyncio
+async def test_confirmation_checks_reviewed_file_revision_and_keeps_legacy_callers(
+    db_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    company_id, user_id, body = await _setup(db_session_maker)
+    storage = MemoryStorage()
+    async with db_session_maker() as session:
+        pending = await new_pending(session, company_id, user_id, storage)
+        reviewed = await get_item(session, pending.id, company_id)
+        assert reviewed.file_revision == 1
+        await append_files(
+            session, pending.id, company_id, user_id,
+            [(b"\x89PNG\r\n\x1a\nextra", "image/png", "extra.png")],
+            1024, storage,
+        )
+
+    async with db_session_maker() as session:
+        with pytest.raises(InboxConflict, match="FILE_GROUP_CHANGED") as conflict:
+            await confirm_item(
+                session, pending.id, company_id, user_id, body,
+                expected_file_revision=reviewed.file_revision,
+            )
+        assert conflict.value.code == "FILE_GROUP_CHANGED"
+        assert await session.scalar(select(func.count()).select_from(Expense)) == 0
+        current = await get_item(session, pending.id, company_id)
+        assert current.file_revision == 2 and len(current.files) == 2
+
+    async with db_session_maker() as session:
+        confirmed = await confirm_item(
+            session, pending.id, company_id, user_id, body,
+            expected_file_revision=current.file_revision,
+        )
+        assert confirmed.inbox.status.value == "CONFIRMED"
+
+    async with db_session_maker() as session:
+        legacy = await new_pending(session, company_id, user_id, storage)
+        confirmed_without_revision = await confirm_item(
+            session, legacy.id, company_id, user_id, body
+        )
+        assert confirmed_without_revision.inbox.status.value == "CONFIRMED"
+
+
+@pytest.mark.asyncio
+async def test_get_item_holds_one_coherent_file_group_during_append(
+    db_session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    company_id, user_id, _body = await _setup(db_session_maker)
+    storage = MemoryStorage()
+    async with db_session_maker() as session:
+        pending = await new_pending(session, company_id, user_id, storage)
+        await session.execute(
+            update(ReceiptInbox)
+            .where(ReceiptInbox.id == pending.id)
+            .values(ai_state="READY", ai_suggestion={"supplier_name": "Old group"})
+        )
+        await session.commit()
+
+    files_started, release_files = asyncio.Event(), asyncio.Event()
+    original_files = inbox_service._files
+    first_call = True
+
+    async def delayed_files(session: AsyncSession, item_id: uuid.UUID):
+        nonlocal first_call
+        if first_call:
+            first_call = False
+            files_started.set()
+            await release_files.wait()
+        return await original_files(session, item_id)
+
+    monkeypatch.setattr(inbox_service, "_files", delayed_files)
+    async def read_snapshot():
+        async with db_session_maker() as session:
+            return await get_item(session, pending.id, company_id)
+
+    async def append_group():
+        async with db_session_maker() as session:
+            return await append_files(
+                session, pending.id, company_id, user_id,
+                [(b"\x89PNG\r\n\x1a\nextra", "image/png", "extra.png")],
+                1024, storage,
+            )
+
+    read_task = asyncio.create_task(read_snapshot())
+    append_task: asyncio.Task | None = None
+    append_waited_for_lock = False
+    try:
+        await asyncio.wait_for(files_started.wait(), timeout=5)
+        append_task = asyncio.create_task(append_group())
+        await asyncio.sleep(0.05)
+        append_waited_for_lock = not append_task.done()
+    finally:
+        release_files.set()
+    snapshot = await asyncio.wait_for(read_task, timeout=5)
+    assert append_task is not None
+    appended = await asyncio.wait_for(append_task, timeout=5)
+    assert append_waited_for_lock, "append must wait for the coherent read lock"
+    assert snapshot.file_revision == 1
+    assert len(snapshot.files) == 1
+    assert snapshot.ai_suggestion is not None
+    assert snapshot.ai_suggestion.supplier_name == "Old group"
+    assert appended.file_revision == 2
+    assert len(appended.files) == 2
+    assert appended.ai_suggestion is None
 
 
 @pytest.mark.asyncio

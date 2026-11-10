@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from jai.schemas.expense import ExpenseAIPrefill, ExpenseRead
 
@@ -30,6 +30,7 @@ class ReceiptInboxErrorCode(StrEnum):
     FILE_LIMIT_REACHED = "FILE_LIMIT_REACHED"
     LAST_FILE = "LAST_FILE"
     ALREADY_CONFIRMED = "ALREADY_CONFIRMED"
+    FILE_GROUP_CHANGED = "FILE_GROUP_CHANGED"
     AI_DISABLED = "AI_DISABLED"
     AI_NOT_CONFIGURED = "AI_NOT_CONFIGURED"
     AI_TIMEOUT = "AI_TIMEOUT"
@@ -49,6 +50,12 @@ class ReceiptInboxRead(BaseModel):
     id: uuid.UUID
     status: ReceiptInboxStatus
     files: list[ReceiptInboxFileRead]
+    file_revision: int = Field(
+        description=(
+            "File-group version. Use a coherent detail or mutation response revision "
+            "when confirming; list rows are for navigation."
+        )
+    )
     ai_state: ReceiptInboxAIState
     ai_suggestion: ExpenseAIPrefill | None
     ai_error_code: ReceiptInboxErrorCode | None

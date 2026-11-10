@@ -14,10 +14,15 @@ vi.mock('../../src/stores/expenses', () => ({ useExpensesStore: () => mocks }))
 vi.mock('../../src/stores/recurringExpenses', () => ({ useRecurringExpensesStore: () => ({
   ...mocks, total: 1, limit: 50, offset: 0, activeFilter: null, loading: false, error: null,
 }) }))
-vi.mock('../../src/composables/usePurchaseExpenseDictionaries', () => ({
+vi.mock('../../src/composables/usePurchaseExpenseDictionaries', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../src/composables/usePurchaseExpenseDictionaries')>()),
   toExpenseInput: (value: unknown) => value,
   usePurchaseExpenseDictionaries: () => ({
     categories: { value: [{ id: 'cat', name: 'Office', default_deductible: false }] },
+    treatments: { value: [
+      { id: 'tax', code: 'NL_DOMESTIC_PURCH', label: 'Domestic', side: 'PURCHASE', effect: 'APPLY_RATE', active: true },
+      { id: 'reverse', code: 'EU_B2B_REVERSE_PURCH', label: 'EU reverse charge', side: 'PURCHASE', effect: 'ZERO_REVERSE', active: true },
+    ] },
     rates: { value: [] }, categoryOptions: { value: [{ label: 'Office', value: 'cat' }, { label: 'Other category', value: 'other-cat' }] },
     purchaseTreatmentOptions: { value: [{ label: 'Domestic', value: 'tax' }, { label: 'Other', value: 'other' }] },
     vatRateOptions: { value: [{ label: '21%', value: 'rate' }] }, load: vi.fn(),

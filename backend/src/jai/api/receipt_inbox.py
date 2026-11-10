@@ -200,12 +200,14 @@ async def extract_receipt_inbox(
 async def confirm_receipt_inbox(
     inbox_id: uuid.UUID,
     body: ExpenseInput,
+    expected_file_revision: int | None = Query(None, ge=0),
     user: User = Depends(_owner),
     session: AsyncSession = Depends(get_session),
 ) -> ReceiptInboxConfirmationRead | JSONResponse:
     try:
         return await confirm_item(
-            session, inbox_id, _company_id(user), user.id, body
+            session, inbox_id, _company_id(user), user.id, body,
+            expected_file_revision=expected_file_revision,
         )
     except InboxConflict as exc:
         if exc.code == "ALREADY_CONFIRMED":
