@@ -12,6 +12,7 @@ from collections.abc import Generator
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from jai.models._enums import SettingLevel
 from jai.schemas.setting import (
@@ -22,6 +23,7 @@ from jai.schemas.setting import (
 )
 from jai.services.settings import (
     _cache,
+    _cache_key,
     get_effective_setting,
     get_setting,
     set_setting,
@@ -145,6 +147,72 @@ class TestGetSetting:
 
         assert result is not None
         assert result.completed is False
+
+    async def test_bypass_cache_uses_typed_database_fallback_without_changing_cache(self) -> None:
+        company_id = uuid.uuid4()
+        company_key = _cache_key(
+            SettingLevel.COMPANY, company_id, SETTING_KEY_ONBOARDING_COMPLETED
+        )
+        global_key = _cache_key(
+            SettingLevel.GLOBAL, None, SETTING_KEY_ONBOARDING_COMPLETED
+        )
+        cached_company = OnboardingState(completed=False)
+        cached_global = OnboardingState(completed=False)
+        _cache[company_key] = cached_company
+        _cache[global_key] = cached_global
+        fetch = _make_fetch_mock(
+            {(SettingLevel.GLOBAL, None): {"completed": True}}
+        )
+
+        with patch("jai.services.settings._fetch_row", fetch):
+            result = await get_setting(
+                AsyncMock(),
+                SETTING_KEY_ONBOARDING_COMPLETED,
+                level=SettingLevel.COMPANY,
+                scope_id=company_id,
+                value_type=OnboardingState,
+                bypass_cache=True,
+            )
+
+        assert result == OnboardingState(completed=True)
+        assert [call.args[1:3] for call in fetch.await_args_list] == [
+            (SettingLevel.COMPANY, company_id),
+            (SettingLevel.GLOBAL, None),
+        ]
+        assert _cache[company_key] is cached_company
+        assert _cache[global_key] is cached_global
+
+    async def test_bypass_cache_rejects_invalid_typed_database_value_without_fallback(self) -> None:
+        company_id = uuid.uuid4()
+        company_key = _cache_key(
+            SettingLevel.COMPANY, company_id, SETTING_KEY_ONBOARDING_COMPLETED
+        )
+        cached_company = OnboardingState(completed=False)
+        _cache[company_key] = cached_company
+        fetch = _make_fetch_mock(
+            {
+                (SettingLevel.COMPANY, company_id): {"completed": "invalid"},
+                (SettingLevel.GLOBAL, None): {"completed": True},
+            }
+        )
+
+        with (
+            patch("jai.services.settings._fetch_row", fetch),
+            pytest.raises(ValidationError),
+        ):
+            await get_setting(
+                AsyncMock(),
+                SETTING_KEY_ONBOARDING_COMPLETED,
+                level=SettingLevel.COMPANY,
+                scope_id=company_id,
+                value_type=OnboardingState,
+                bypass_cache=True,
+            )
+
+        assert [call.args[1:3] for call in fetch.await_args_list] == [
+            (SettingLevel.COMPANY, company_id)
+        ]
+        assert _cache[company_key] is cached_company
 
 
 # ---------------------------------------------------------------------------

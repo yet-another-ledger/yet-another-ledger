@@ -9,18 +9,21 @@ from decimal import Decimal
 import pyotp
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from jai.models._enums import ExpenseKind
+from jai.models._enums import ExpenseKind, SettingLevel
 from jai.models.company import Company
 from jai.models.expense import Expense
 from jai.models.mileage import MileageRateAdjustment, MileageTrip
+from jai.models.setting import Setting
 from jai.models.user import User
-from jai.schemas.mileage import MileageExpenseWrite
+from jai.schemas.mileage import MileageDefaultsRead, MileageExpenseWrite
+from jai.schemas.setting import SETTING_KEY_MILEAGE_DEFAULTS
 from jai.services import mileage as mileage_service
 from jai.services import vat as vat_service
+from jai.services.settings import get_setting
 
 
 async def _authenticate(client: AsyncClient, email: str = "mileage-crud@example.com") -> None:
@@ -101,6 +104,105 @@ async def _create_taxable_purchase(client: AsyncClient) -> dict[str, object]:
 
 @pytest.mark.integration
 class TestMileageCrudProjection:
+    async def test_transaction_primitive_returns_usable_result_and_outer_rollback_removes_both_rows(
+        self,
+        db_client: AsyncClient,
+        db_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _authenticate(db_client)
+        setup = await _setup_company(db_client)
+        company_id = uuid.UUID(setup["company"]["id"])  # type: ignore[index]
+
+        async with db_session_maker() as session:
+            result = await mileage_service.create_mileage_expense_in_transaction(
+                session,
+                company_id,
+                MileageExpenseWrite(
+                    trip_date=date(2026, 6, 15),
+                    one_way_distance_km=Decimal("12.500"),
+                    round_trip=True,
+                    purpose="Uncommitted visit",
+                ),
+                creator_id=None,
+            )
+            assert session.in_transaction()
+            assert result.id is not None
+            assert result.expense_id is not None
+            assert result.one_way_distance_km == Decimal("12.500")
+            assert result.total_distance_km == Decimal("25.000")
+            assert result.amount == Decimal("6.25")
+            assert result.purpose == "Uncommitted visit"
+            await session.rollback()
+
+        async with db_session_maker() as session:
+            assert await session.get(MileageTrip, result.id) is None
+            assert await session.get(Expense, result.expense_id) is None
+
+    async def test_creation_bypasses_stale_settings_cache_without_caching_uncommitted_defaults(
+        self,
+        db_client: AsyncClient,
+        db_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _authenticate(db_client)
+        setup = await _setup_company(db_client)
+        company_id = uuid.UUID(setup["company"]["id"])  # type: ignore[index]
+        original_defaults = setup["defaults"]
+        alternate = await db_client.post(
+            "/api/v1/mileage-transport-types", json={"name": "Fresh default", "active": True}
+        )
+        assert alternate.status_code == 201, alternate.text
+        alternate_id = uuid.UUID(alternate.json()["id"])
+
+        async with db_session_maker() as session:
+            updated = MileageDefaultsRead(
+                expense_category_id=uuid.UUID(original_defaults["expense_category_id"]),  # type: ignore[index]
+                default_transport_type_id=alternate_id,
+            )
+            # The default is already warm in the process cache from setup.
+            # Simulate a concurrent committed writer without invalidating that
+            # local cache entry, then make the change transaction-local here.
+            await session.execute(
+                update(Setting)
+                .where(
+                    Setting.level == SettingLevel.COMPANY,
+                    Setting.scope_id == company_id,
+                    Setting.key == SETTING_KEY_MILEAGE_DEFAULTS,
+                )
+                .values(value=updated.model_dump(mode="json"))
+            )
+            result = await mileage_service.create_mileage_expense_in_transaction(
+                session,
+                company_id,
+                MileageExpenseWrite(
+                    trip_date=date(2026, 6, 15), one_way_distance_km=Decimal("1.000")
+                ),
+                creator_id=None,
+                bypass_settings_cache=True,
+            )
+            assert result.transport_type_id == alternate_id
+            cached = await get_setting(
+                session,
+                SETTING_KEY_MILEAGE_DEFAULTS,
+                level=SettingLevel.COMPANY,
+                scope_id=company_id,
+                value_type=MileageDefaultsRead,
+            )
+            assert cached is not None
+            assert cached.default_transport_type_id != alternate_id
+            await session.rollback()
+
+    async def test_owner_create_keeps_database_normalized_decimal_wire_scale(
+        self, db_client: AsyncClient
+    ) -> None:
+        await _authenticate(db_client)
+        await _setup_company(db_client)
+        response = await db_client.post(
+            "/api/v1/mileage-expenses",
+            json={"trip_date": "2026-06-15", "one_way_distance_km": "1.2"},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["one_way_distance_km"] == "1.200"
+
     async def test_put_audits_immutable_scope_when_same_rule_moves_to_general_or_another_type(
         self,
         db_client: AsyncClient,

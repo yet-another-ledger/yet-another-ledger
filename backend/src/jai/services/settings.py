@@ -68,6 +68,7 @@ async def get_setting[T: BaseModel](
     scope_id: uuid.UUID | None = None,
     value_type: type[T],
     _scope_map: dict[SettingLevel, uuid.UUID | None] | None = None,
+    bypass_cache: bool = False,
 ) -> T | None: ...
 
 
@@ -80,6 +81,7 @@ async def get_setting(
     scope_id: uuid.UUID | None = None,
     value_type: None = None,
     _scope_map: dict[SettingLevel, uuid.UUID | None] | None = None,
+    bypass_cache: bool = False,
 ) -> dict[str, Any] | None: ...
 
 
@@ -91,6 +93,7 @@ async def get_setting[T: BaseModel](
     scope_id: uuid.UUID | None = None,
     value_type: type[T] | None = None,
     _scope_map: dict[SettingLevel, uuid.UUID | None] | None = None,
+    bypass_cache: bool = False,
 ) -> T | dict[str, Any] | None:
     """Retrieve a typed setting, with level-based fallback.
 
@@ -116,6 +119,10 @@ async def get_setting[T: BaseModel](
         fallback.  When provided, each probed level uses its mapped scope ID.
         When absent, ``scope_id`` is used only for the starting level and
         ``None`` for all deeper levels (i.e. falls straight to GLOBAL).
+    bypass_cache:
+        When true, read every candidate from the database and do not cache the
+        result. This is useful when a caller needs transaction-fresh settings
+        and must not expose an uncommitted value to other sessions.
 
     Returns
     -------
@@ -134,15 +141,17 @@ async def get_setting[T: BaseModel](
         else:
             sid = None
 
-        cache_hit = _cache.get(_cache_key(lvl, sid, key))
-        if cache_hit is not None:
-            return cache_hit  # type: ignore[no-any-return]
+        if not bypass_cache:
+            cache_hit = _cache.get(_cache_key(lvl, sid, key))
+            if cache_hit is not None:
+                return cache_hit  # type: ignore[no-any-return]
 
         row = await _fetch_row(session, lvl, sid, key)
         if row is not None:
             raw: dict[str, Any] = row
             parsed = value_type.model_validate(raw) if value_type is not None else raw
-            _cache[_cache_key(lvl, sid, key)] = parsed
+            if not bypass_cache:
+                _cache[_cache_key(lvl, sid, key)] = parsed
             return parsed
 
     return None

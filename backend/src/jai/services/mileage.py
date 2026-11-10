@@ -243,7 +243,9 @@ async def validate_mileage_defaults(
     return MileageDefaultsRead(**defaults.model_dump())
 
 
-async def get_mileage_defaults(session: AsyncSession, company_id: uuid.UUID) -> MileageDefaultsRead:
+async def get_mileage_defaults(
+    session: AsyncSession, company_id: uuid.UUID, *, bypass_cache: bool = False
+) -> MileageDefaultsRead:
     """Read and validate the company-level default references."""
     defaults = await get_setting(
         session,
@@ -251,6 +253,7 @@ async def get_mileage_defaults(session: AsyncSession, company_id: uuid.UUID) -> 
         level=SettingLevel.COMPANY,
         scope_id=company_id,
         value_type=MileageDefaultsRead,
+        bypass_cache=bypass_cache,
     )
     if defaults is None:
         raise MileageConfigurationError("Mileage defaults are not configured for this company.")
@@ -668,12 +671,8 @@ async def delete_mileage_rate(
 async def _load_live_trip_transport_type(
     session: AsyncSession,
     company_id: uuid.UUID,
-    requested_type_id: uuid.UUID | None,
+    requested_type_id: uuid.UUID,
 ) -> MileageTransportType:
-    if requested_type_id is None:
-        requested_type_id = (
-            await get_mileage_defaults(session, company_id)
-        ).default_transport_type_id
     item = await _load_transport_type(session, requested_type_id, company_id)
     if not item.active:
         raise MileageConfigurationError(
@@ -783,12 +782,21 @@ async def _resolve_mileage_pricing(
     body: MileageCalculationRequest,
     *,
     require_category_and_vat: bool,
+    bypass_settings_cache: bool = False,
 ) -> _MileagePricing:
     defaults: MileageDefaultsRead | None = None
     if require_category_and_vat or body.transport_type_id is None:
-        defaults = await get_mileage_defaults(session, company_id)
+        defaults = await get_mileage_defaults(
+            session, company_id, bypass_cache=bypass_settings_cache
+        )
+    requested_type_id = body.transport_type_id
+    if requested_type_id is None:
+        assert defaults is not None
+        requested_type_id = defaults.default_transport_type_id
     transport_type = await _load_live_trip_transport_type(
-        session, company_id, body.transport_type_id
+        session,
+        company_id,
+        requested_type_id,
     )
     rate = await _resolve_rate_for_trip(session, company_id, body.trip_date, transport_type.id)
     total_distance_km = derive_total_distance(body.one_way_distance_km, body.round_trip)
@@ -1311,43 +1319,70 @@ async def list_mileage_rate_adjustments(
     )
 
 
+async def create_mileage_expense_in_transaction(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    body: MileageExpenseWrite,
+    creator_id: uuid.UUID | None,
+    *,
+    bypass_settings_cache: bool = False,
+) -> MileageExpenseRead:
+    """Create the Expense projection and trip without taking transaction ownership.
+
+    The company advisory lock is acquired before settings, schedule, and
+    configuration reads, preserving the M11 writer lock order. The result is
+    materialized after flush and can be used by an enclosing operation before
+    its eventual commit. Callers own commit and rollback.
+    """
+    await _lock_mileage_company(session, company_id)
+    pricing = await _resolve_mileage_pricing(
+        session,
+        company_id,
+        body,
+        require_category_and_vat=True,
+        bypass_settings_cache=bypass_settings_cache,
+    )
+    expense = Expense(creator_id=creator_id)
+    _apply_expense_projection(expense, pricing, body.trip_date)
+    session.add(expense)
+    await session.flush()
+    trip = MileageTrip(
+        company_id=company_id,
+        expense_id=expense.id,
+        ownership=MileageTripOwnership.PRIVATE,
+        creator_id=creator_id,
+        transport_type_name=pricing.transport_type.name,
+        rate_effective_from=pricing.rate.effective_from,
+        rate_per_km=pricing.rate.rate_per_km,
+        trip_date=body.trip_date,
+        one_way_distance_km=body.one_way_distance_km,
+        total_distance_km=pricing.total_distance_km,
+        calculated_amount=pricing.amount,
+    )
+    _apply_trip_write(trip, body, pricing)
+    session.add(trip)
+    await session.flush()
+    # Populate database-normalized NUMERIC scale and server defaults while
+    # keeping the enclosing transaction open for the caller.
+    await session.refresh(trip)
+    await session.refresh(expense)
+    return _trip_to_read(trip, expense)
+
+
 async def create_mileage_expense(
     session: AsyncSession,
     company_id: uuid.UUID,
     body: MileageExpenseWrite,
     creator_id: uuid.UUID | None,
 ) -> MileageExpenseRead:
+    """Owner API wrapper retaining its historical commit/rollback contract."""
     try:
-        await _lock_mileage_company(session, company_id)
-        pricing = await _resolve_mileage_pricing(
-            session, company_id, body, require_category_and_vat=True
-        )
-        expense = Expense(creator_id=creator_id)
-        _apply_expense_projection(expense, pricing, body.trip_date)
-        session.add(expense)
-        await session.flush()
-        trip = MileageTrip(
-            company_id=company_id,
-            expense_id=expense.id,
-            ownership=MileageTripOwnership.PRIVATE,
-            creator_id=creator_id,
-            transport_type_name=pricing.transport_type.name,
-            rate_effective_from=pricing.rate.effective_from,
-            rate_per_km=pricing.rate.rate_per_km,
-            trip_date=body.trip_date,
-            one_way_distance_km=body.one_way_distance_km,
-            total_distance_km=pricing.total_distance_km,
-            calculated_amount=pricing.amount,
-        )
-        _apply_trip_write(trip, body, pricing)
-        session.add(trip)
+        result = await create_mileage_expense_in_transaction(session, company_id, body, creator_id)
         await session.commit()
     except Exception:
         await session.rollback()
         raise
-    await session.refresh(trip)
-    await session.refresh(expense)
-    return _trip_to_read(trip, expense)
+    return result
 
 
 async def get_mileage_expense(
