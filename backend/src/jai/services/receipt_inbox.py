@@ -38,7 +38,11 @@ MAX_FILES = 5
 
 
 def _has_presentable_suggestion(
-    suggestion: dict[str, object], *, category_matches: bool, rate_matches: bool
+    suggestion: dict[str, object],
+    *,
+    category_matches: bool,
+    rate_matches: bool,
+    treatment_matches: bool = False,
 ) -> bool:
     """Whether extraction can populate at least one review field."""
     if any(
@@ -51,7 +55,7 @@ def _has_presentable_suggestion(
         for field in ("supplier_name", "summary")
     ):
         return True
-    return category_matches or rate_matches
+    return category_matches or rate_matches or treatment_matches
 
 
 async def _suggestion_is_presentable(
@@ -90,8 +94,32 @@ async def _suggestion_is_presentable(
                 func.abs(VatRate.percent - rate_percent) < 0.01,
             )
         ))
+    treatment_matches = False
+    treatment = suggestion.get("suggested_vat_treatment")
+    if isinstance(treatment, dict):
+        treatment_id, treatment_code = treatment.get("id"), treatment.get("code")
+        try:
+            treatment_uuid = uuid.UUID(str(treatment_id))
+        except (ValueError, TypeError):
+            treatment_uuid = None
+        if treatment_uuid is not None and isinstance(treatment_code, str):
+            from jai.services.vat import resolve_ai_purchase_treatment
+
+            treatment_matches = bool(
+                await resolve_ai_purchase_treatment(
+                    session, company_id, treatment_code, treatment_id=treatment_uuid
+                )
+            )
+        if not treatment_matches:
+            # The dictionary may have changed between extraction and this
+            # persistence check. Never keep a reference that we just found
+            # ineligible; unrelated extracted fields remain useful.
+            suggestion["suggested_vat_treatment"] = None
     return _has_presentable_suggestion(
-        suggestion, category_matches=category_matches, rate_matches=rate_matches
+        suggestion,
+        category_matches=category_matches,
+        rate_matches=rate_matches,
+        treatment_matches=treatment_matches,
     )
 
 

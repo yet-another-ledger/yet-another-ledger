@@ -6316,9 +6316,8 @@ export interface components {
          *     matched (case-insensitive, best-effort) against the company's expense
          *     categories.
          *
-         *     VAT treatment is intentionally absent: cross-border treatment inference
-         *     is unreliable, so the user always selects it manually (D15 / M8 AI pipeline
-         *     note).
+         *     VAT treatment is a reviewable, dictionary-resolved suggestion. It is never
+         *     an authoritative booking choice.
          */
         ExpenseAIPrefill: {
             /** Expense Date */
@@ -6341,6 +6340,7 @@ export interface components {
             confidence?: string | null;
             /** Summary */
             summary?: string | null;
+            suggested_vat_treatment?: components["schemas"]["ExpenseVatTreatmentSuggestion"] | null;
         };
         /**
          * ExpenseAttachmentListResponse
@@ -6839,6 +6839,21 @@ export interface components {
              * @description Sum of non_deductible_net across all categories (EUR). total_deductible_net + total_non_deductible_net == total_net.
              */
             total_non_deductible_net: string;
+        };
+        /**
+         * ExpenseVatTreatmentSuggestion
+         * @description Company dictionary reference and short evidence statement.
+         */
+        ExpenseVatTreatmentSuggestion: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Code */
+            code: string;
+            /** Reason */
+            reason: string;
         };
         /** ExternalSaleReportReference */
         ExternalSaleReportReference: {

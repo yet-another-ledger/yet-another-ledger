@@ -316,6 +316,38 @@ async def get_vat_treatment(
     return result.scalar_one_or_none()
 
 
+async def resolve_ai_purchase_treatment(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    code: str,
+    *,
+    treatment_id: uuid.UUID | None = None,
+) -> VatTreatment | None:
+    """Resolve an AI-supported purchase code to its eligible company row.
+
+    AI recognition is deliberately bounded to these existing dictionary codes;
+    labels, IDs and effect values remain company-owned data.
+    """
+    expected_effect = {
+        "NL_DOMESTIC_PURCH": VatTreatmentEffect.APPLY_RATE,
+        "EU_B2B_REVERSE_PURCH": VatTreatmentEffect.ZERO_REVERSE,
+        "EU_B2C_PURCH": VatTreatmentEffect.APPLY_RATE,
+    }.get(code)
+    if expected_effect is None:
+        return None
+    stmt = select(VatTreatment).where(
+        VatTreatment.company_id == company_id,
+        VatTreatment.code == code,
+        VatTreatment.active.is_(True),
+        VatTreatment.side == VatTreatmentSide.PURCHASE,
+        VatTreatment.effect == expected_effect,
+    )
+    if treatment_id is not None:
+        stmt = stmt.where(VatTreatment.id == treatment_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def create_vat_treatment(
     session: AsyncSession,
     data: VatTreatmentWrite,

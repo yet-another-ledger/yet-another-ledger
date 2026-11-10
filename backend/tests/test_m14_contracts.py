@@ -38,6 +38,9 @@ def test_receipt_inbox_openapi_contract_is_present_and_has_no_storage_key() -> N
     assert schemas["ReceiptInboxRead"]["properties"]["status"]["$ref"].endswith(
         "/ReceiptInboxStatus"
     )
+    treatment = schemas["ExpenseAIPrefill"]["properties"]["suggested_vat_treatment"]
+    assert treatment["anyOf"]
+    assert schemas["ExpenseVatTreatmentSuggestion"]["properties"]["reason"]["maxLength"] == 240
 
 
 def test_receipt_inbox_enums_match_frozen_codes() -> None:
@@ -84,6 +87,15 @@ def test_only_presentable_suggestions_count_as_ready(
     assert _has_presentable_suggestion(
         suggestion, category_matches=category_matches, rate_matches=rate_matches
     ) is expected
+
+
+def test_valid_treatment_only_suggestion_counts_as_presentable() -> None:
+    assert _has_presentable_suggestion(
+        {"suggested_vat_treatment": {"code": "EU_B2B_REVERSE_PURCH"}},
+        category_matches=False,
+        rate_matches=False,
+        treatment_matches=True,
+    )
 
 
 def test_attachment_model_requires_exactly_one_parent() -> None:

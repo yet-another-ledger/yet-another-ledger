@@ -292,9 +292,8 @@ class ExpenseAIPrefill(BaseModel):
     matched (case-insensitive, best-effort) against the company's expense
     categories.
 
-    VAT treatment is intentionally absent: cross-border treatment inference
-    is unreliable, so the user always selects it manually (D15 / M8 AI pipeline
-    note).
+    VAT treatment is a reviewable, dictionary-resolved suggestion. It is never
+    an authoritative booking choice.
     """
 
     expense_date: date | None = None
@@ -307,3 +306,35 @@ class ExpenseAIPrefill(BaseModel):
     raw_model_note: str | None = None
     confidence: str | None = None
     summary: str | None = None
+    suggested_vat_treatment: ExpenseVatTreatmentSuggestion | None = None
+
+
+class ExpenseVatTreatmentSuggestion(BaseModel):
+    """Company dictionary reference and short evidence statement."""
+
+    id: uuid.UUID
+    code: str
+    reason: str = Field(min_length=1, max_length=240)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _trim_reason(cls, value: object) -> object:
+        # Normalize before Field's max_length check so the API contract applies
+        # to the trimmed evidence text, including when reading nested JSONB.
+        if not isinstance(value, str):
+            return value
+        value = value.strip()
+        if not value or len(value) > 240 or not _is_jsonb_safe_text(value):
+            raise ValueError("Reason must contain 1–240 non-whitespace characters.")
+        return value
+
+
+def _is_jsonb_safe_text(value: str) -> bool:
+    """Reject text PostgreSQL JSONB/UTF-8 cannot store without losing fields."""
+    if "\x00" in value:
+        return False
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        return False
+    return True
