@@ -3923,7 +3923,7 @@ export interface components {
          * @description Capabilities a token may receive.
          * @enum {string}
          */
-        AgentTokenScope: "receipt:intake" | "customer:read" | "customer:create" | "catalog:read" | "quote:read" | "quote:write_draft" | "invoice:read" | "invoice:write_draft" | "expense:read";
+        AgentTokenScope: "receipt:intake" | "customer:read" | "customer:create" | "catalog:read" | "quote:read" | "quote:write_draft" | "invoice:read" | "invoice:write_draft" | "expense:read" | "mileage:create";
         /**
          * AiSettingsRead
          * @description AI settings as returned by the API – ``api_key`` is desensitised.

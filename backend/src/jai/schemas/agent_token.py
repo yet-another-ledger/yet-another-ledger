@@ -22,6 +22,7 @@ class AgentTokenScope(StrEnum):
     INVOICE_READ = "invoice:read"
     INVOICE_WRITE_DRAFT = "invoice:write_draft"
     EXPENSE_READ = "expense:read"
+    MILEAGE_CREATE = "mileage:create"
 
 
 class AgentTokenCreate(BaseModel):

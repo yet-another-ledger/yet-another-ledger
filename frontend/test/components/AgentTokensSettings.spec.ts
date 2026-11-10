@@ -28,16 +28,20 @@ describe('AgentTokensSettings', () => {
     expect(wrapper.text()).toContain('Hermes')
     expect(wrapper.text()).toContain('receipt:intake')
     expect(wrapper.text()).toContain('读取开支（只读）')
-    expect(wrapper.findAll('.n-checkbox')).toHaveLength(9)
+    expect(wrapper.text()).toContain('创建正式里程开支（行程及开支记录）')
+    expect(wrapper.findAll('.n-checkbox')).toHaveLength(10)
 
     // Exercise the one-time display after a successful create response.
     api.post.mockResolvedValue({ ...token, token: 'jai1.secret.once' })
     await wrapper.find('input').setValue('Temporary')
     const checkboxes = wrapper.findAll('.n-checkbox')
     expect(checkboxes.length).toBeGreaterThan(0)
-    await checkboxes[0].trigger('click')
+    await checkboxes[9].trigger('click')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
+    expect(api.post).toHaveBeenCalledWith('/api/v1/agent-tokens', {
+      name: 'Temporary', scopes: ['mileage:create'],
+    })
     expect((wrapper.get('input[type="password"]').element as HTMLInputElement).value)
       .toBe('jai1.secret.once')
 
@@ -55,6 +59,7 @@ describe('AgentTokensSettings', () => {
     const i18n = createI18n({ legacy: false, locale: 'en', messages: { en, zh } })
     const wrapper = mount(AgentTokensSettings, { global: { plugins: [i18n] } })
     await flushPromises()
+    expect(wrapper.text()).toContain('Create formal mileage expenses (trip and Expense)')
 
     await wrapper.find('input').setValue('Temporary')
     await wrapper.findAll('.n-checkbox')[0].trigger('click')

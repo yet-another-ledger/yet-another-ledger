@@ -26,7 +26,7 @@ from test_migrations import (
 )
 
 
-def test_m15_follows_released_main_with_one_unambiguous_head() -> None:
+def test_m18_step2_follows_si4_with_one_unambiguous_head() -> None:
     scripts = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
     assert len(scripts.get_heads()) == 1
     assert scripts.get_revision("0053").down_revision == "0052"
@@ -34,9 +34,117 @@ def test_m15_follows_released_main_with_one_unambiguous_head() -> None:
     assert scripts.get_revision("0055").down_revision == "0054"
     assert scripts.get_revision("0056").down_revision == "0055"
     assert scripts.get_revision("0057").down_revision == "0056"
-    assert scripts.get_heads() == ["0057"]
+    assert scripts.get_revision("0058").down_revision == "0057"
+    assert scripts.get_heads() == ["0058"]
     revisions = list(scripts.walk_revisions())
     assert len(revisions) == len({revision.revision for revision in revisions})
+
+
+@pytest.mark.integration
+def test_m18_scope_migration_preserves_old_tokens_and_guards_revoked_scope_downgrade() -> None:
+    url = make_url(_alembic_url()).set(database=f"jai_test_m18_scope_{uuid.uuid4().hex[:12]}")
+    isolated_url = url.render_as_string(hide_password=False)
+    _ensure_database(isolated_url)
+    company_ids = [uuid.uuid4(), uuid.uuid4()]
+    owner_ids = [uuid.uuid4(), uuid.uuid4()]
+    token_ids = [uuid.uuid4(), uuid.uuid4()]
+    try:
+        result = _run_alembic("upgrade", "0057", url=isolated_url)
+        assert result.returncode == 0, result.stderr
+        for index, company_id in enumerate(company_ids):
+            _query(
+                isolated_url,
+                "INSERT INTO company (id, name, base_currency) "
+                "VALUES (:company_id, :name, 'EUR'); "
+                'INSERT INTO "user" (id, email, hashed_password, company_id) '
+                "VALUES (:owner_id, :email, 'synthetic-test-only', :company_id)",
+                {
+                    "company_id": company_id,
+                    "name": f"M18 company {index}",
+                    "owner_id": owner_ids[index],
+                    "email": f"m18-{index}-{company_id}@example.test",
+                },
+                company_id=company_id,
+            )
+            _query(
+                isolated_url,
+                "INSERT INTO agent_token "
+                "(id, company_id, creator_id, name, selector, secret_digest, scopes) "
+                "VALUES (:token_id, :company_id, :owner_id, 'synthetic token', "
+                "gen_random_uuid(), decode(repeat('00', 32), 'hex'), :scopes)",
+                {
+                    "token_id": token_ids[index],
+                    "company_id": company_id,
+                    "owner_id": owner_ids[index],
+                    "scopes": ["customer:read"] if index == 0 else ["expense:read"],
+                },
+                company_id=company_id,
+            )
+
+        result = _run_alembic("upgrade", "head", url=isolated_url)
+        assert result.returncode == 0, result.stderr
+        assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+            {"version_num": "0058"}
+        ]
+        original_scopes = [
+            _query(
+                isolated_url,
+                "SELECT scopes, revoked_at IS NOT NULL AS revoked FROM agent_token "
+                "WHERE id = :token_id",
+                {"token_id": token_ids[index]},
+                company_id=company_ids[index],
+            )[0]
+            for index in range(2)
+        ]
+        assert [tuple(row["scopes"]) for row in original_scopes] == [
+            ("customer:read",),
+            ("expense:read",),
+        ]
+        assert not any(row["revoked"] for row in original_scopes)
+        _query(
+            isolated_url,
+            "UPDATE agent_token SET scopes = ARRAY['mileage:create']::text[], "
+            "revoked_at = now() "
+            "WHERE id = :token_id",
+            {"token_id": token_ids[1]},
+            company_id=company_ids[1],
+        )
+        _expect_integrity_error(
+            isolated_url,
+            "UPDATE agent_token SET scopes = ARRAY['future:scope']::text[] "
+            "WHERE id = :token_id",
+            {"token_id": token_ids[0]},
+            company_id=company_ids[0],
+        )
+
+        result = _run_alembic("downgrade", "-1", url=isolated_url)
+        assert result.returncode != 0
+        assert "ck_agent_token_scopes_old" in result.stderr
+        assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+            {"version_num": "0058"}
+        ]
+        assert _query(
+            isolated_url,
+            "SELECT scopes, revoked_at IS NOT NULL AS revoked FROM agent_token "
+            "WHERE id = :token_id",
+            {"token_id": token_ids[1]},
+            company_id=company_ids[1],
+        ) == [{"scopes": ["mileage:create"], "revoked": True}]
+
+        _query(
+            isolated_url,
+            "UPDATE agent_token SET scopes = ARRAY['expense:read']::text[] "
+            "WHERE id = :token_id",
+            {"token_id": token_ids[1]},
+            company_id=company_ids[1],
+        )
+        result = _run_alembic("downgrade", "-1", url=isolated_url)
+        assert result.returncode == 0, result.stderr
+        assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+            {"version_num": "0057"}
+        ]
+    finally:
+        _drop_database(isolated_url)
 
 
 @pytest.mark.integration
@@ -83,7 +191,7 @@ def test_si4_scope_migration_preserves_old_tokens_and_guards_cross_company_downg
         result = _run_alembic("upgrade", "head", url=isolated_url)
         assert result.returncode == 0, result.stderr
         assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
-            {"version_num": "0057"}
+            {"version_num": "0058"}
         ]
         for index in range(2):
             assert _query(
@@ -109,6 +217,11 @@ def test_si4_scope_migration_preserves_old_tokens_and_guards_cross_company_downg
                 company_id=company_ids[index],
             )
 
+        result = _run_alembic("downgrade", "-1", url=isolated_url)
+        assert result.returncode == 0, result.stderr
+        assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
+            {"version_num": "0057"}
+        ]
         result = _run_alembic("downgrade", "-1", url=isolated_url)
         assert result.returncode != 0
         assert "ck_agent_token_scopes_old" in result.stderr

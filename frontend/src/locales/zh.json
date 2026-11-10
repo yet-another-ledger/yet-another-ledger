@@ -445,6 +445,7 @@
       "name": "令牌名称",
       "scopes": "允许的能力",
       "expenseReadScope": "读取开支（只读）",
+      "mileageCreateScope": "创建正式里程开支（行程及开支记录）",
       "create": "创建令牌",
       "oneTimeWarning": "请立即复制此密钥。JAI 无法再次显示。",
       "copyOnce": "复制密钥并隐藏",

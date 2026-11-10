@@ -8,12 +8,13 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from jai.schemas.content import DocumentTemplateRead
 from jai.schemas.customer import CustomerRead, CustomerWrite
 from jai.schemas.expense import ExpenseListItem, ExpenseRead
 from jai.schemas.invoice import InvoiceRead, InvoiceWrite, ProductInvoiceOptionRead
+from jai.schemas.mileage import MileageCalculationRead, MileageExpenseWrite
 from jai.schemas.quote import QuoteRead, QuoteWrite
 from jai.schemas.receipt_inbox import ReceiptInboxErrorCode
 from jai.schemas.vat import VatRateRead, VatTreatmentRead
@@ -37,6 +38,17 @@ class AgentSource(BaseModel):
     message_id: str | None = None
 
 
+class AgentMileageSource(AgentSource):
+    """M18 source metadata that is safe to persist in an operation row."""
+
+    @field_validator("platform", "chat_id", "message_id")
+    @classmethod
+    def _reject_nul(cls, value: str | None) -> str | None:
+        if value is not None and "\x00" in value:
+            raise ValueError("NUL characters are not allowed.")
+        return value
+
+
 class AgentWriteResult(BaseModel):
     operation_id: uuid.UUID
     status: Literal["created", "replayed"]
@@ -54,6 +66,8 @@ class AgentErrorCode(StrEnum):
     TARGET_AMBIGUOUS = "MCP_TARGET_AMBIGUOUS"
     DRAFT_REQUIRED = "MCP_DRAFT_REQUIRED"
     REQUEST_ID_CONFLICT = "MCP_REQUEST_ID_CONFLICT"
+    MILEAGE_CONFIGURATION_INVALID = "MCP_MILEAGE_CONFIGURATION_INVALID"
+    MILEAGE_PREVIEW_STALE = "MCP_MILEAGE_PREVIEW_STALE"
     HOST_REJECTED = "MCP_HOST_REJECTED"
     ORIGIN_REJECTED = "MCP_ORIGIN_REJECTED"
 
@@ -168,6 +182,52 @@ class EmptyInput(BaseModel):
     """Explicit empty object for bounded list tools without filters."""
 
     model_config = ConfigDict(extra="forbid")
+
+
+class AgentMileageWrite(MileageExpenseWrite):
+    """MCP-only strict input contract; owner HTTP semantics stay unchanged."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("origin_address", "destination_address", "purpose", "note")
+    @classmethod
+    def _reject_nul(cls, value: str | None) -> str | None:
+        if value is not None and "\x00" in value:
+            raise ValueError("NUL characters are not allowed.")
+        return value
+
+
+class PreviewMileageInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: RequestId
+    source: AgentMileageSource | None = None
+    mileage: AgentMileageWrite
+
+
+class MileageTransportOption(BaseModel):
+    id: uuid.UUID
+    name: str
+
+
+class MileageCategoryOption(BaseModel):
+    id: uuid.UUID
+    name: str
+
+
+class MileagePreviewOutput(BaseModel):
+    request_id: uuid.UUID
+    mileage: AgentMileageWrite
+    transport_type: MileageTransportOption
+    expense_category: MileageCategoryOption
+    calculation: MileageCalculationRead
+    preview_token: str
+
+
+
+
+class MileageOptionsOutput(BaseModel):
+    default_transport_type_id: uuid.UUID
+    transport_types: list[MileageTransportOption]
 
 
 class CatalogListOutput(BaseModel):

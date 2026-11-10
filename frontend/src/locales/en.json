@@ -445,6 +445,7 @@
       "name": "Token name",
       "scopes": "Allowed capabilities",
       "expenseReadScope": "Read expenses (read-only)",
+      "mileageCreateScope": "Create formal mileage expenses (trip and Expense)",
       "create": "Create token",
       "oneTimeWarning": "Copy this secret now. JAI cannot show it again.",
       "copyOnce": "Copy secret and hide",

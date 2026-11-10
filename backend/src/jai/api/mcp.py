@@ -19,9 +19,11 @@ from starlette.formparsers import MultiPartException
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from jai.config import get_settings
-from jai.db import get_session_maker
+from jai.db import get_session_maker, set_rls_company
 from jai.schemas.agent_token import AgentTokenScope
 from jai.schemas.agent_tools import (
+    AgentMileageSource,
+    AgentMileageWrite,
     AgentSource,
     CatalogListOutput,
     CreateCustomerInput,
@@ -43,8 +45,11 @@ from jai.schemas.agent_tools import (
     InvoiceOutput,
     InvoiceWriteOutput,
     ListExpensesInput,
+    MileageOptionsOutput,
+    MileagePreviewOutput,
     NonEmpty,
     PreviewInvoiceInput,
+    PreviewMileageInput,
     PreviewQuoteInput,
     QuoteOutput,
     QuoteWriteOutput,
@@ -89,6 +94,8 @@ from jai.services.agent_expenses import (
 from jai.services.agent_expenses import (
     list_expenses as list_expenses_agent_service,
 )
+from jai.services.agent_mileage import get_mileage_options as get_mileage_options_service
+from jai.services.agent_mileage import preview_mileage as preview_mileage_service
 from jai.services.agent_receipts import (
     AgentReceiptError,
 )
@@ -389,6 +396,8 @@ _SAFE_TOOL_ERRORS = frozenset(
         "MCP_TARGET_AMBIGUOUS",
         "MCP_DRAFT_REQUIRED",
         "MCP_REQUEST_ID_CONFLICT",
+        "MCP_MILEAGE_CONFIGURATION_INVALID",
+        "MCP_MILEAGE_PREVIEW_STALE",
     }
 )
 _TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
@@ -410,6 +419,8 @@ _TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "update_invoice_draft": UpdateInvoiceDraftInput,
     "list_expenses": ListExpensesInput,
     "get_expense": GetExpenseInput,
+    "get_mileage_options": EmptyInput,
+    "preview_mileage_expense": PreviewMileageInput,
 }
 
 
@@ -431,7 +442,14 @@ class SafeMCPServer(MCPServer):
             return await super().call_tool(name, arguments, context)
         except ToolError as exc:
             cause = exc.__cause__
-            safe_code = str(cause) if isinstance(cause, ToolError) else None
+            direct_code = str(exc)
+            safe_code = (
+                direct_code
+                if direct_code in _SAFE_TOOL_ERRORS
+                else str(cause)
+                if isinstance(cause, ToolError)
+                else None
+            )
             if safe_code in _SAFE_TOOL_ERRORS:
                 raise ToolError(safe_code) from None
             raise ToolError("MCP_VALIDATION_FAILED") from None
@@ -807,6 +825,55 @@ async def update_invoice_draft_tool(
     except Exception as exc:
         if isinstance(exc, ToolError):
             raise
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="get_mileage_options",
+    description="List enabled mileage transport types and the current default.",
+    structured_output=True,
+)
+async def get_mileage_options() -> MileageOptionsOutput:
+    principal = _authorized_principal(AgentTokenScope.MILEAGE_CREATE)
+    async with get_session_maker()() as session, session.begin():
+        await set_rls_company(session, principal.company_id)
+        try:
+            return await get_mileage_options_service(session, principal)
+        except Exception:
+            raise _tool_error("MCP_MILEAGE_CONFIGURATION_INVALID") from None
+
+
+@server.tool(
+    name="preview_mileage_expense",
+    description="Calculate and validate a complete mileage Expense for explicit user confirmation.",
+    structured_output=True,
+)
+async def preview_mileage_expense(
+    request_id: uuid.UUID,
+    mileage: AgentMileageWrite,
+    source: AgentMileageSource | None = None,
+) -> MileagePreviewOutput:
+    principal = _authorized_principal(AgentTokenScope.MILEAGE_CREATE)
+    try:
+        request = PreviewMileageInput(request_id=request_id, source=source, mileage=mileage)
+        async with get_session_maker()() as session, session.begin():
+            await set_rls_company(session, principal.company_id)
+            try:
+                return await preview_mileage_service(session, principal, request)
+            except Exception as exc:
+                from jai.services.mileage import (
+                    MileageConfigurationError,
+                    MileageResourceNotFoundError,
+                )
+
+                if isinstance(exc, MileageResourceNotFoundError):
+                    raise _tool_error("MCP_TARGET_NOT_FOUND") from None
+                if isinstance(exc, MileageConfigurationError):
+                    raise _tool_error("MCP_MILEAGE_CONFIGURATION_INVALID") from None
+                raise
+    except ToolError:
+        raise
+    except Exception:
         raise _tool_error("MCP_VALIDATION_FAILED") from None
 
 

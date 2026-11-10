@@ -673,7 +673,10 @@ async def _load_live_trip_transport_type(
     company_id: uuid.UUID,
     requested_type_id: uuid.UUID,
 ) -> MileageTransportType:
-    item = await _load_transport_type(session, requested_type_id, company_id)
+    try:
+        item = await _load_transport_type(session, requested_type_id, company_id)
+    except LookupError as exc:
+        raise MileageResourceNotFoundError("Mileage transport type not found.") from exc
     if not item.active:
         raise MileageConfigurationError(
             "Mileage transport type is inactive and cannot be selected."
@@ -799,8 +802,13 @@ async def _resolve_mileage_pricing(
         requested_type_id,
     )
     rate = await _resolve_rate_for_trip(session, company_id, body.trip_date, transport_type.id)
+    resolved_rate = Decimal(str(rate.rate_per_km))
+    try:
+        _positive_finite(resolved_rate, "Mileage rate")
+    except ValueError as exc:
+        raise MileageConfigurationError("The applicable mileage rate is invalid.") from exc
     total_distance_km = derive_total_distance(body.one_way_distance_km, body.round_trip)
-    amount = calculate_mileage_amount(total_distance_km, Decimal(str(rate.rate_per_km)))
+    amount = calculate_mileage_amount(total_distance_km, resolved_rate)
 
     company_result = await session.execute(select(Company).where(Company.id == company_id))
     company = company_result.scalar_one_or_none()
@@ -889,6 +897,17 @@ async def calculate_mileage_expense(
         session, company_id, body, require_category_and_vat=False
     )
     return _pricing_to_calculation(body, pricing)
+
+
+async def preview_mileage_expense_facts(
+    session: AsyncSession, company_id: uuid.UUID, body: MileageExpenseWrite
+) -> tuple[_MileagePricing, MileageCalculationRead]:
+    """Resolve all immutable facts needed to preview a real mileage Expense."""
+    await _lock_mileage_company(session, company_id)
+    pricing = await _resolve_mileage_pricing(
+        session, company_id, body, require_category_and_vat=True, bypass_settings_cache=True
+    )
+    return pricing, _pricing_to_calculation(body, pricing)
 
 
 def _apply_expense_projection(
