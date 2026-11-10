@@ -26,6 +26,7 @@ from jai.models.agent_token import AgentToken
 from jai.schemas.agent_tools import (
     AgentSource,
     InvoiceToolSnapshot,
+    MileageToolSnapshot,
     QuoteToolSnapshot,
     ReceiptSubmissionSnapshot,
 )
@@ -40,6 +41,7 @@ _SNAPSHOT_MODELS: dict[str, tuple[type[BaseModel], ...]] = {
     # Both explicit quote response shapes retain the business target type.
     "quote": (QuoteRead, QuoteToolSnapshot),
     "invoice": (InvoiceRead, InvoiceToolSnapshot),
+    "mileage": (MileageToolSnapshot,),
     # Explicit allowlist for safe receipt submission result fields. The
     # operation envelope (operation ID/status/target ID) is stored separately.
     "receipt": (ReceiptSubmissionSnapshot,),
@@ -51,6 +53,9 @@ _JAI_TOKEN_VALUE = re.compile(
     r"\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
     r"\.[A-Za-z0-9_-]{43}\b",
     re.IGNORECASE,
+)
+_M18_PREVIEW_TOKEN_VALUE = re.compile(
+    r"m18v1\.[0-9a-f]{64}", re.IGNORECASE
 )
 _DATA_URI_TOKEN = r"(?:[a-z0-9!#$&^_.+-]|%[a-f0-9]{2})+"
 _DATA_URI_PARAMETER = (
@@ -208,8 +213,33 @@ def _typed_snapshot(target_type: str, result: BaseModel) -> dict[str, Any]:
     if type(result) not in allowed_models:
         raise ValueError("Agent result must use its target's allowlisted response schema.")
     snapshot = result.model_dump(mode="json")
-    _reject_forbidden_snapshot_material(snapshot)
+    if target_type == "mileage":
+        _reject_m18_retained_material(snapshot)
+    else:
+        _reject_forbidden_snapshot_material(snapshot)
     return snapshot
+
+
+def _reject_m18_preview_credentials(value: Any) -> None:
+    """Reject preview credentials in the retained M18 text and result surface."""
+
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if isinstance(key, str) and _M18_PREVIEW_TOKEN_VALUE.search(key):
+                raise ValueError("Agent result contains M18 preview credential material.")
+            _reject_m18_preview_credentials(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _reject_m18_preview_credentials(item)
+    elif isinstance(value, str) and _M18_PREVIEW_TOKEN_VALUE.search(value):
+        raise ValueError("Agent result contains M18 preview credential material.")
+
+
+def _reject_m18_retained_material(value: Any) -> None:
+    """Apply the shared credential/file screen and the M18 preview-token screen."""
+
+    _reject_forbidden_snapshot_material(value)
+    _reject_m18_preview_credentials(value)
 
 
 def _assert_target_id_matches(target_type: str, target_id: uuid.UUID, result: BaseModel) -> None:
@@ -220,12 +250,15 @@ def _assert_target_id_matches(target_type: str, target_id: uuid.UUID, result: Ba
         "quote": "id",
         "invoice": "id",
         "receipt": "inbox_id",
+        "mileage": "id",
     }.get(target_type)
     result_id = None
     if target_type == "quote" and isinstance(result, QuoteToolSnapshot):
         result_id = result.quote.id
     elif target_type == "invoice" and isinstance(result, InvoiceToolSnapshot):
         result_id = result.invoice.id
+    elif target_type == "mileage" and isinstance(result, MileageToolSnapshot):
+        result_id = result.mileage.id
     elif id_field is not None and not isinstance(result, QuoteToolSnapshot):
         result_id = getattr(result, id_field, None)
     if result_id != target_id:
@@ -343,6 +376,8 @@ async def run_agent_mutation(
     if not operation.strip() or len(operation) > 100:
         raise HTTPException(status_code=422, detail={"code": "MCP_VALIDATION_FAILED"})
     source_values, canonical_source = _safe_source(source)
+    if operation == "create_mileage_expense":
+        _reject_m18_retained_material(canonical_source)
     digest = canonical_argument_digest({"arguments": arguments, "source": canonical_source})
 
     if session.in_transaction():
@@ -460,7 +495,10 @@ def _response(row: AgentOperation, *, status: str) -> AgentOperationResponse:
                 continue
         else:
             raise RuntimeError("Saved Agent operation has an invalid result snapshot.")
-        _reject_forbidden_snapshot_material(snapshot)
+        if row.target_type == "mileage":
+            _reject_m18_retained_material(snapshot)
+        else:
+            _reject_forbidden_snapshot_material(snapshot)
     return AgentOperationResponse(
         operation_id=row.id,
         status=status,

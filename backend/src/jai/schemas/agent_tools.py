@@ -14,7 +14,7 @@ from jai.schemas.content import DocumentTemplateRead
 from jai.schemas.customer import CustomerRead, CustomerWrite
 from jai.schemas.expense import ExpenseListItem, ExpenseRead
 from jai.schemas.invoice import InvoiceRead, InvoiceWrite, ProductInvoiceOptionRead
-from jai.schemas.mileage import MileageCalculationRead, MileageExpenseWrite
+from jai.schemas.mileage import MileageCalculationRead, MileageExpenseRead, MileageExpenseWrite
 from jai.schemas.quote import QuoteRead, QuoteWrite
 from jai.schemas.receipt_inbox import ReceiptInboxErrorCode
 from jai.schemas.vat import VatRateRead, VatTreatmentRead
@@ -204,6 +204,10 @@ class PreviewMileageInput(BaseModel):
     mileage: AgentMileageWrite
 
 
+class CreateMileageExpenseInput(PreviewMileageInput):
+    preview_token: Annotated[str, StringConstraints(pattern=r"^m18v1\.[0-9a-f]{64}$")]
+
+
 class MileageTransportOption(BaseModel):
     id: uuid.UUID
     name: str
@@ -221,6 +225,20 @@ class MileagePreviewOutput(BaseModel):
     expense_category: MileageCategoryOption
     calculation: MileageCalculationRead
     preview_token: str
+
+
+class MileageToolSnapshot(BaseModel):
+    """Allowlisted durable mileage result and original editor URL."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mileage: MileageExpenseRead
+    web_url: str
+
+
+class MileageWriteOutput(BaseModel):
+    mileage: MileageExpenseRead
+    operation: AgentWriteResult
 
 
 

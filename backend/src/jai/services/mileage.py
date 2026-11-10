@@ -1361,6 +1361,24 @@ async def create_mileage_expense_in_transaction(
         require_category_and_vat=True,
         bypass_settings_cache=bypass_settings_cache,
     )
+    return await create_mileage_expense_from_pricing(
+        session, company_id, body, creator_id, pricing
+    )
+
+
+async def create_mileage_expense_from_pricing(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    body: MileageExpenseWrite,
+    creator_id: uuid.UUID | None,
+    pricing: _MileagePricing,
+) -> MileageExpenseRead:
+    """Flush one mileage Expense/trip pair from already-verified fresh pricing.
+
+    This narrow primitive lets Agent creation persist the exact pricing object
+    whose facts were signed and verified, without resolving settings a second
+    time between verification and insertion.
+    """
     expense = Expense(creator_id=creator_id)
     _apply_expense_projection(expense, pricing, body.trip_date)
     session.add(expense)

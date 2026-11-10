@@ -428,6 +428,7 @@ async def test_parent_lifespan_runs_real_mcp_session_manager(monkeypatch) -> Non
         "get_expense",
                 "get_mileage_options",
                 "preview_mileage_expense",
+                "create_mileage_expense",
     }
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://localhost"

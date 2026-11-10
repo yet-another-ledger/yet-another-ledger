@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import MutableMapping
 from contextvars import ContextVar
@@ -29,6 +30,7 @@ from jai.schemas.agent_tools import (
     CreateCustomerInput,
     CreateCustomerOutput,
     CreateInvoiceDraftInput,
+    CreateMileageExpenseInput,
     CreateQuoteDraftInput,
     CustomerListOutput,
     CustomerOutput,
@@ -47,6 +49,7 @@ from jai.schemas.agent_tools import (
     ListExpensesInput,
     MileageOptionsOutput,
     MileagePreviewOutput,
+    MileageWriteOutput,
     NonEmpty,
     PreviewInvoiceInput,
     PreviewMileageInput,
@@ -94,6 +97,7 @@ from jai.services.agent_expenses import (
 from jai.services.agent_expenses import (
     list_expenses as list_expenses_agent_service,
 )
+from jai.services.agent_mileage import create_mileage_expense as create_mileage_expense_service
 from jai.services.agent_mileage import get_mileage_options as get_mileage_options_service
 from jai.services.agent_mileage import preview_mileage as preview_mileage_service
 from jai.services.agent_receipts import (
@@ -111,6 +115,20 @@ from jai.services.storage import get_storage
 _ALLOWED_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
 AGENT_RECEIPT_UPLOAD_PATH = "/api/v1/agent/receipt-inbox"
 agent_principal: ContextVar[AgentPrincipal | None] = ContextVar("agent_principal", default=None)
+
+
+class _MCPSSEResponseBodyLogFilter(logging.Filter):
+    """Suppress the installed SSE transport's body dump for MCP requests."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not (
+            agent_principal.get() is not None
+            and record.name == "sse_starlette.sse"
+            and record.msg == "chunk: %s"
+        )
+
+
+logging.getLogger("sse_starlette.sse").addFilter(_MCPSSEResponseBodyLogFilter())
 
 
 def _body_limit() -> int:
@@ -421,6 +439,7 @@ _TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "get_expense": GetExpenseInput,
     "get_mileage_options": EmptyInput,
     "preview_mileage_expense": PreviewMileageInput,
+    "create_mileage_expense": CreateMileageExpenseInput,
 }
 
 
@@ -871,6 +890,41 @@ async def preview_mileage_expense(
                 if isinstance(exc, MileageConfigurationError):
                     raise _tool_error("MCP_MILEAGE_CONFIGURATION_INVALID") from None
                 raise
+    except ToolError:
+        raise
+    except Exception:
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
+
+
+@server.tool(
+    name="create_mileage_expense",
+    description=(
+        "Create a confirmed mileage trip as a formal Expense included in reports. "
+        "Requires the matching current preview token."
+    ),
+    structured_output=True,
+)
+async def create_mileage_expense_tool(
+    request_id: uuid.UUID,
+    mileage: AgentMileageWrite,
+    preview_token: str,
+    source: AgentMileageSource | None = None,
+) -> MileageWriteOutput:
+    principal = _authorized_principal(AgentTokenScope.MILEAGE_CREATE)
+    try:
+        request = CreateMileageExpenseInput(
+            request_id=request_id,
+            source=source,
+            mileage=mileage,
+            preview_token=preview_token,
+        )
+        return await create_mileage_expense_service(get_session_maker(), principal, request)
+    except HTTPException as exc:
+        detail = exc.detail
+        code = detail.get("code") if isinstance(detail, dict) else None
+        if isinstance(code, str) and code in _SAFE_TOOL_ERRORS:
+            raise _tool_error(code) from None
+        raise _tool_error("MCP_VALIDATION_FAILED") from None
     except ToolError:
         raise
     except Exception:
