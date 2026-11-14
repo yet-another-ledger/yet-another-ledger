@@ -134,13 +134,13 @@ SI1 (document ordering, Quote duplication and server-side Sent copies) was accep
 
 [M18 Agent mileage intake](docs/plan/milestones/M18.md) was accepted on 2026-11-10 within the author-delegated backend verification scope for v0.14.0. All four steps passed automated gates and independent review; actual Codex CLI, Hermes CLI discovery/native MCP calls, and isolated database/report checks passed. Browser, live maps, Hermes natural-language dialogue and Telegram checks were not performed. It adds client-neutral transport options, user-confirmed previews and idempotent creation under `mileage:create`. Route suggestions come from the Agent's own available search/map capabilities.
 
-⬜ **Next milestone — M19.** The [purchase receipt AI classification design](docs/plan/milestones/M19.md) was agreed on 2026-11-10 and is pending implementation. It adds reviewable VAT-treatment suggestions to the receipt inbox and Expense attachment extraction for Dutch domestic, EU B2B reverse-charge and EU foreign-VAT purchases. The three atomic task cards cover prompt/contract validation, both purchase forms with human-choice protection, and regression/acceptance.
+🟡 **M19 automated implementation complete.** All three steps passed their automated gates and independent review. The receipt inbox and Expense attachment extraction offer reviewable VAT-treatment suggestions for Dutch domestic, EU B2B reverse-charge and EU foreign-VAT purchases. Author walkthrough and real-provider verification remain pending. The released version remains v0.14.0. See the [M19 design and three atomic task cards](docs/plan/milestones/M19.md).
 
 ## Documentation
 
 Docs are English-first with a synchronized Chinese mirror (`*_zh.md`). Start at [`docs/plan/roadmap.md`](docs/plan/roadmap.md); the Dutch VAT/BTW filing basis is in [`docs/insight/btw-aangifte-2026-guide.md`](docs/insight/btw-aangifte-2026-guide.md).
 
-The next milestone's implementation design and three atomic task cards are in [M19 Purchase Receipt AI Recognition and VAT Treatment Prefill](docs/plan/milestones/M19.md).
+The M19 implementation design and three atomic task cards are in [M19 Purchase Receipt AI Recognition and VAT Treatment Prefill](docs/plan/milestones/M19.md).
 
 ## License
 
