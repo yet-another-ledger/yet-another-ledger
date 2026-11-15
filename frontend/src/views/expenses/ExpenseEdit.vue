@@ -780,24 +780,26 @@ async function handleAiExtract(attachmentId: string) {
 
                   <!-- VAT Treatment (PURCHASE side only) -->
                   <n-form-item :label="t('expenses.vatTreatment')">
-                    <n-select
-                      :value="vatTreatmentId"
-                      :options="purchaseTreatmentOptions"
-                      :placeholder="t('expenses.vatTreatmentPlaceholder')"
-                      clearable
-                      @update:value="onTreatmentChange"
-                    />
-                    <div v-if="treatmentSuggestion" class="treatment-suggestion">
-                      <span>{{ t('expenses.ai.treatmentOrigin') }} · {{ treatmentSuggestionRecord?.label ?? treatmentSuggestion.code }}: {{ treatmentSuggestion.reason }}</span>
-                      <n-button v-if="!saving && treatmentSuggestionRecord && treatmentSuggestionRecord.id !== vatTreatmentId" size="tiny" attr-type="button" :disabled="deletingCurrentAiAttachment" @click="applyTreatmentSuggestion">{{ t('expenses.ai.applyTreatment') }}</n-button>
+                    <div class="vat-field">
+                      <n-select
+                        :value="vatTreatmentId"
+                        :options="purchaseTreatmentOptions"
+                        :placeholder="t('expenses.vatTreatmentPlaceholder')"
+                        clearable
+                        @update:value="onTreatmentChange"
+                      />
+                      <div v-if="treatmentSuggestion" class="treatment-suggestion">
+                        <span>{{ t('expenses.ai.treatmentOrigin') }} · {{ treatmentSuggestionRecord?.label ?? treatmentSuggestion.code }}: {{ treatmentSuggestion.reason }}</span>
+                        <n-button v-if="!saving && treatmentSuggestionRecord && treatmentSuggestionRecord.id !== vatTreatmentId" size="tiny" attr-type="button" :disabled="deletingCurrentAiAttachment" @click="applyTreatmentSuggestion">{{ t('expenses.ai.applyTreatment') }}</n-button>
+                      </div>
+                      <n-text v-if="treatmentSuggestion && !treatmentSuggestionRecord" depth="3" style="font-size: 13px">{{ t('receiptInbox.treatmentUnavailable') }}</n-text>
+                      <n-text v-if="vatTreatmentId" depth="3" style="font-size: 12px">
+                        {{ t(treatmentOrigin === 'saved' ? 'expenses.ai.savedTreatmentOrigin' : treatmentOrigin === 'human' ? 'expenses.ai.humanTreatmentOrigin' : 'expenses.ai.treatmentOrigin') }}
+                      </n-text>
+                      <n-text v-if="treatmentSuggestion?.code === 'EU_B2B_REVERSE_PURCH' || isReverseCharge" depth="3" style="font-size: 13px">
+                        {{ t('expenses.ai.nominalRateReview') }}
+                      </n-text>
                     </div>
-                    <n-text v-if="treatmentSuggestion && !treatmentSuggestionRecord" depth="3" style="font-size: 13px">{{ t('receiptInbox.treatmentUnavailable') }}</n-text>
-                    <n-text v-if="vatTreatmentId" depth="3" style="font-size: 12px">
-                      {{ t(treatmentOrigin === 'saved' ? 'expenses.ai.savedTreatmentOrigin' : treatmentOrigin === 'human' ? 'expenses.ai.humanTreatmentOrigin' : 'expenses.ai.treatmentOrigin') }}
-                    </n-text>
-                    <n-text v-if="treatmentSuggestion?.code === 'EU_B2B_REVERSE_PURCH' || isReverseCharge" depth="3" style="font-size: 13px">
-                      {{ t('expenses.ai.nominalRateReview') }}
-                    </n-text>
                   </n-form-item>
 
                   <!-- VAT Rate -->
@@ -1109,6 +1111,22 @@ async function handleAiExtract(attachmentId: string) {
 .form-col {
   flex: 1;
   min-width: 0;
+}
+
+.vat-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.treatment-suggestion {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  overflow-wrap: anywhere;
 }
 
 .attach-col {

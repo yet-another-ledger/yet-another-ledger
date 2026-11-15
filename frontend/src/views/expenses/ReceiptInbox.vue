@@ -599,17 +599,23 @@ function formatBytes(n: number) { return n < 1024 ? `${n} B` : `${(n / 1024).toF
             <n-form-item :label="t('expenses.expenseDate')"><input v-model="expenseDate" type="date" @input="markEdited('expenseDate')" /></n-form-item>
             <n-form-item :label="t('expenses.category')"><n-select v-model:value="categoryId" :options="dict.categoryOptions.value" filterable @update:value="(v) => { markEdited('categoryId'); onCategoryChange(v) }" /></n-form-item>
             <n-form-item :label="t('expenses.supplier')"><n-input v-model:value="supplier" @update:value="markEdited('supplier')" /></n-form-item>
-            <n-form-item :label="t('expenses.vatTreatment')"><n-select :value="treatmentId" :options="dict.purchaseTreatmentOptions.value" clearable @update:value="onTreatmentChange" />
-              <div v-if="treatmentSuggestion" class="treatment-suggestion">
-                <span>{{ t('expenses.ai.treatmentOrigin') }} · {{ treatmentSuggestionRecord?.label ?? treatmentSuggestion.code }}: {{ treatmentSuggestion.reason }}</span>
-                <n-button v-if="canApplyTreatmentSuggestion" size="tiny" attr-type="button" @click="applyTreatmentSuggestion">{{ t('expenses.ai.applyTreatment') }}</n-button>
+            <n-form-item :label="t('expenses.vatTreatment')">
+              <div class="vat-field">
+                <n-select :value="treatmentId" :options="dict.purchaseTreatmentOptions.value" clearable @update:value="onTreatmentChange" />
+                <div v-if="treatmentSuggestion" class="treatment-suggestion">
+                  <span>{{ t('expenses.ai.treatmentOrigin') }} · {{ treatmentSuggestionRecord?.label ?? treatmentSuggestion.code }}: {{ treatmentSuggestion.reason }}</span>
+                  <n-button v-if="canApplyTreatmentSuggestion" size="tiny" attr-type="button" @click="applyTreatmentSuggestion">{{ t('expenses.ai.applyTreatment') }}</n-button>
+                </div>
+                <p v-if="treatmentSuggestion && !treatmentSuggestionRecord" class="treatment-hint">{{ t('receiptInbox.treatmentUnavailable') }}</p>
+                <p v-if="treatmentId" class="treatment-hint">{{ t(treatmentOrigin === 'human' ? 'expenses.ai.humanTreatmentOrigin' : 'expenses.ai.treatmentOrigin') }}</p>
+                <p v-if="treatmentSuggestion?.code === 'EU_B2B_REVERSE_PURCH' && !treatmentSuggestionRecord" class="treatment-hint">{{ t('expenses.ai.nominalRateReview') }}</p>
               </div>
-              <p v-if="treatmentSuggestion && !treatmentSuggestionRecord" class="treatment-hint">{{ t('receiptInbox.treatmentUnavailable') }}</p>
-              <p v-if="treatmentId" class="treatment-hint">{{ t(treatmentOrigin === 'human' ? 'expenses.ai.humanTreatmentOrigin' : 'expenses.ai.treatmentOrigin') }}</p>
-              <p v-if="treatmentSuggestion?.code === 'EU_B2B_REVERSE_PURCH' && !treatmentSuggestionRecord" class="treatment-hint">{{ t('expenses.ai.nominalRateReview') }}</p>
             </n-form-item>
-            <n-form-item :label="t('expenses.vatRate')"><n-select :value="rateId" :options="dict.vatRateOptions.value" clearable @update:value="(v) => { markEdited('rateId'); rateOrigin='human'; rateId=v; preview() }" />
-              <p v-if="isReverseCharge" class="treatment-hint">{{ t('expenses.ai.nominalRateReview') }}</p>
+            <n-form-item :label="t('expenses.vatRate')">
+              <div class="vat-field">
+                <n-select :value="rateId" :options="dict.vatRateOptions.value" clearable @update:value="(v) => { markEdited('rateId'); rateOrigin='human'; rateId=v; preview() }" />
+                <p v-if="isReverseCharge" class="treatment-hint">{{ t('expenses.ai.nominalRateReview') }}</p>
+              </div>
             </n-form-item>
             <n-form-item :label="t('expenses.netAmount')"><n-input-number v-model:value="net" :min="0" :precision="2" @update:value="(v) => { markEdited('net'); net=v; preview() }" /></n-form-item>
             <n-form-item :label="t('expenses.vatAmount')"><n-input-number v-model:value="vat" :min="0" :precision="2" @update:value="(v) => { markEdited('vat'); vat=v; onVatChange() }" /></n-form-item>
@@ -652,5 +658,8 @@ function formatBytes(n: number) { return n < 1024 ? `${n} B` : `${(n / 1024).toF
 .review{max-width:760px;margin-top:24px}
 .review :deep(.n-input-number){width:100%}
 .review input[type=date]{width:100%;padding:8px;border:1px solid var(--n-border-color);border-radius:4px}
+.vat-field{display:flex;flex-direction:column;gap:6px;width:100%;min-width:0}
+.treatment-suggestion{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px;overflow-wrap:anywhere}
+.treatment-hint{margin:0;font-size:13px;line-height:1.45}
 @media(max-width:640px){.inbox-page{padding:14px}.files{grid-template-columns:1fr}}
 </style>
