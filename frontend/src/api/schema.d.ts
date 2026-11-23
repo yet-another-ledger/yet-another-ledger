@@ -2735,6 +2735,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fixed-assets/expenses/{expense_id}/conversion-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Expense Fixed Asset Endpoint
+         * @description Preview legacy expense amortization against a proposed asset schedule.
+         */
+        post: operations["preview_expense_fixed_asset_endpoint_api_v1_fixed_assets_expenses__expense_id__conversion_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses/ai-extract": {
         parameters: {
             query?: never;
@@ -7436,6 +7456,165 @@ export interface components {
             vat_amount: string;
             /** Gross Amount */
             gross_amount: string;
+        };
+        /** FixedAssetMonthlyDepreciation */
+        FixedAssetMonthlyDepreciation: {
+            /**
+             * Period End
+             * Format: date
+             */
+            period_end: string;
+            /** Amount */
+            amount: string;
+            /** Business Amount */
+            business_amount: string;
+            /** Private Use Reduction */
+            private_use_reduction: string;
+            /** Opening Book Value */
+            opening_book_value: string;
+            /** Cumulative Amount */
+            cumulative_amount: string;
+            /** Closing Book Value */
+            closing_book_value: string;
+        };
+        /**
+         * FixedAssetPeriodDelta
+         * @description M10-range legacy baseline versus completed-month asset contribution.
+         */
+        FixedAssetPeriodDelta: {
+            /**
+             * Period End
+             * Format: date
+             */
+            period_end: string;
+            /** Legacy Attribution Date */
+            legacy_attribution_date: string | null;
+            /** Fixed Asset Attribution Date */
+            fixed_asset_attribution_date: string | null;
+            /** Legacy Expense Amount */
+            legacy_expense_amount: string;
+            /** Planned Legacy Expense Amount */
+            planned_legacy_expense_amount: string;
+            /** Fixed Asset Depreciation */
+            fixed_asset_depreciation: string;
+            /** Planned Fixed Asset Depreciation */
+            planned_fixed_asset_depreciation: string;
+            /** Difference */
+            difference: string;
+            /** Planned Difference */
+            planned_difference: string;
+            /** Completed Period */
+            completed_period: boolean;
+        };
+        /**
+         * FixedAssetPreviewRequest
+         * @description Proposed fixed-asset terms; the preview is strictly read-only.
+         */
+        FixedAssetPreviewRequest: {
+            /** Asset Name */
+            asset_name: string;
+            /** In Service Date */
+            in_service_date?: string | null;
+            /** Useful Life Years */
+            useful_life_years: number;
+            /** Residual Value */
+            residual_value: number | string;
+            /** Business Percentage */
+            business_percentage: number | string;
+            /**
+             * Use Type
+             * @enum {string}
+             */
+            use_type: "FULL_BUSINESS" | "MIXED_USE";
+        };
+        /** FixedAssetPreviewResult */
+        FixedAssetPreviewResult: {
+            /**
+             * Expense Id
+             * Format: uuid
+             */
+            expense_id: string;
+            /**
+             * Expense Date
+             * Format: date
+             */
+            expense_date: string;
+            /** Acquisition Cost */
+            acquisition_cost: string;
+            /** Residual Value */
+            residual_value: string;
+            /** Depreciable Amount */
+            depreciable_amount: string;
+            /** Annual Baseline */
+            annual_baseline: string;
+            /** Legacy Annual Cost */
+            legacy_annual_cost: string;
+            /** Pending In Service */
+            pending_in_service: boolean;
+            /** Prior Years Affected */
+            prior_years_affected: number[];
+            /** Conversion Blocked */
+            conversion_blocked: boolean;
+            /** Conversion Block Reason */
+            conversion_block_reason: string | null;
+            /**
+             * Reporting As Of
+             * Format: date
+             */
+            reporting_as_of: string;
+            /**
+             * Preview Period Start
+             * Format: date
+             */
+            preview_period_start: string;
+            /**
+             * Preview Period End
+             * Format: date
+             */
+            preview_period_end: string;
+            /** Legacy Preview Truncated */
+            legacy_preview_truncated: boolean;
+            /** Period Deltas */
+            period_deltas: components["schemas"]["FixedAssetPeriodDelta"][];
+            /** Monthly Schedule */
+            monthly_schedule: components["schemas"]["FixedAssetMonthlyDepreciation"][];
+            /** Yearly Deltas */
+            yearly_deltas: components["schemas"]["FixedAssetYearDelta"][];
+        };
+        /** FixedAssetYearDelta */
+        FixedAssetYearDelta: {
+            /** Year */
+            year: number;
+            /** Legacy Expense Amount */
+            legacy_expense_amount: string;
+            /** Planned Legacy Expense Amount */
+            planned_legacy_expense_amount: string;
+            /** Asset Depreciation */
+            asset_depreciation: string;
+            /** Business Use Reduction */
+            business_use_reduction: string;
+            /** Fixed Asset Depreciation */
+            fixed_asset_depreciation: string;
+            /** Realized Asset Depreciation */
+            realized_asset_depreciation: string;
+            /** Planned Fixed Asset Depreciation */
+            planned_fixed_asset_depreciation: string;
+            /** Planned Difference */
+            planned_difference: string;
+            /** Planned Business Use Reduction */
+            planned_business_use_reduction: string;
+            /** Difference */
+            difference: string;
+            /** Opening Book Value */
+            opening_book_value: string;
+            /** Planned Opening Book Value */
+            planned_opening_book_value: string;
+            /** Cumulative Depreciation */
+            cumulative_depreciation: string;
+            /** Closing Book Value */
+            closing_book_value: string;
+            /** Planned Closing Book Value */
+            planned_closing_book_value: string;
         };
         /**
          * FollowupContextRead
@@ -18710,6 +18889,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExpenseCostPreviewResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_expense_fixed_asset_endpoint_api_v1_fixed_assets_expenses__expense_id__conversion_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FixedAssetPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetPreviewResult"];
                 };
             };
             /** @description Validation Error */

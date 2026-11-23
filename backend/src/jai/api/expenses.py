@@ -41,6 +41,8 @@ from jai.schemas.expense import (
     ExpenseInput,
     ExpenseListResponse,
     ExpenseRead,
+    FixedAssetPreviewRequest,
+    FixedAssetPreviewResult,
 )
 from jai.services.expense import (
     ExpenseConflict,
@@ -53,6 +55,7 @@ from jai.services.expense import (
     list_expenses,
     update_expense,
 )
+from jai.services.fixed_asset_preview import preview_expense_fixed_asset
 from jai.services.mileage import MileageExpenseUpdateError
 from jai.services.storage import get_storage
 
@@ -180,6 +183,29 @@ async def get_expense_cost_endpoint(
         return await get_expense_cost_preview(session, expense_id, company_id)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post(
+    "/fixed-assets/expenses/{expense_id}/conversion-preview",
+    response_model=FixedAssetPreviewResult,
+)
+async def preview_expense_fixed_asset_endpoint(
+    expense_id: uuid.UUID,
+    body: FixedAssetPreviewRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> FixedAssetPreviewResult:
+    """Preview legacy expense amortization against a proposed asset schedule."""
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    try:
+        return await preview_expense_fixed_asset(session, expense_id, company_id, body)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
 
 
 # ---------------------------------------------------------------------------

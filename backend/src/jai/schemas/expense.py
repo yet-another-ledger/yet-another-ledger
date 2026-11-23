@@ -19,6 +19,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator  # noqa: F401
 
@@ -271,6 +272,89 @@ class ExpenseCostPreviewResult(BaseModel):
     cost_basis_amount: Decimal
     annual_cost: Decimal
     included_in_pl: bool
+
+
+class FixedAssetPreviewRequest(BaseModel):
+    """Proposed fixed-asset terms; the preview is strictly read-only."""
+
+    asset_name: str = Field(min_length=1, max_length=200)
+    in_service_date: date | None = None
+    useful_life_years: int = Field(ge=1, le=100)
+    residual_value: Decimal = Field(ge=0, max_digits=18, decimal_places=2)
+    business_percentage: Decimal = Field(ge=0, le=100)
+    use_type: Literal["FULL_BUSINESS", "MIXED_USE"]
+
+    @field_validator("residual_value")
+    @classmethod
+    def _residual_value_minor_unit(cls, value: Decimal) -> Decimal:
+        if value != value.quantize(Decimal("0.01")):
+            raise ValueError("Residual value must be entered to the nearest cent.")
+        return value
+
+
+class FixedAssetMonthlyDepreciation(BaseModel):
+    period_end: date
+    amount: Decimal
+    business_amount: Decimal
+    private_use_reduction: Decimal
+    opening_book_value: Decimal
+    cumulative_amount: Decimal
+    closing_book_value: Decimal
+
+
+class FixedAssetYearDelta(BaseModel):
+    year: int
+    legacy_expense_amount: Decimal
+    planned_legacy_expense_amount: Decimal
+    asset_depreciation: Decimal
+    business_use_reduction: Decimal
+    fixed_asset_depreciation: Decimal
+    realized_asset_depreciation: Decimal
+    planned_fixed_asset_depreciation: Decimal
+    planned_difference: Decimal
+    planned_business_use_reduction: Decimal
+    difference: Decimal
+    opening_book_value: Decimal
+    planned_opening_book_value: Decimal
+    cumulative_depreciation: Decimal
+    closing_book_value: Decimal
+    planned_closing_book_value: Decimal
+
+
+class FixedAssetPeriodDelta(BaseModel):
+    """M10-range legacy baseline versus completed-month asset contribution."""
+
+    period_end: date
+    legacy_attribution_date: date | None
+    fixed_asset_attribution_date: date | None
+    legacy_expense_amount: Decimal
+    planned_legacy_expense_amount: Decimal
+    fixed_asset_depreciation: Decimal
+    planned_fixed_asset_depreciation: Decimal
+    difference: Decimal
+    planned_difference: Decimal
+    completed_period: bool
+
+
+class FixedAssetPreviewResult(BaseModel):
+    expense_id: uuid.UUID
+    expense_date: date
+    acquisition_cost: Decimal
+    residual_value: Decimal
+    depreciable_amount: Decimal
+    annual_baseline: Decimal
+    legacy_annual_cost: Decimal
+    pending_in_service: bool
+    prior_years_affected: list[int]
+    conversion_blocked: bool
+    conversion_block_reason: str | None
+    reporting_as_of: date
+    preview_period_start: date
+    preview_period_end: date
+    legacy_preview_truncated: bool
+    period_deltas: list[FixedAssetPeriodDelta]
+    monthly_schedule: list[FixedAssetMonthlyDepreciation]
+    yearly_deltas: list[FixedAssetYearDelta]
 
 
 # ---------------------------------------------------------------------------

@@ -67,6 +67,59 @@ beforeEach(() => {
 })
 
 describe('Expense attachment treatment suggestions', () => {
+  it('keeps fixed asset preview keyboard submission separate from expense saving', async () => {
+    mocks.post.mockResolvedValue({
+      acquisition_cost: '10.00', annual_baseline: '2.00', preview_period_start: '2026-01-01',
+      preview_period_end: '2030-12-31', legacy_preview_truncated: false,
+      pending_in_service: false, conversion_blocked: false, conversion_block_reason: null,
+      period_deltas: [], yearly_deltas: [], monthly_schedule: [],
+    })
+    const { wrapper } = await setup()
+    const [expenseForm] = wrapper.findAll('form')
+    const previewForm = wrapper.find('.asset-preview-form')
+    const assetNameInput = previewForm.find('input')
+    const saveButton = wrapper.findAll('button').find(button => button.text() === en.expenses.save)!
+    const previewButton = wrapper.findAll('button').find(button => button.text() === en.fixedAssets.previewButton)!
+
+    expect(assetNameInput.element.closest('form')).toBe(previewForm.element)
+    expect(previewButton.element.closest('form')).toBe(previewForm.element)
+    expect(saveButton.element.closest('form')).toBe(expenseForm.element)
+
+    const setupState = (wrapper.vm as unknown as { $: { setupState: Record<string, unknown> } }).$.setupState
+    setupState.supplierName = 'Unsaved supplier change'
+    await previewForm.trigger('submit')
+    await flushPromises()
+    expect(mocks.post).toHaveBeenCalledWith('/api/v1/fixed-assets/expenses/one/conversion-preview', expect.any(Object))
+    expect(mocks.updateExpense).not.toHaveBeenCalled()
+
+    await expenseForm.trigger('submit')
+    await flushPromises()
+    expect(mocks.updateExpense).toHaveBeenCalledWith('one', expect.objectContaining({ supplier_name: 'Unsaved supplier change' }))
+    wrapper.unmount()
+  })
+
+  it('resets fixed asset draft terms when the detail route changes purchase id', async () => {
+    const { router, wrapper } = await setup('/expenses/one/edit')
+    const setupState = (wrapper.vm as unknown as { $: { setupState: Record<string, unknown> } }).$.setupState
+    setupState.assetInServiceDate = '2020-03-15'
+    setupState.assetUsefulLife = 10
+    setupState.assetResidualValue = 100
+    await flushPromises()
+
+    await router.push('/expenses/two/edit')
+    await flushPromises()
+    expect(setupState.assetInServiceDate).toBe('')
+    expect(setupState.assetUsefulLife).toBe(5)
+    expect(setupState.assetResidualValue).toBe(0)
+
+    await wrapper.findAll('button').find(button => button.text() === en.fixedAssets.previewButton)!.trigger('click')
+    await flushPromises()
+    expect(mocks.post).toHaveBeenCalledWith('/api/v1/fixed-assets/expenses/two/conversion-preview', expect.objectContaining({
+      in_service_date: null, useful_life_years: 5, residual_value: 0,
+    }))
+    wrapper.unmount()
+  })
+
   it.each(['before refresh', 'after refresh'])('withdraws a missing extraction source when a failed delete refresh completes %s the extraction', async order => {
     const attachmentB = { ...attachment, id: 'attachment-2', filename: 'other-document.pdf' }
     mocks.listAttachments.mockResolvedValueOnce([attachment, attachmentB]).mockResolvedValueOnce([attachmentB])
@@ -994,5 +1047,68 @@ describe('Expense attachment treatment suggestions', () => {
     expect(wrapper.findAll('.attach-item')).toHaveLength(1)
     expect(wrapper.text()).toContain('receipt-two.pdf')
     expect(wrapper.text()).not.toContain('stale.pdf')
+  })
+})
+
+describe('Fixed asset conversion preview freshness', () => {
+  const previewResult = {
+    expense_id: 'one', expense_date: '2026-01-02', acquisition_cost: '1000.00',
+    residual_value: '0.00', depreciable_amount: '1000.00', annual_baseline: '200.00',
+    legacy_annual_cost: '10.00', pending_in_service: false, prior_years_affected: [],
+    conversion_blocked: false, conversion_block_reason: null, reporting_as_of: '2026-11-23',
+    period_deltas: [], monthly_schedule: [], yearly_deltas: [],
+  }
+
+  it('clears an old preview when asset inputs change and after the purchase is saved', async () => {
+    mocks.post.mockImplementation(async (path: string) => path.includes('fixed-assets') ? previewResult : {})
+    mocks.updateExpense.mockImplementation(async (id: string, body: unknown) => expense(id, body as Record<string, unknown>))
+    const { wrapper } = await setup()
+    const previewButton = wrapper.findAll('button').find(button => button.text() === en.fixedAssets.previewButton)!
+    await previewButton.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('1000.00')
+
+    const residualInput = wrapper.find(`[data-label="${en.fixedAssets.residualValue}"] input`)
+    await residualInput.setValue('50')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('1000.00')
+
+    await previewButton.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('1000.00')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('1000.00')
+    wrapper.unmount()
+  })
+
+  it('ignores an in-flight response after a preview input changes', async () => {
+    const pending = deferred<typeof previewResult>()
+    mocks.post.mockImplementation((path: string) => path.includes('fixed-assets') ? pending.promise : Promise.resolve({}))
+    const { wrapper } = await setup()
+    const previewButton = wrapper.findAll('button').find(button => button.text() === en.fixedAssets.previewButton)!
+    await previewButton.trigger('click')
+    await wrapper.find(`[data-label="${en.fixedAssets.residualValue}"] input`).setValue('25')
+    pending.resolve(previewResult)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('1000.00')
+    wrapper.unmount()
+  })
+
+  it('submits 100% when switching a saved mixed-use purchase to full business use', async () => {
+    mocks.getExpense.mockResolvedValueOnce(expense('mixed', { business_percentage: '60' }))
+    const { wrapper } = await setup('/expenses/mixed/edit')
+    const useTypeField = wrapper.find(`[data-label="${en.fixedAssets.useType}"] select`)
+    expect((wrapper.vm as unknown as { $: { setupState: Record<string, unknown> } }).$.setupState.assetUseType)
+      .toBe('MIXED_USE')
+    await useTypeField.setValue('FULL_BUSINESS')
+    await flushPromises()
+    expect(wrapper.findAll(`[data-label="${en.expenses.businessPercentage}"]`)).toHaveLength(1)
+
+    await wrapper.findAll('button').find(button => button.text() === en.fixedAssets.previewButton)!.trigger('click')
+    await flushPromises()
+    expect(mocks.post).toHaveBeenCalledWith('/api/v1/fixed-assets/expenses/mixed/conversion-preview',
+      expect.objectContaining({ use_type: 'FULL_BUSINESS', business_percentage: 100 }))
+    wrapper.unmount()
   })
 })

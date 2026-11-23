@@ -38,6 +38,7 @@ import type { components } from '../../api/schema'
 type PaidBy = components['schemas']['PaidBy']
 type PlCostBasis = components['schemas']['PlCostBasis']
 type ExpenseCalculateResult = components['schemas']['ExpenseCalculateResult']
+type FixedAssetPreviewResult = components['schemas']['FixedAssetPreviewResult']
 
 const route = useRoute()
 const router = useRouter()
@@ -46,6 +47,18 @@ const store = useExpensesStore()
 
 const expenseId = computed(() => route.params.id as string | undefined)
 const isEdit = computed(() => !!expenseId.value)
+const assetName = ref('')
+const assetInServiceDate = ref('')
+const assetUsefulLife = ref(5)
+const assetResidualValue = ref<number>(0)
+const assetUseType = ref<'FULL_BUSINESS' | 'MIXED_USE'>('FULL_BUSINESS')
+const assetBusinessPercentage = ref(100)
+const assetReportBusinessPercentage = computed(() =>
+  assetUseType.value === 'FULL_BUSINESS' ? 100 : assetBusinessPercentage.value,
+)
+const assetPreview = ref<FixedAssetPreviewResult | null>(null)
+const assetPreviewLoading = ref(false)
+const assetPreviewError = ref<string | null>(null)
 
 // ---- Form state (raw inputs only) ----
 const expenseDate = ref(localDateStr(new Date()))
@@ -110,6 +123,20 @@ let aiRequestVersion = 0
 let vatPreviewVersion = 0
 let pageVersion = 0
 let dictionariesPromise: Promise<void> | null = null
+let assetPreviewVersion = 0
+
+function invalidateAssetPreview() {
+  assetPreviewVersion += 1
+  assetPreview.value = null
+  assetPreviewError.value = null
+  assetPreviewLoading.value = false
+}
+
+watch(
+  [assetName, assetInServiceDate, assetUsefulLife, assetResidualValue, assetUseType, assetBusinessPercentage,
+    expenseDate, netAmount, vatAmount, deductible, businessPercentage, depreciationYears, includeInPl, plCostBasis],
+  invalidateAssetPreview,
+)
 
 // ---- Page state ----
 const loading = ref(false)
@@ -138,10 +165,14 @@ const lastAiSuccessfulAttachmentId = ref<string | null>(null)
 // ---- Load data ----
 function fillFromExpense(expense: ExpenseRead, preserveExtractionVatMissing = false) {
   const preserveManualVat = receiptVatSource.value === 'human' || vatManuallyEdited.value
+  invalidateAssetPreview()
   resetCostPreview()
   expenseDate.value = expense.expense_date
   categoryId.value = expense.category_id ?? null
   supplierName.value = expense.supplier_name ?? ''
+  assetName.value = expense.supplier_name || expense.category_name || ''
+  assetBusinessPercentage.value = Number(expense.business_percentage)
+  assetUseType.value = Number(expense.business_percentage) === 100 ? 'FULL_BUSINESS' : 'MIXED_USE'
   vatTreatmentId.value = expense.vat_treatment_id ?? null
   vatRateId.value = expense.vat_rate_id ?? null
   treatmentOrigin.value = 'saved'
@@ -170,6 +201,34 @@ function fillFromExpense(expense: ExpenseRead, preserveExtractionVatMissing = fa
   grossAmountDisplay.value = expense.gross_amount
   isDraft.value = expense.is_draft
   recurringExpenseId.value = expense.recurring_expense_id ?? null
+}
+
+async function previewFixedAsset() {
+  if (!expenseId.value) return
+  const requestVersion = ++assetPreviewVersion
+  assetPreviewLoading.value = true
+  assetPreviewError.value = null
+  try {
+    const result = await post<FixedAssetPreviewResult>(
+      `/api/v1/fixed-assets/expenses/${expenseId.value}/conversion-preview`,
+      {
+        asset_name: assetName.value,
+        in_service_date: assetInServiceDate.value || null,
+        useful_life_years: assetUsefulLife.value,
+        residual_value: assetResidualValue.value,
+        business_percentage: assetReportBusinessPercentage.value,
+        use_type: assetUseType.value,
+      },
+    )
+    if (requestVersion === assetPreviewVersion) assetPreview.value = result
+  } catch (error: unknown) {
+    if (requestVersion === assetPreviewVersion) {
+      assetPreviewError.value = error instanceof ApiError ? error.message : String(error)
+      assetPreview.value = null
+    }
+  } finally {
+    if (requestVersion === assetPreviewVersion) assetPreviewLoading.value = false
+  }
 }
 
 type VatEvidenceTransition = {
@@ -269,10 +328,13 @@ onMounted(async () => {
 })
 watch(expenseId, (targetId, previousId) => {
   if (targetId === previousId) return
+  invalidateAssetPreview()
   const version = ++pageVersion
   ++aiRequestVersion; clearTreatmentSuggestion(); invalidateVatPreview()
   pageError.value = null; saveSuccess.value = false; saving.value = false; attachLoading.value = false; attachUploading.value = false; attachments.value = []; lastAiAttachmentId.value = null; lastAiExtractedAttachmentId.value = null; lastAiSuccessfulAttachmentId.value = null
   expenseDate.value = localDateStr(new Date()); categoryId.value = null; supplierName.value = ''; vatTreatmentId.value = null; vatRateId.value = null
+  assetName.value = ''; assetInServiceDate.value = ''; assetUsefulLife.value = 5; assetResidualValue.value = 0
+  assetBusinessPercentage.value = 100; assetUseType.value = 'FULL_BUSINESS'
   netAmount.value = null; vatAmount.value = null; deductible.value = null; note.value = ''; reference.value = ''; grossAmountDisplay.value = null
   receiptVatBaseline.value = null; ordinaryVatPreview.value = null
   vatManuallyEdited.value = false
@@ -939,6 +1001,70 @@ async function handleAiExtract(attachmentId: string) {
                     <n-button v-else type="primary" attr-type="submit" :disabled="deletingAttachmentHasAiValues">{{ t('expenses.save') }}</n-button>
                     <n-button @click="router.push({ path: '/expenses', query: { tab: 'purchase' } })">{{ t('expenses.cancel') }}</n-button>
                   </n-space>
+                </n-form>
+                <n-form v-if="isEdit && !isDraft" class="asset-preview-form" @submit.prevent="previewFixedAsset">
+                  <n-card v-if="isEdit && !isDraft" size="small" :title="t('fixedAssets.previewTitle')">
+                    <n-text depth="3">{{ t('fixedAssets.previewReadOnly') }}</n-text>
+                    <n-form-item :label="t('fixedAssets.assetName')">
+                      <n-input v-model:value="assetName" />
+                    </n-form-item>
+                    <n-form-item :label="t('fixedAssets.inServiceDate')">
+                      <n-input v-model:value="assetInServiceDate" type="text" placeholder="YYYY-MM-DD" />
+                    </n-form-item>
+                    <n-form-item :label="t('fixedAssets.usefulLifeYears')">
+                      <n-input-number v-model:value="assetUsefulLife" :min="1" :max="100" :precision="0" />
+                    </n-form-item>
+                    <n-form-item :label="t('fixedAssets.residualValue')">
+                      <n-input-number v-model:value="assetResidualValue" :min="0" :precision="2" />
+                    </n-form-item>
+                    <n-form-item :label="t('fixedAssets.useType')">
+                      <n-select v-model:value="assetUseType" :options="[
+                        { label: t('fixedAssets.fullBusiness'), value: 'FULL_BUSINESS' },
+                        { label: t('fixedAssets.mixedUse'), value: 'MIXED_USE' },
+                      ]" />
+                    </n-form-item>
+                    <n-form-item v-if="assetUseType === 'MIXED_USE'" :label="t('expenses.businessPercentage')">
+                      <n-input-number v-model:value="assetBusinessPercentage" :min="0" :max="100" :precision="1" />
+                    </n-form-item>
+                    <n-space vertical>
+                      <n-button secondary attr-type="submit" :loading="assetPreviewLoading" @click.prevent="previewFixedAsset">
+                        {{ t('fixedAssets.previewButton') }}
+                      </n-button>
+                      <n-alert v-if="assetPreviewError" type="error" :show-icon="false">{{ assetPreviewError }}</n-alert>
+                      <template v-if="assetPreview">
+                        <n-text>{{ t('fixedAssets.acquisitionCost') }}: {{ assetPreview.acquisition_cost }}</n-text>
+                        <n-text>{{ t('fixedAssets.annualBaseline') }}: {{ assetPreview.annual_baseline }}</n-text>
+                        <n-text>{{ t('fixedAssets.coverageRange') }}: {{ assetPreview.preview_period_start }} – {{ assetPreview.preview_period_end }}</n-text>
+                        <n-alert v-if="assetPreview.legacy_preview_truncated" type="warning" :show-icon="false">
+                          {{ t('fixedAssets.legacyTruncated') }}
+                        </n-alert>
+                        <n-text v-if="assetPreview.pending_in_service">{{ t('fixedAssets.pendingInService') }}</n-text>
+                        <n-alert v-if="assetPreview.conversion_blocked" type="warning" :show-icon="false">
+                          {{ assetPreview.conversion_block_reason }}
+                        </n-alert>
+                        <n-text>{{ t('fixedAssets.costCue') }}</n-text>
+                        <n-text v-for="period in assetPreview.period_deltas" :key="period.period_end">
+                          {{ t('fixedAssets.period') }} {{ period.period_end }} ·
+                          {{ t('fixedAssets.reportLegacyBaseline') }} ({{ period.legacy_attribution_date ?? '—' }}): {{ period.legacy_expense_amount }} ·
+                          {{ t('fixedAssets.completedAssetDepreciation') }} ({{ period.fixed_asset_attribution_date ?? '—' }}): {{ period.fixed_asset_depreciation }} ·
+                          {{ t('fixedAssets.reportPeriodDelta') }} {{ period.difference }} ·
+                          {{ t('fixedAssets.futurePeriodPlan') }} ({{ t('fixedAssets.legacyTotal') }} / {{ t('fixedAssets.assetBusiness') }}) {{ period.planned_legacy_expense_amount }} / {{ period.planned_fixed_asset_depreciation }} ·
+                          {{ t('fixedAssets.plannedDifference') }} {{ period.planned_difference }}
+                        </n-text>
+                        <n-text v-for="delta in assetPreview.yearly_deltas" :key="delta.year">
+                          {{ delta.year }} · {{ t('fixedAssets.legacy') }} {{ delta.legacy_expense_amount }} ·
+                          {{ t('fixedAssets.realizedAsset') }} ({{ t('fixedAssets.assetTotal') }} / {{ t('fixedAssets.assetBusiness') }}) {{ delta.realized_asset_depreciation }} / {{ delta.fixed_asset_depreciation }} ·
+                          {{ t('fixedAssets.reportPeriodDelta') }} {{ delta.difference }} ·
+                          {{ t('fixedAssets.fullYearPlan') }} ({{ t('fixedAssets.legacyTotal') }} / {{ t('fixedAssets.assetTotal') }} / {{ t('fixedAssets.assetBusiness') }}) {{ delta.planned_legacy_expense_amount }} / {{ delta.asset_depreciation }} / {{ delta.planned_fixed_asset_depreciation }} ·
+                          {{ t('fixedAssets.plannedDifference') }} {{ delta.planned_difference }} ·
+                          {{ t('fixedAssets.plannedBusinessReduction') }} {{ delta.planned_business_use_reduction }}
+                          · {{ t('fixedAssets.bookValue') }} {{ delta.opening_book_value }} → {{ delta.closing_book_value }}
+                          · {{ t('fixedAssets.plannedBookValue') }} {{ delta.planned_opening_book_value }} → {{ delta.planned_closing_book_value }}
+                        </n-text>
+                      </template>
+                    </n-space>
+                  </n-card>
+
                 </n-form>
               </div>
 

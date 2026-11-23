@@ -34,8 +34,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import jai.services.fixed_asset_preview as fixed_asset_preview_service
 from jai.models._enums import ExpenseKind, PlCostBasis, VatTreatmentEffect
+from jai.models.expense import Expense
+from jai.schemas.expense import FixedAssetPreviewRequest
 from jai.services.expense import compute_annual_pl_cost, compute_pl_cost_basis
+from jai.services.fixed_asset_preview import build_fixed_asset_preview
 from jai.services.reporting.pl import (
     _anniversary_date,
     _annual_slice,
@@ -324,6 +328,61 @@ class TestComputeProfitLoss:
         assert feb.revenue_net == Decimal("500.00")
         assert feb.expense_actual == Decimal("0")
         assert feb.profit == Decimal("500.00")
+
+    @pytest.mark.asyncio
+    async def test_fixed_asset_preview_report_delta_matches_future_m10_report_range(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """December preview baseline matches M10, while future asset month stays planned."""
+
+        class FrozenDate(date):
+            @classmethod
+            def today(cls) -> date:
+                return cls(2026, 11, 23)
+
+        monkeypatch.setattr(fixed_asset_preview_service, "date", FrozenDate)
+        cid = uuid.uuid4()
+        purchase = Expense(
+            id=uuid.uuid4(),
+            company_id=cid,
+            kind=ExpenseKind.PURCHASE,
+            is_draft=False,
+            expense_date=date(2026, 12, 15),
+            base_net_amount=Decimal("1200.00"),
+            base_vat_amount=Decimal("0.00"),
+            base_gross_amount=Decimal("1200.00"),
+            business_percentage=Decimal("100"),
+            depreciation_years=5,
+            pl_cost_basis=PlCostBasis.NET,
+            vat_treatment_effect=VatTreatmentEffect.APPLY_RATE,
+            vat_treatment_code="NL_DOMESTIC_PURCH",
+            deductible=True,
+            include_in_pl=True,
+        )
+        session = _make_session([], [purchase])
+        report = await compute_profit_loss(
+            session, cid, date(2026, 12, 1), date(2026, 12, 31), "month"
+        )
+        preview = build_fixed_asset_preview(
+            purchase,
+            FixedAssetPreviewRequest(
+                asset_name="Tester",
+                in_service_date=date(2026, 12, 15),
+                useful_life_years=5,
+                residual_value=Decimal("0.00"),
+                business_percentage=Decimal("100"),
+                use_type="FULL_BUSINESS",
+            ),
+        )
+        december = next(
+            row for row in preview.period_deltas if row.period_end == date(2026, 12, 31)
+        )
+
+        assert report.expense_actual == Decimal("240.00")
+        assert december.legacy_expense_amount == report.expense_actual
+        assert december.fixed_asset_depreciation == Decimal("0.00")
+        assert december.difference == Decimal("-240.00")
+        assert december.planned_fixed_asset_depreciation > Decimal("0.00")
 
     @pytest.mark.asyncio
     async def test_happy_quarter_granularity(self) -> None:
