@@ -4,6 +4,8 @@
 
 > **状态**：🟢 已于 2026-09-05 完成、验收并冻结。4 个编排实现步骤、盲审/返工循环和自动化收尾门禁均已收敛。作者通过 Standard Invoice Happy Path，并以自动化证据验收未执行的负向及 Advance/Final/Credit Note 人工路径。本文取代了原来未拆步骤的“收尾 / GA 前体检”占位。被移出的运维加固设想继续在[路线图 §4.aa](../roadmap_zh.md) 的已完成里程碑路线之外跟踪。
 
+> **计划后续** [M20](M20_zh.md) 计划让发票 PDF 的 AI 核验复用 Responses 或 Chat Completions 协议选择。
+
 ## 执行模式
 
 - 按 `AGENTS_zh.md`，默认仍为手动模式。只有作者明确要求 orchestrator mode 或 direct generation 时，才运行自动 implementer/reviewer/fixer 循环。

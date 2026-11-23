@@ -126,7 +126,7 @@ Backend lives in `backend/` (`uv run ...`), frontend in `frontend/` (`npm run ..
 
 ## Roadmap
 
-M0–M18 are accepted within their recorded scopes. **M15 was accepted on 2026-11-09 and is included in v0.12.0**, following historical real receipt intake, automated Codex MCP acceptance and isolated real Hermes CLI validation. Author-skipped and deferred checks remain recorded in the [M15 acceptance conclusion](docs/plan/milestones/M15.md) and [roadmap](docs/plan/roadmap.md).
+M0–M19 are accepted within their recorded scopes. **M15 was accepted on 2026-11-09 and is included in v0.12.0**, following historical real receipt intake, automated Codex MCP acceptance and isolated real Hermes CLI validation. Author-skipped and deferred checks remain recorded in the [M15 acceptance conclusion](docs/plan/milestones/M15.md) and [roadmap](docs/plan/roadmap.md).
 
 The author accepted [M16](docs/plan/milestones/M16.md) on 2026-11-01 on its recorded representative walkthrough scope. External sales bookkeeping, VAT/P&L separation, annual battery private-use adjustment and the incorporated SI3 mileage/profit breakdown are delivered; skipped/unretested paths and known carryovers remain explicitly recorded.
 
@@ -138,11 +138,11 @@ SI1 (document ordering, Quote duplication and server-side Sent copies) was accep
 
 🟢 **M19 accepted for v0.15.0.** The author accepted the recorded Happy Flow on 2026-11-15. The receipt inbox and Expense attachment extraction offer reviewable VAT-treatment suggestions for Dutch domestic, EU B2B reverse-charge and EU foreign-VAT purchases. The walkthrough records live-provider and reporting checks and the paths covered by automated regression. See the [M19 acceptance conclusion](docs/plan/milestones/M19.md#acceptance-conclusion).
 
+🟡 **[M20 Fixed Asset Register, AI Residual Value Estimates, and AI API Protocol Selection](docs/plan/milestones/M20.md)** is the active milestone. The design is approved and includes seven implementation task cards. It covers registration at purchase, depreciation with residual value, annual mixed-use confirmation for storage batteries, and a testable choice of Responses or Chat Completions.
+
 ## Documentation
 
 Docs are English-first with a synchronized Chinese mirror (`*_zh.md`). Start at [`docs/plan/roadmap.md`](docs/plan/roadmap.md); the Dutch VAT/BTW filing basis is in [`docs/insight/btw-aangifte-2026-guide.md`](docs/insight/btw-aangifte-2026-guide.md).
-
-The M19 implementation design and three atomic task cards are in [M19 Purchase Receipt AI Recognition and VAT Treatment Prefill](docs/plan/milestones/M19.md).
 
 ## License
 

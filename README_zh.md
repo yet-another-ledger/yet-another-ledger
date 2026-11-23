@@ -125,7 +125,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 路线图
 
-M0–M18 均已按各自记录范围验收。**M15 于 2026-11-09 验收并纳入 v0.12.0**，证据包括历史真实收据接收、自动化 Codex MCP 验收与隔离真实 Hermes CLI 验证。作者跳过及暂缓的检查继续保留在 [M15 验收结论](docs/plan/milestones/M15_zh.md)和[路线图](docs/plan/roadmap_zh.md)。
+M0–M19 均已按各自记录范围验收。**M15 于 2026-11-09 验收并纳入 v0.12.0**，证据包括历史真实收据接收、自动化 Codex MCP 验收与隔离真实 Hermes CLI 验证。作者跳过及暂缓的检查继续保留在 [M15 验收结论](docs/plan/milestones/M15_zh.md)和[路线图](docs/plan/roadmap_zh.md)。
 
 作者已于 2026-11-01 按记录的代表性走查范围验收 [M16](docs/plan/milestones/M16_zh.md)，外部销售凭证记账、VAT／P&L 分离、储能年度私用调整及并入的 SI3 里程利润拆分已交付；跳过／未重测路径及已知遗留仍明确记录。
 
@@ -137,11 +137,11 @@ SI1（单据排序、Quote 复制和服务器侧 Sent 副本）已于2026-10-25�
 
 🟢 **M19 正常流程已验收（v0.15.0）。** 作者于 2026-11-15 确认记录范围内的正常流程（Happy Flow）通过。收件箱和 Expense 附件识别为荷兰本地、EU B2B 反向征税及 EU 国外 VAT 采购提供可复核的 VAT 类型建议。走查记录包含真实提供商与报表核对，以及采用自动化回归覆盖的项目。详见 [M19 验收结论](docs/plan/milestones/M19_zh.md#验收结论)。
 
+🟡 **[M20 固定资产台账、AI 残值估计与 AI API 协议切换](docs/plan/milestones/M20_zh.md)** 是当前里程碑。设计已确认，包含七张实施任务卡。范围包括采购时直接登记资产、带残值的折旧、储能混合用途年度确认，以及可测试、可切换的 Responses 和 Chat Completions。
+
 ## 文档
 
 文档英文优先，并配同步的中文镜像（`*_zh.md`）。从 [`docs/plan/roadmap_zh.md`](docs/plan/roadmap_zh.md) 入手；荷兰 VAT/BTW 申报口径见 [`docs/insight/btw-aangifte-2026-guide_zh.md`](docs/insight/btw-aangifte-2026-guide_zh.md)。
-
-M19 的实施设计和三张原子任务卡见 [M19 采购票据 AI 识别与 VAT 类型预填](docs/plan/milestones/M19_zh.md)。
 
 ## 许可证
 

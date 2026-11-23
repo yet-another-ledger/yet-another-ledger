@@ -2,9 +2,9 @@
 
 > 🌐 **English** · [中文](roadmap_zh.md)
 
-> **Current scheduling (2026-11-15)** M0–M17 are accepted within their recorded scopes. M15 shipped in v0.12.0, with historical checks and skips/deferrals retained in the [M15 acceptance conclusion](milestones/M15.md). 🟢 [SI4 expense MCP reads](improvements/SI4.md) completed independent review and author-delegated real TCP subagent acceptance for v0.13.0. 🟢 [M18 Agent mileage intake](milestones/M18.md) is accepted within the author-delegated backend verification scope for v0.14.0; browser, live maps, Hermes natural-language dialogue and Telegram checks remain unperformed. 🟢 [M19 Purchase Receipt AI Recognition and VAT Treatment Prefill](milestones/M19.md) was accepted within the recorded Happy Flow on 2026-11-15 for v0.15.0.
+> **Current scheduling (2026-11-23)** M0–M17 are accepted within their recorded scopes. M15 shipped in v0.12.0, with historical checks and skips/deferrals retained in the [M15 acceptance conclusion](milestones/M15.md). 🟢 [SI4 expense MCP reads](improvements/SI4.md) completed independent review and author-delegated real TCP subagent acceptance for v0.13.0. 🟢 [M18 Agent mileage intake](milestones/M18.md) is accepted within the author-delegated backend verification scope for v0.14.0; browser, live maps, Hermes natural-language dialogue and Telegram checks remain unperformed. 🟢 [M19 Purchase Receipt AI Recognition and VAT Treatment Prefill](milestones/M19.md) was accepted within the recorded Happy Flow on 2026-11-15 for v0.15.0. 🟡 [M20 Fixed Asset Register, AI Residual Value Estimates, and AI API Protocol Selection](milestones/M20.md) is the active milestone. The design is approved and progress is tracked below.
 
-> **What this is** A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the receipt-inbox, agent-accounting, external-bookkeeping/VAT–P&L, Quote PDF appendix, Agent mileage intake and purchase-receipt AI classification follow-ons **M14–M19**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
+> **What this is** A **buildable overview** of the agreed v1 scope (P0–P7) in **M0–M13**, plus the receipt-inbox, agent-accounting, external-bookkeeping/VAT–P&L, Quote PDF appendix, Agent mileage intake, purchase-receipt AI classification, fixed assets, and AI protocol selection follow-ons **M14–M20**. Milestones follow the principles of atomicity, frontend/backend parallelism, and deployable verification.
 >
 > **What this is not**: A line-by-line construction guide. This document stays at the level of "milestones + methodology + constraints"; the **atomic step list** for each milestone is written out JIT in `docs/plan/milestones/M<x>.md` (template: `milestones/_TEMPLATE.md`).
 >
@@ -112,7 +112,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4. Milestone Map M0–M19 (including inserted M2.5 · Settings UX refactor / M6.5 · Cost accounting / M11.5 · Quote deposits)
+## 4. Milestone Map M0–M20 (including inserted M2.5 · Settings UX refactor / M6.5 · Cost accounting / M11.5 · Quote deposits)
 
 > Dependencies: **M0 → M1 → M2 → (M2.5) → {M3, M4}**, then two parallelisable tracks:
 > ① **Document track**: M5 → M6 → **M6.5** → M7; ② **Expense track**: M8 (depends only on M2 base currency + M4 dictionaries, optionally M3 customers, **independent of invoices/quotes/payments**). The two tracks converge at M9 → M10, then continue through **M11 (private-transport business mileage) → M11.5 (quote deposits and final-invoice settlement) → M12 (advance/final invoices and credit notes) → M13 (Document Artifact backfill) → M14 (receipt inbox and review) → M15 (agent receipt intake and business drafts)**.
@@ -311,6 +311,14 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **Implementation order** Prompt/backend validation/additive contract → both purchase forms and human-choice protection → regression, real-provider walkthrough and acceptance.
 - **Deployment self-tests** Three supported types, non-EU/ambiguous fallback, manual override and retry, file/route races, existing Expense apply/save, old suggestions, MCP-to-web review and exactly-once confirmation/report projection.
 
+### M20 · Fixed asset register, AI residual value estimates, and AI API protocol selection
+
+- **Goal** Register fixed assets from saved or newly entered purchases, with pending-in-service records, residual value, straight-line depreciation and a yearly register. Default to five years and zero residual, with AI estimates for user review and application.
+- **Bookkeeping** Retain purchase originals and input VAT. Asset depreciation takes over the purchase's P&L contribution and feeds the Dashboard. Q4 mixed-use confirmation recalculates the full year, with separate confirmation for battery VAT box 1d.
+- **AI protocol** Fresh configurations default to Responses and existing configurations continue with Chat Completions. Administrators can test and switch. The shared setting covers receipt recognition, external sales, PDF validation and residual estimates.
+- **Implementation and acceptance** Follow [M20's seven atomic task cards](milestones/M20.md#atomic-task-cards). Verify the same-year Fluke conversion, storage battery intake through depreciation and VAT, and an upgrade preserving the old protocol followed by a test, switch and switch-back.
+- **Boundary** One whole purchase per asset. Combined purchases, prior-year opening balances, asset disposal and online estimates are deferred.
+
 ---
 
 ## 4.si Small improvements (separate from milestone numbering)
@@ -323,9 +331,9 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M19)
+## 4.x Beyond the roadmap (vNext) · External bank feed integration (memo only, not in M0–M20)
 
-> **Status**: Explicitly **not doing** in the current roadmap through M16; this note is kept here so it's easy to pick up later. **No DB schema is reserved now** — any future columns/tables are additive migrations, existing data is unaffected, cost is acceptable, no need to pre-allocate.
+> **Status**: Explicitly **not doing** in the current roadmap through M20; this note is kept here so it's easy to pick up later. **No DB schema is reserved now** — any future columns/tables are additive migrations, existing data is unaffected, cost is acceptable, no need to pre-allocate.
 
 - **What it is**: Connect an **external transaction provider** and automatically pull transaction feeds from partner banks via API, eliminating manual entry. **Provider-agnostic**: Plaid (used behind YNAB), GoCardless Bank Account Data (formerly Nordigen, EU open banking, AIS free tier), Tink / TrueLayer, etc. — selection deferred.
 - **Two use cases**:
@@ -339,7 +347,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 
 ---
 
-## 4.y Beyond the roadmap (vNext) · PDF document/letterhead template customisation (memo only, not in M0–M19)
+## 4.y Beyond the roadmap (vNext) · PDF document/letterhead template customisation (memo only, not in M0–M20)
 
 > **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**. Elaborates on M9's OUT item "custom / multiple PDF template sets → deferred (one template family + CSS interface)". **No schema reserved now** — everything will be additive.
 >
@@ -350,7 +358,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 - **The big concern is security (guardrail 7)**: User input entering PDF = XSS/SSRF surface; reuse / strengthen sanitisation — reference the two bugs fixed 2026-06-14: `{{ css | safe }}` font escaping and SVG `<style>` inline class sanitisation; body uses "plain text + explicit placeholders + escaping" rather than arbitrary HTML/CSS. Plus template editor UI + preview + built-in defaults when values are absent.
 - **Granularity**: Configured per document type (invoice / quote) × language (EN / ZH), following the email template structure.
 
-## 4.z Beyond the roadmap (vNext) · Customer address free-text block (memo only, not in M0–M19)
+## 4.z Beyond the roadmap (vNext) · Customer address free-text block (memo only, not in M0–M20)
 
 > **Status**: Raised by the author in the 2026-06-14 M9 walkthrough, explicitly **deferred**.
 
@@ -423,7 +431,7 @@ docs/                # insight (analysis) + plan (this roadmap + milestones)
 docs/
   insight/btw-aangifte-2026-guide.md # Dutch VAT/BTW filing conventions (authoritative, structured guide to official Tax Authority instructions)
   plan/
-    roadmap.md                       # This document: overview + methodology + constraints + M0–M19
+    roadmap.md                       # This document: overview + methodology + constraints + M0–M20
     milestones/
       _TEMPLATE.md                   # Milestone refinement template
       M0.md, M1.md, ...              # Produced JIT before starting work (atomic step lists)
@@ -470,6 +478,7 @@ Small improvements use the same implementation-plan structure and quality gates,
 | M17 | Quote PDF appendices (shared library + Quote-specific uploads) | 🟢 All six implementation steps passed local gates and independent review. The author walkthrough was completed on 2026-11-06 within the recorded scope; [design and acceptance](milestones/M17.md); M15 evaluation resumes separately on 2026-11-06 |
 | M18 | Agent mileage intake through MCP | 🟢 Accepted on 2026-11-10 within the author-delegated backend verification scope for v0.14.0. All four steps passed local gates and independent review; real-client MCP and isolated database/report checks passed. Unperformed client/UI paths are recorded in M18. Client-neutral preview/confirmation/idempotent creation. [Design and four atomic task cards](milestones/M18.md) |
 | M19 | Purchase receipt AI recognition and VAT treatment prefill | 🟢 Accepted within the recorded Happy Flow on 2026-11-15 for v0.15.0. Three supported purchase types, both purchase entry points, human-choice protection and reverse-charge rate separation. [Acceptance conclusion](milestones/M19.md#acceptance-conclusion) |
+| M20 | Fixed asset register, AI residual value estimates, and AI API protocol selection | 🟡 Active milestone. Design approved on 2026-11-23, 0 of 7 task cards implemented, deployment acceptance pending. [Design and task cards](milestones/M20.md) |
 
 Separately numbered improvements:
 
