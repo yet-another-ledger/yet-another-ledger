@@ -306,6 +306,7 @@ class FixedAssetMonthlyDepreciation(BaseModel):
 
 class FixedAssetYearDelta(BaseModel):
     year: int
+    provisional: bool = False
     legacy_expense_amount: Decimal
     planned_legacy_expense_amount: Decimal
     asset_depreciation: Decimal
@@ -370,6 +371,7 @@ class FixedAssetConfirmRequest(FixedAssetPreviewRequest):
 class FixedAssetRead(BaseModel):
     id: uuid.UUID
     acquisition_expense_id: uuid.UUID
+    battery_asset_id: uuid.UUID | None = None
     name: str
     acquisition_date: date
     in_service_date: date | None
@@ -377,6 +379,8 @@ class FixedAssetRead(BaseModel):
     residual_value: Decimal
     useful_life_years: int
     business_percentage: Decimal
+    use_type: Literal["FULL_BUSINESS", "MIXED_USE"]
+    version: int
     pending_in_service: bool
     yearly_deltas: list[FixedAssetYearDelta]
 

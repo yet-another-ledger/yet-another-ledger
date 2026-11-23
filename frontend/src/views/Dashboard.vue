@@ -228,7 +228,7 @@ const topCategoryColumns = computed<DataTableColumns<DashboardTopCategory>>(() =
                 <n-gi>
                   <n-statistic :label="t('dashboard.ytdExpense')" :value="kpiExpense">
                     <template #suffix>
-                      <span class="kpi-hint">{{ t('fixedAssets.depreciation') }} {{ fmtMoney(store.dashboardReport.kpi.ytd_fixed_asset_depreciation) }}</span>
+                      <span class="kpi-hint">{{ t('fixedAssets.depreciation') }} {{ fmtMoney(store.dashboardReport.kpi.ytd_fixed_asset_depreciation) }}<template v-if="store.dashboardReport.kpi.ytd_fixed_asset_depreciation_provisional"> · {{ t('fixedAssets.provisionalUse') }}</template></span>
                     </template>
                   </n-statistic>
                 </n-gi>

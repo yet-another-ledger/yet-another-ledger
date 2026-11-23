@@ -972,14 +972,27 @@ async def get_expense_cost_preview(
     )
     if linked_asset is not None:
         if linked_asset.in_service_date is not None:
-            from jai.services.fixed_asset_preview import build_monthly_fixed_asset_schedule
+            from jai.models.fixed_asset import FixedAssetAnnualUse
+            from jai.services.fixed_asset_preview import (
+                apply_yearly_business_use,
+                build_monthly_fixed_asset_schedule,
+            )
 
             effective = build_monthly_fixed_asset_schedule(
                 linked_asset.acquisition_cost,
                 linked_asset.residual_value,
                 linked_asset.useful_life_years,
                 linked_asset.in_service_date,
-                linked_asset.business_percentage,
+                Decimal("100"),
+            )
+            annuals = list((await session.scalars(select(FixedAssetAnnualUse).where(
+                FixedAssetAnnualUse.asset_id == linked_asset.id
+            ))).all())
+            apply_yearly_business_use(
+                effective,
+                Decimal(str(linked_asset.business_percentage)),
+                annuals,
+                linked_asset.use_type,
             )
             as_of = date.today()
             result.effective_annual_cost = sum(

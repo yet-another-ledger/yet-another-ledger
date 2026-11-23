@@ -818,6 +818,28 @@ describe('Battery readable and complete revision history', () => {
     } finally { wrapper.unmount() }
   })
 
+  it('renders persisted shared fixed-asset monthly impacts from the battery audit history', async () => {
+    const sharedRevision = { ...rev, affected_periods: [], reason: 'Shared purchase correction',
+      before_snapshot: { ...fullAsset },
+      after_snapshot: { ...fullAsset, fixed_asset_pnl_monthly_previews: [
+        { period: '2026-01', before_depreciation: '16.67', after_depreciation: '0.00', pnl_delta: '-16.67' },
+        { period: '2026-02', before_depreciation: '16.66', after_depreciation: '25.00', pnl_delta: '8.34' },
+      ] } }
+    api.get.mockImplementation((url: string) => {
+      if (url.startsWith('/api/v1/battery-assets?')) return Promise.resolve({ items: [fullAsset], total: 1 })
+      if (url === `/api/v1/battery-assets/${fullAsset.id}`) return Promise.resolve(fullAsset)
+      if (url.startsWith(`/api/v1/battery-assets/${fullAsset.id}/revisions?`)) return Promise.resolve({ items: [sharedRevision], total: 1 })
+      if (url.includes('/annual-use/2025')) return Promise.resolve(prior)
+      return Promise.resolve({ items: [], total: 0 })
+    })
+    const { wrapper } = await render(`/battery-assets/${fullAsset.id}?year=2025`)
+    try {
+      const history = wrapper.find('.asset-history').text()
+      expect(history).toContain('2026-01 · 16.67 → 0.00 · Δ -16.67')
+      expect(history).toContain('2026-02 · 16.66 → 25.00 · Δ 8.34')
+    } finally { wrapper.unmount() }
+  })
+
   it('reports a failed subsequent annual-history page and retries the full retained history', async () => {
     let fails = true
     const rows = Array.from({ length: 101 }, (_, index) => ({ ...rev, id: `revision-${index}`, reason: index === 100 ? 'Retried oldest entry' : `Revision ${index}` }))

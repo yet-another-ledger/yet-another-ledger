@@ -35,7 +35,7 @@ def test_m18_step2_follows_si4_with_one_unambiguous_head() -> None:
     assert scripts.get_revision("0056").down_revision == "0055"
     assert scripts.get_revision("0057").down_revision == "0056"
     assert scripts.get_revision("0058").down_revision == "0057"
-    assert scripts.get_heads() == ["0059"]
+    assert scripts.get_heads() == ["0060"]
     revisions = list(scripts.walk_revisions())
     assert len(revisions) == len({revision.revision for revision in revisions})
 

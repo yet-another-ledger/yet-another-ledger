@@ -124,6 +124,7 @@ class BatteryAssetRevisionInput(BaseModel):
     vat_rate_id: uuid.UUID | None = None
     expected_rate_snapshot: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     expected_annual_versions: dict[int, int] = Field(default_factory=dict)
+    expected_fixed_asset_snapshot: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     acknowledge_affected_periods: list[str] = Field(default_factory=list, max_length=100)
 
     @field_validator("reason")
@@ -133,6 +134,13 @@ class BatteryAssetRevisionInput(BaseModel):
         if not value:
             raise ValueError("A revision reason is required.")
         return value
+
+
+class BatteryFixedAssetPnlPreviewItem(BaseModel):
+    period: str
+    before_depreciation: Decimal
+    after_depreciation: Decimal
+    pnl_delta: Decimal
 
 
 class BatteryAssetRevisionPreview(BaseModel):
@@ -145,6 +153,13 @@ class BatteryAssetRevisionPreview(BaseModel):
     expense_after: BatteryExpenseFinancialSnapshot
     affected_periods: list[str]
     annual_previews: list[BatteryAnnualRevisionPreviewItem]
+    fixed_asset_pnl_previews: list[BatteryFixedAssetPnlPreviewItem] = Field(default_factory=list)
+    pnl_affected_periods: list[str] = Field(default_factory=list)
+    fixed_asset_pnl_monthly_previews: list[BatteryFixedAssetPnlPreviewItem] = Field(
+        default_factory=list
+    )
+    pnl_affected_months: list[str] = Field(default_factory=list)
+    fixed_asset_snapshot: str | None = None
     warnings: list[str] = Field(default_factory=list)
 
 

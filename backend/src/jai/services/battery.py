@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import uuid
@@ -49,6 +50,7 @@ from jai.schemas.battery import (
     BatteryConflictCode,
     BatteryEvidenceRead,
     BatteryExpenseFinancialSnapshot,
+    BatteryFixedAssetPnlPreviewItem,
 )
 from jai.services.expense import _load_expense, compute_expense_amounts
 from jai.services.money import quantize_to_minor_unit
@@ -152,10 +154,15 @@ async def preview_asset(
         conflict = BatteryConflictCode.ACQUISITION_ALREADY_REGISTERED
     from jai.models.fixed_asset import FixedAsset
 
-    if await session.scalar(
-        select(FixedAsset.id).where(FixedAsset.acquisition_expense_id == expense.id)
-    ) is not None:
-        conflict = BatteryConflictCode.FIXED_ASSET_LINKED
+    linked_fixed_asset = await session.scalar(
+        select(FixedAsset).where(FixedAsset.acquisition_expense_id == expense.id)
+    )
+    if (
+        linked_fixed_asset is not None
+        and linked_fixed_asset.in_service_date != body.in_service_date
+    ):
+        conflict = BatteryConflictCode.EXPENSE_INELIGIBLE
+        warning.append("The battery and fixed asset must use the same in-service date.")
     if body.in_service_date < expense.expense_date:
         conflict = BatteryConflictCode.EXPENSE_INELIGIBLE
         warning.append("The in-service date cannot precede the acquisition date.")
@@ -234,7 +241,11 @@ async def _asset_revision_rows(
 def _rate_snapshot(rate: VatRate) -> str:
     """Identify the selected dictionary state; never trust client amounts."""
     payload = [
-        str(rate.id), str(rate.percent), rate.label, rate.active, rate.updated_at.isoformat()
+        str(rate.id),
+        str(rate.percent),
+        rate.label,
+        rate.active,
+        rate.updated_at.isoformat(),
     ]
     return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
 
@@ -256,6 +267,9 @@ async def _prepare_asset_revision(
     BatteryExpenseFinancialSnapshot,
     list[str],
     list[BatteryAnnualRevisionPreviewItem],
+    list[BatteryFixedAssetPnlPreviewItem],
+    list[BatteryFixedAssetPnlPreviewItem],
+    str | None,
     str | None,
 ]:
     asset, expense, annuals = await _asset_revision_rows(session, company_id, asset_id, lock=lock)
@@ -347,15 +361,18 @@ async def _prepare_asset_revision(
         vat_rate_percent=rate_percent,
         vat_rate_label=rate_label,
     )
-    affected_periods = sorted(set(_asset_periods(
-        expense.expense_date, new_expense_date, asset.in_service_date, new_service_date
-    )) | {f"{row.year}-Q4" for row in annuals})
+    affected_periods = sorted(
+        set(
+            _asset_periods(
+                expense.expense_date, new_expense_date, asset.in_service_date, new_service_date
+            )
+        )
+        | {f"{row.year}-Q4" for row in annuals}
+    )
     annual_by_year = {row.year: row for row in annuals}
     preview_items: list[BatteryAnnualRevisionPreviewItem] = []
     for year in sorted(
-        set(_years(asset.in_service_date))
-        | set(_years(new_service_date))
-        | set(annual_by_year)
+        set(_years(asset.in_service_date)) | set(_years(new_service_date)) | set(annual_by_year)
     ):
         row = annual_by_year.get(year)
         percentage = row.private_use_percentage if row is not None else None
@@ -386,6 +403,188 @@ async def _prepare_asset_revision(
                 requires_reconfirmation=row is not None and year in _years(new_service_date),
             )
         )
+    from jai.models._enums import PlCostBasis, VatTreatmentEffect
+    from jai.models.fixed_asset import FixedAsset, FixedAssetAnnualUse
+    from jai.services.expense import compute_pl_cost_basis
+    from jai.services.fixed_asset_preview import (
+        apply_yearly_business_use,
+        build_monthly_fixed_asset_schedule,
+        validate_fixed_asset_schedule_window,
+    )
+
+    fixed_stmt = select(FixedAsset).where(FixedAsset.acquisition_expense_id == expense.id)
+    if lock:
+        fixed_stmt = fixed_stmt.with_for_update()
+    fixed_asset = await session.scalar(fixed_stmt)
+    fixed_asset_previews: list[BatteryFixedAssetPnlPreviewItem] = []
+    fixed_asset_monthly_previews: list[BatteryFixedAssetPnlPreviewItem] = []
+    fixed_asset_snapshot: str | None = None
+    if fixed_asset is not None:
+        proposed_cost = quantize_to_minor_unit(
+            compute_pl_cost_basis(
+                Decimal(str(after_expense.base_net_amount)),
+                Decimal(str(after_expense.base_vat_amount)),
+                VatTreatmentEffect(expense.vat_treatment_effect),
+                expense.deductible,
+                PlCostBasis.AUTO,
+                expense.vat_treatment_code,
+                Decimal(str(after_expense.base_gross_amount)),
+            )
+        )
+        if fixed_asset.residual_value > proposed_cost:
+            raise BatteryConflict("BATTERY_EXPENSE_INELIGIBLE")
+        if (proposed_cost - fixed_asset.residual_value) / Decimal(
+            fixed_asset.useful_life_years
+        ) > proposed_cost * Decimal("0.20"):
+            raise BatteryConflict("BATTERY_EXPENSE_INELIGIBLE")
+        fixed_annuals = list(
+            (
+                await session.scalars(
+                    select(FixedAssetAnnualUse)
+                    .where(FixedAssetAnnualUse.asset_id == fixed_asset.id)
+                    .order_by(FixedAssetAnnualUse.year)
+                    .with_for_update()
+                    if lock
+                    else select(FixedAssetAnnualUse)
+                    .where(FixedAssetAnnualUse.asset_id == fixed_asset.id)
+                    .order_by(FixedAssetAnnualUse.year)
+                )
+            ).all()
+        )
+
+        def _project(cost: Decimal, service_date: date | None) -> dict[str, Decimal]:
+            if service_date is None:
+                return {}
+            try:
+                validate_fixed_asset_schedule_window(
+                    service_date, fixed_asset.useful_life_years, new_expense_date.year
+                )
+            except ValueError as exc:
+                raise BatteryConflict("BATTERY_EXPENSE_INELIGIBLE") from exc
+            schedule = build_monthly_fixed_asset_schedule(
+                cost,
+                fixed_asset.residual_value,
+                fixed_asset.useful_life_years,
+                service_date,
+                Decimal("100"),
+            )
+            apply_yearly_business_use(
+                schedule, fixed_asset.business_percentage, fixed_annuals, fixed_asset.use_type
+            )
+            totals: dict[str, Decimal] = {}
+            for item in schedule:
+                if item.period_end > date.today():
+                    continue
+                key = f"{item.period_end.year:04d}-{item.period_end.month:02d}"
+                totals[key] = totals.get(key, Decimal("0.00")) + item.business_amount
+            return totals
+
+        old_months = _project(
+            Decimal(str(fixed_asset.acquisition_cost)), fixed_asset.in_service_date
+        )
+        new_months = _project(proposed_cost, new_service_date)
+        for period in sorted(set(old_months) | set(new_months)):
+            before_amount = old_months.get(period, Decimal("0.00"))
+            after_amount = new_months.get(period, Decimal("0.00"))
+            if before_amount == after_amount:
+                continue
+            fixed_asset_monthly_previews.append(
+                BatteryFixedAssetPnlPreviewItem(
+                    period=period,
+                    before_depreciation=before_amount,
+                    after_depreciation=after_amount,
+                    pnl_delta=after_amount - before_amount,
+                )
+            )
+
+        def quarter_totals(months: dict[str, Decimal]) -> dict[str, Decimal]:
+            quarters: dict[str, Decimal] = {}
+            for month, amount in months.items():
+                year, month_number = (int(part) for part in month.split("-"))
+                quarter = (month_number - 1) // 3 + 1
+                key = f"{year}-Q{quarter}"
+                quarters[key] = quarters.get(key, Decimal("0.00")) + amount
+            return quarters
+
+        old_quarters = quarter_totals(old_months)
+        new_quarters = quarter_totals(new_months)
+        for period in sorted(set(old_quarters) | set(new_quarters)):
+            before_amount = old_quarters.get(period, Decimal("0.00"))
+            after_amount = new_quarters.get(period, Decimal("0.00"))
+            if before_amount == after_amount:
+                continue
+            fixed_asset_previews.append(
+                BatteryFixedAssetPnlPreviewItem(
+                    period=period,
+                    before_depreciation=before_amount,
+                    after_depreciation=after_amount,
+                    pnl_delta=after_amount - before_amount,
+                )
+            )
+        from jai.auth.secret import get_auth_secret
+
+        snapshot_payload = {
+            "company_id": str(company_id),
+            "source_expense_id": str(expense.id),
+            "battery_asset_id": str(asset.id),
+            "battery_version": asset.version,
+            "battery_before": _snapshot(before_asset),
+            "battery_after": _snapshot(after_asset),
+            "expense_before": _snapshot(before_expense),
+            "expense_after": _snapshot(after_expense),
+            "rate_snapshot": rate_snapshot,
+            "fixed_asset_id": str(fixed_asset.id),
+            "fixed_asset_version": fixed_asset.version,
+            "fixed_asset_before": {
+                "name": fixed_asset.name,
+                "acquisition_date": fixed_asset.acquisition_date.isoformat(),
+                "in_service_date": fixed_asset.in_service_date.isoformat()
+                if fixed_asset.in_service_date
+                else None,
+                "acquisition_cost": str(fixed_asset.acquisition_cost),
+                "residual_value": str(fixed_asset.residual_value),
+                "useful_life_years": fixed_asset.useful_life_years,
+                "business_percentage": str(fixed_asset.business_percentage),
+                "use_type": fixed_asset.use_type,
+            },
+            "fixed_asset_after": {
+                "name": fixed_asset.name,
+                "acquisition_date": new_expense_date.isoformat(),
+                "in_service_date": new_service_date.isoformat(),
+                "acquisition_cost": str(proposed_cost),
+                "residual_value": str(fixed_asset.residual_value),
+                "useful_life_years": fixed_asset.useful_life_years,
+                "business_percentage": str(fixed_asset.business_percentage),
+                "use_type": fixed_asset.use_type,
+            },
+            "annual_inputs": [
+                [
+                    str(row.id),
+                    row.year,
+                    row.version,
+                    str(row.estimated_business_percentage),
+                    str(row.actual_business_percentage)
+                    if row.actual_business_percentage is not None
+                    else None,
+                ]
+                for row in fixed_annuals
+            ],
+            "as_of": date.today().isoformat(),
+            "period_deltas": [
+                [item.period, str(item.before_depreciation), str(item.after_depreciation)]
+                for item in fixed_asset_previews
+            ],
+            "monthly_period_deltas": [
+                [item.period, str(item.before_depreciation), str(item.after_depreciation)]
+                for item in fixed_asset_monthly_previews
+            ],
+        }
+        encoded = json.dumps(snapshot_payload, sort_keys=True, separators=(",", ":")).encode()
+        fixed_asset_snapshot = hmac.new(
+            get_auth_secret().encode("utf-8"),
+            b"jai:m20:battery-fixed-asset-preview:v1:" + encoded,
+            hashlib.sha256,
+        ).hexdigest()
     return (
         asset,
         expense,
@@ -396,6 +595,9 @@ async def _prepare_asset_revision(
         after_expense,
         affected_periods,
         preview_items,
+        fixed_asset_previews,
+        fixed_asset_monthly_previews,
+        fixed_asset_snapshot,
         rate_snapshot,
     )
 
@@ -408,7 +610,21 @@ async def preview_asset_revision(
 ) -> BatteryAssetRevisionPreview:
     await set_rls_company(session, company_id)
     prepared = await _prepare_asset_revision(session, company_id, asset_id, body, lock=False)
-    asset, _, _, before, after, expense_before, expense_after, periods, annuals, rate = prepared
+    (
+        asset,
+        _,
+        _,
+        before,
+        after,
+        expense_before,
+        expense_after,
+        periods,
+        annuals,
+        fixed_asset_pnl_previews,
+        fixed_asset_pnl_monthly_previews,
+        fixed_asset_snapshot,
+        rate,
+    ) = prepared
     return BatteryAssetRevisionPreview(
         rate_snapshot=rate,
         asset_id=asset.id,
@@ -419,6 +635,11 @@ async def preview_asset_revision(
         expense_after=expense_after,
         affected_periods=periods,
         annual_previews=annuals,
+        fixed_asset_pnl_previews=fixed_asset_pnl_previews,
+        pnl_affected_periods=[item.period for item in fixed_asset_pnl_previews],
+        fixed_asset_pnl_monthly_previews=fixed_asset_pnl_monthly_previews,
+        pnl_affected_months=[item.period for item in fixed_asset_pnl_monthly_previews],
+        fixed_asset_snapshot=fixed_asset_snapshot,
         warnings=["Changes affect the listed report periods; filing status is unknown."],
     )
 
@@ -442,11 +663,19 @@ async def revise_asset(
         expense_after,
         periods,
         annual_previews,
+        fixed_asset_pnl_previews,
+        fixed_asset_pnl_monthly_previews,
+        fixed_asset_snapshot,
         _,
     ) = prepared
     current_annual_versions = {row.year: row.version for row in annuals}
     if body.expected_annual_versions != current_annual_versions:
         raise BatteryConflict("BATTERY_VERSION_CONFLICT", asset.version)
+    if not hmac.compare_digest(
+        body.expected_fixed_asset_snapshot or "",
+        fixed_asset_snapshot or "",
+    ):
+        raise BatteryConflict("BATTERY_PREVIEW_STALE", asset.version)
     if sorted(set(body.acknowledge_affected_periods)) != periods:
         raise BatteryConflict("BATTERY_REVISION_PERIOD_ACK_REQUIRED", asset.version)
 
@@ -454,6 +683,16 @@ async def revise_asset(
     after_snapshot = _snapshot(after)
     after_snapshot["expense_after"] = _snapshot(expense_after)
     after_snapshot["annual_previews"] = [_snapshot(item) for item in annual_previews]
+    after_snapshot["fixed_asset_pnl_previews"] = [
+        _snapshot(item) for item in fixed_asset_pnl_previews
+    ]
+    after_snapshot["fixed_asset_pnl_monthly_previews"] = [
+        _snapshot(item) for item in fixed_asset_pnl_monthly_previews
+    ]
+    pnl_periods = [item.period for item in fixed_asset_pnl_previews]
+    pnl_months = [item.period for item in fixed_asset_pnl_monthly_previews]
+    after_snapshot["pnl_affected_periods"] = pnl_periods
+    after_snapshot["pnl_affected_months"] = pnl_months
     after_snapshot["annual_before"] = affected_annuals_before
     after_snapshot["annual_after"] = [
         {
@@ -478,6 +717,8 @@ async def revise_asset(
             **_snapshot(before),
             "expense_before": _snapshot(expense_before),
             "annual_before": affected_annuals_before,
+            "pnl_affected_periods": pnl_periods,
+            "pnl_affected_months": pnl_months,
         },
         after_snapshot=after_snapshot,
     )
@@ -486,12 +727,103 @@ async def revise_asset(
     await session.execute(
         select(func.set_config("jai.battery_asset_revision_id", str(revision.id), True))
     )
+    # A shared purchase can be represented by both registers. Move the fixed
+    # asset leg under the same locked Expense → battery → fixed-asset transaction.
+    from jai.models.fixed_asset import FixedAsset, FixedAssetRevision
+
+    fixed_asset = await session.scalar(
+        select(FixedAsset).where(FixedAsset.acquisition_expense_id == expense.id).with_for_update()
+    )
+    if fixed_asset is not None:
+        from jai.models._enums import PlCostBasis, VatTreatmentEffect
+        from jai.services.expense import compute_pl_cost_basis
+        from jai.services.money import quantize_to_minor_unit
+
+        updated_cost = quantize_to_minor_unit(
+            compute_pl_cost_basis(
+                Decimal(str(expense_after.base_net_amount)),
+                Decimal(str(expense_after.base_vat_amount)),
+                VatTreatmentEffect(expense.vat_treatment_effect),
+                expense.deductible,
+                PlCostBasis.AUTO,
+                expense.vat_treatment_code,
+                Decimal(str(expense_after.base_gross_amount)),
+            )
+        )
+        if fixed_asset.residual_value > updated_cost:
+            raise BatteryConflict("BATTERY_EXPENSE_INELIGIBLE")
+        if (updated_cost - fixed_asset.residual_value) / Decimal(
+            fixed_asset.useful_life_years
+        ) > updated_cost * Decimal("0.20"):
+            raise BatteryConflict("BATTERY_EXPENSE_INELIGIBLE")
+        fixed_before = {
+            "name": fixed_asset.name,
+            "acquisition_date": fixed_asset.acquisition_date.isoformat(),
+            "in_service_date": fixed_asset.in_service_date.isoformat()
+            if fixed_asset.in_service_date
+            else None,
+            "acquisition_cost": str(fixed_asset.acquisition_cost),
+            "residual_value": str(fixed_asset.residual_value),
+            "useful_life_years": fixed_asset.useful_life_years,
+            "business_percentage": str(fixed_asset.business_percentage),
+        }
+        fixed_after = {
+            **fixed_before,
+            "acquisition_date": expense_after.expense_date.isoformat(),
+            "in_service_date": after.in_service_date.isoformat(),
+            "acquisition_cost": str(updated_cost),
+            "version": fixed_asset.version + 1,
+            "affected_periods": [item.period for item in fixed_asset_pnl_previews],
+            "affected_months": [item.period for item in fixed_asset_pnl_monthly_previews],
+            "period_deltas": [
+                {
+                    "period": item.period,
+                    "before_depreciation": str(item.before_depreciation),
+                    "after_depreciation": str(item.after_depreciation),
+                    "pnl_delta": str(item.pnl_delta),
+                }
+                for item in fixed_asset_pnl_previews
+            ],
+            "monthly_period_deltas": [
+                {
+                    "period": item.period,
+                    "before_depreciation": str(item.before_depreciation),
+                    "after_depreciation": str(item.after_depreciation),
+                    "pnl_delta": str(item.pnl_delta),
+                }
+                for item in fixed_asset_pnl_monthly_previews
+            ],
+        }
+        fixed_revision = FixedAssetRevision(
+            company_id=company_id,
+            asset_id=fixed_asset.id,
+            version=fixed_asset.version + 1,
+            reason=body.reason,
+            actor_id=actor_id,
+            before_snapshot=fixed_before,
+            after_snapshot=fixed_after,
+            affected_periods=[item.period for item in fixed_asset_pnl_previews],
+        )
+        session.add(fixed_revision)
+        await session.flush()
+        await session.execute(
+            select(func.set_config("jai.fixed_asset_revision_id", str(fixed_revision.id), True))
+        )
+        fixed_asset.acquisition_date = expense_after.expense_date
+        fixed_asset.in_service_date = after.in_service_date
+        fixed_asset.acquisition_cost = updated_cost
+        fixed_asset.version += 1
+    # Both audit IDs are now transaction-local before any guarded source or
+    # registry fields change. All three records still commit or roll back once.
     asset.acquisition_expense_date = expense_after.expense_date
     asset.in_service_date = after.in_service_date
     asset.net_basis = expense_after.base_net_amount
     asset.purchase_vat = expense_after.base_vat_amount
     asset.purchase_vat_rate_percent = expense_after.vat_rate_percent
     asset.version += 1
+    # Flush both register rows and their staged audits before touching the
+    # protected source Expense. The database guard verifies the new versions.
+    await session.flush()
     expense.expense_date = expense_after.expense_date
     expense.net_amount = expense_after.net_amount
     expense.vat_amount = expense_after.vat_amount
@@ -548,7 +880,16 @@ async def register_asset(
         raise BatteryConflict(preview.conflict_code or "BATTERY_EXPENSE_INELIGIBLE")
     if preview.affected_historical_periods and not body.acknowledge_affected_periods:
         raise BatteryConflict("BATTERY_HISTORICAL_ACK_REQUIRED")
-    expense.include_in_pl = False
+    from jai.models.fixed_asset import FixedAsset
+
+    linked_fixed_asset = await session.scalar(
+        select(FixedAsset).where(FixedAsset.acquisition_expense_id == expense.id).with_for_update()
+    )
+    if (
+        linked_fixed_asset is not None
+        and linked_fixed_asset.in_service_date != body.in_service_date
+    ):
+        raise BatteryConflict("BATTERY_EXPENSE_INELIGIBLE")
     registered_at = datetime.now(UTC)
     acknowledged_periods = (
         preview.affected_historical_periods if body.acknowledge_affected_periods else []

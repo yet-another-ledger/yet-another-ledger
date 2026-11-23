@@ -2806,6 +2806,144 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fixed-assets/{asset_id}/annual-use/{year}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Fixed Asset Annual Use Endpoint */
+        get: operations["get_fixed_asset_annual_use_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__get"];
+        /** Put Fixed Asset Annual Estimate Endpoint */
+        put: operations["put_fixed_asset_annual_estimate_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fixed-assets/{asset_id}/annual-use/{year}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Fixed Asset Annual Use Endpoint */
+        post: operations["confirm_fixed_asset_annual_use_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fixed-assets/{asset_id}/annual-use/{year}/confirm/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Fixed Asset Annual Confirmation Endpoint */
+        post: operations["preview_fixed_asset_annual_confirmation_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__confirm_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fixed-assets/{asset_id}/annual-use/{year}/revisions/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Fixed Asset Annual Revision Endpoint */
+        post: operations["preview_fixed_asset_annual_revision_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__revisions_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fixed-assets/{asset_id}/annual-use/{year}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Fixed Asset Annual Revisions Endpoint */
+        get: operations["get_fixed_asset_annual_revisions_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__revisions_get"];
+        put?: never;
+        /** Revise Fixed Asset Annual Use Endpoint */
+        post: operations["revise_fixed_asset_annual_use_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__revisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fixed-assets/{asset_id}/service-date/revisions/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Fixed Asset Service Date Endpoint */
+        post: operations["preview_fixed_asset_service_date_endpoint_api_v1_fixed_assets__asset_id__service_date_revisions_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fixed-assets/{asset_id}/service-date/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revise Fixed Asset Service Date Endpoint */
+        post: operations["revise_fixed_asset_service_date_endpoint_api_v1_fixed_assets__asset_id__service_date_revisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fixed-assets/{asset_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Fixed Asset Revisions Endpoint */
+        get: operations["get_fixed_asset_revisions_endpoint_api_v1_fixed_assets__asset_id__revisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses/ai-extract": {
         parameters: {
             query?: never;
@@ -4425,6 +4563,8 @@ export interface components {
             expected_annual_versions?: {
                 [key: string]: number;
             };
+            /** Expected Fixed Asset Snapshot */
+            expected_fixed_asset_snapshot?: string | null;
             /** Acknowledge Affected Periods */
             acknowledge_affected_periods?: string[];
         };
@@ -4464,6 +4604,16 @@ export interface components {
             affected_periods: string[];
             /** Annual Previews */
             annual_previews: components["schemas"]["BatteryAnnualRevisionPreviewItem"][];
+            /** Fixed Asset Pnl Previews */
+            fixed_asset_pnl_previews?: components["schemas"]["BatteryFixedAssetPnlPreviewItem"][];
+            /** Pnl Affected Periods */
+            pnl_affected_periods?: string[];
+            /** Fixed Asset Pnl Monthly Previews */
+            fixed_asset_pnl_monthly_previews?: components["schemas"]["BatteryFixedAssetPnlPreviewItem"][];
+            /** Pnl Affected Months */
+            pnl_affected_months?: string[];
+            /** Fixed Asset Snapshot */
+            fixed_asset_snapshot?: string | null;
             /** Warnings */
             warnings?: string[];
         };
@@ -4566,6 +4716,17 @@ export interface components {
             vat_rate_percent: string;
             /** Vat Rate Label */
             vat_rate_label: string;
+        };
+        /** BatteryFixedAssetPnlPreviewItem */
+        BatteryFixedAssetPnlPreviewItem: {
+            /** Period */
+            period: string;
+            /** Before Depreciation */
+            before_depreciation: string;
+            /** After Depreciation */
+            after_depreciation: string;
+            /** Pnl Delta */
+            pnl_delta: string;
         };
         /**
          * BatteryMissingCode
@@ -5145,6 +5306,11 @@ export interface components {
              */
             ytd_fixed_asset_depreciation?: string;
             /**
+             * Ytd Fixed Asset Depreciation Provisional
+             * @default false
+             */
+            ytd_fixed_asset_depreciation_provisional?: boolean;
+            /**
              * Ytd Profit
              * @description ytd_revenue − ytd_expense (EUR).
              */
@@ -5184,6 +5350,11 @@ export interface components {
              * @default 0
              */
             fixed_asset_depreciation?: string;
+            /**
+             * Provisional Fixed Asset Depreciation
+             * @default false
+             */
+            provisional_fixed_asset_depreciation?: boolean;
             /**
              * Profit
              * @description revenue − expense for this month (EUR).
@@ -7524,6 +7695,146 @@ export interface components {
             /** Gross Amount */
             gross_amount: string;
         };
+        /** FixedAssetAnnualConfirmInput */
+        FixedAssetAnnualConfirmInput: {
+            /** Actual Business Percentage */
+            actual_business_percentage: number | string;
+            /** Preview Token */
+            preview_token: string;
+            /** Reason */
+            reason: string;
+        };
+        /** FixedAssetAnnualConfirmPreview */
+        FixedAssetAnnualConfirmPreview: {
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Year */
+            year: number;
+            /** Before Business Percentage */
+            before_business_percentage: string;
+            /** After Business Percentage */
+            after_business_percentage: string;
+            /** Period Deltas */
+            period_deltas: components["schemas"]["FixedAssetAnnualPeriodDelta"][];
+            /** Monthly Period Deltas */
+            monthly_period_deltas?: components["schemas"]["FixedAssetAnnualPeriodDelta"][];
+            /** Affected Periods */
+            affected_periods: string[];
+            /** Preview Token */
+            preview_token: string;
+        };
+        /** FixedAssetAnnualConfirmPreviewInput */
+        FixedAssetAnnualConfirmPreviewInput: {
+            /** Actual Business Percentage */
+            actual_business_percentage: number | string;
+        };
+        /** FixedAssetAnnualPeriodDelta */
+        FixedAssetAnnualPeriodDelta: {
+            /** Period */
+            period: string;
+            /** Before Business Depreciation */
+            before_business_depreciation: string;
+            /** After Business Depreciation */
+            after_business_depreciation: string;
+            /** Pnl Delta */
+            pnl_delta: string;
+        };
+        /** FixedAssetAnnualRevisionInput */
+        FixedAssetAnnualRevisionInput: {
+            /** Expected Version */
+            expected_version: number;
+            /** Business Percentage */
+            business_percentage: number | string;
+            /** Reason */
+            reason: string;
+            /** Preview Token */
+            preview_token: string;
+        };
+        /** FixedAssetAnnualRevisionPreview */
+        FixedAssetAnnualRevisionPreview: {
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Year */
+            year: number;
+            /** Expected Version */
+            expected_version: number;
+            before: components["schemas"]["FixedAssetAnnualUseRead"];
+            /** After Business Percentage */
+            after_business_percentage: string;
+            /** After Net Pnl Effect */
+            after_net_pnl_effect: string;
+            /** Pnl Delta */
+            pnl_delta: string;
+            /** Affected Periods */
+            affected_periods: string[];
+            /** Period Deltas */
+            period_deltas?: components["schemas"]["FixedAssetAnnualPeriodDelta"][];
+            /** Monthly Period Deltas */
+            monthly_period_deltas?: components["schemas"]["FixedAssetAnnualPeriodDelta"][];
+            /** Preview Token */
+            preview_token: string;
+        };
+        /** FixedAssetAnnualRevisionRead */
+        FixedAssetAnnualRevisionRead: {
+            /** Version */
+            version: number;
+            /** Reason */
+            reason: string;
+            /** Actor Id */
+            actor_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Before Snapshot */
+            before_snapshot: {
+                [key: string]: unknown;
+            };
+            /** After Snapshot */
+            after_snapshot: {
+                [key: string]: unknown;
+            };
+        };
+        /** FixedAssetAnnualUseInput */
+        FixedAssetAnnualUseInput: {
+            /** Estimated Business Percentage */
+            estimated_business_percentage: number | string;
+        };
+        /** FixedAssetAnnualUseRead */
+        FixedAssetAnnualUseRead: {
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Year */
+            year: number;
+            /** Estimated Business Percentage */
+            estimated_business_percentage: string;
+            /** Actual Business Percentage */
+            actual_business_percentage: string | null;
+            /** Effective Business Percentage */
+            effective_business_percentage: string;
+            /** Provisional */
+            provisional: boolean;
+            /** Version */
+            version: number;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Full Depreciation */
+            full_depreciation: string;
+            /** Private Use Reduction */
+            private_use_reduction: string;
+            /** Net Pnl Effect */
+            net_pnl_effect: string;
+        };
         /**
          * FixedAssetConfirmRequest
          * @description Terms previously previewed by the server, bound by its signed token.
@@ -7687,6 +7998,8 @@ export interface components {
              * Format: uuid
              */
             acquisition_expense_id: string;
+            /** Battery Asset Id */
+            battery_asset_id?: string | null;
             /** Name */
             name: string;
             /**
@@ -7704,15 +8017,92 @@ export interface components {
             useful_life_years: number;
             /** Business Percentage */
             business_percentage: string;
+            /**
+             * Use Type
+             * @enum {string}
+             */
+            use_type: "FULL_BUSINESS" | "MIXED_USE";
+            /** Version */
+            version: number;
             /** Pending In Service */
             pending_in_service: boolean;
             /** Yearly Deltas */
             yearly_deltas: components["schemas"]["FixedAssetYearDelta"][];
         };
+        /** FixedAssetRevisionRead */
+        FixedAssetRevisionRead: {
+            /** Version */
+            version: number;
+            /** Reason */
+            reason: string;
+            /** Actor Id */
+            actor_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Before Snapshot */
+            before_snapshot: {
+                [key: string]: unknown;
+            };
+            /** After Snapshot */
+            after_snapshot: {
+                [key: string]: unknown;
+            };
+            /** Affected Periods */
+            affected_periods: string[];
+        };
+        /** FixedAssetServiceDateRevisionInput */
+        FixedAssetServiceDateRevisionInput: {
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * In Service Date
+             * Format: date
+             */
+            in_service_date: string;
+            /** Reason */
+            reason: string;
+            /** Preview Token */
+            preview_token: string;
+        };
+        /** FixedAssetServiceDateRevisionPreview */
+        FixedAssetServiceDateRevisionPreview: {
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Before In Service Date */
+            before_in_service_date: string | null;
+            /**
+             * After In Service Date
+             * Format: date
+             */
+            after_in_service_date: string;
+            /** Affected Periods */
+            affected_periods: string[];
+            /** Before Pnl Effect */
+            before_pnl_effect: string;
+            /** After Pnl Effect */
+            after_pnl_effect: string;
+            /** Pnl Delta */
+            pnl_delta: string;
+            /** Preview Token */
+            preview_token: string;
+        };
         /** FixedAssetYearDelta */
         FixedAssetYearDelta: {
             /** Year */
             year: number;
+            /**
+             * Provisional
+             * @default false
+             */
+            provisional?: boolean;
             /** Legacy Expense Amount */
             legacy_expense_amount: string;
             /** Planned Legacy Expense Amount */
@@ -10302,6 +10692,12 @@ export interface components {
              */
             fixed_asset_depreciation?: string;
             /**
+             * Fixed Asset Depreciation Provisional
+             * @description Whether the selected range includes provisional fixed-asset use.
+             * @default false
+             */
+            fixed_asset_depreciation_provisional?: boolean;
+            /**
              * Profit Before Mileage
              * @description Total revenue net minus non-mileage expense cost (EUR).
              */
@@ -10369,6 +10765,12 @@ export interface components {
              * @default 0
              */
             fixed_asset_depreciation?: string;
+            /**
+             * Fixed Asset Depreciation Provisional
+             * @description Whether this period includes an unconfirmed fixed-asset use estimate.
+             * @default false
+             */
+            fixed_asset_depreciation_provisional?: boolean;
             /**
              * Profit Before Mileage
              * @description Revenue net minus non-mileage expense cost for this period (EUR).
@@ -19163,6 +19565,351 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FixedAssetRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fixed_asset_annual_use_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetAnnualUseRead"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_fixed_asset_annual_estimate_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FixedAssetAnnualUseInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetAnnualUseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_fixed_asset_annual_use_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FixedAssetAnnualConfirmInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetAnnualUseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_fixed_asset_annual_confirmation_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__confirm_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FixedAssetAnnualConfirmPreviewInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetAnnualConfirmPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_fixed_asset_annual_revision_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__revisions_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FixedAssetAnnualRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetAnnualRevisionPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fixed_asset_annual_revisions_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__revisions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetAnnualRevisionRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revise_fixed_asset_annual_use_endpoint_api_v1_fixed_assets__asset_id__annual_use__year__revisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FixedAssetAnnualRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetAnnualUseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_fixed_asset_service_date_endpoint_api_v1_fixed_assets__asset_id__service_date_revisions_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FixedAssetServiceDateRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetServiceDateRevisionPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revise_fixed_asset_service_date_endpoint_api_v1_fixed_assets__asset_id__service_date_revisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FixedAssetServiceDateRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fixed_asset_revisions_endpoint_api_v1_fixed_assets__asset_id__revisions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetRevisionRead"][];
                 };
             };
             /** @description Validation Error */

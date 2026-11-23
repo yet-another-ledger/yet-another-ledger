@@ -323,6 +323,9 @@ function assetRevisionBody(acknowledge: boolean) {
           .filter(item => item.current_version != null)
           .map(item => [item.year, item.current_version]))
       : {},
+    expected_fixed_asset_snapshot: acknowledge
+      ? assetRevisionPreview.value?.fixed_asset_snapshot ?? null
+      : null,
   }
 }
 
@@ -693,6 +696,22 @@ onBeforeUnmount(() => { assetHistoryGeneration += 1; assetRevisionGeneration += 
             oldVat: item.current_calculation_vat ?? '—',
             newBase: item.proposed_calculation_base ?? '—',
             newVat: item.proposed_calculation_vat ?? '—',
+          }) }}
+        </li></ul>
+        <ul v-if="assetRevisionPreview.fixed_asset_pnl_previews?.length"><li v-for="item in assetRevisionPreview.fixed_asset_pnl_previews ?? []" :key="item.period">
+          {{ t('battery.fixedAssetPnlImpact', {
+            period: item.period,
+            before: item.before_depreciation,
+            after: item.after_depreciation,
+            delta: item.pnl_delta,
+          }) }}
+        </li></ul>
+        <ul v-if="assetRevisionPreview.fixed_asset_pnl_monthly_previews?.length"><li v-for="item in assetRevisionPreview.fixed_asset_pnl_monthly_previews ?? []" :key="item.period">
+          {{ t('battery.fixedAssetPnlImpact', {
+            period: item.period,
+            before: item.before_depreciation,
+            after: item.after_depreciation,
+            delta: item.pnl_delta,
           }) }}
         </li></ul>
       </n-alert>

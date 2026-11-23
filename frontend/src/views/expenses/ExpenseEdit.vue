@@ -1124,7 +1124,7 @@ async function handleAiExtract(attachmentId: string) {
                         <n-alert v-if="assetPreview.conversion_blocked" type="warning" :show-icon="false">
                           {{ assetPreview.conversion_block_reason }}
                         </n-alert>
-                        <n-button type="primary" :loading="assetConversionLoading" :disabled="assetPreview.conversion_blocked || assetUseType !== 'FULL_BUSINESS'" @click="confirmFixedAssetConversion">
+                        <n-button type="primary" :loading="assetConversionLoading" :disabled="assetPreview.conversion_blocked" @click="confirmFixedAssetConversion">
                           {{ t('fixedAssets.confirmConversion') }}
                         </n-button>
                         <n-text>{{ t('fixedAssets.costCue') }}</n-text>

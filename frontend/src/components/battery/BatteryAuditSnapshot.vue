@@ -27,6 +27,19 @@ const sections = computed(() => ['expense_before', 'expense_after', 'annual_befo
     const snapshots = items.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && !Array.isArray(item))
     return snapshots.length ? [{ key, snapshots }] : []
   }))
+const monthlyImpacts = computed(() => {
+  const stored = snapshot.value.monthly_period_deltas
+  const previews = snapshot.value.fixed_asset_pnl_monthly_previews
+  const values = Array.isArray(stored) ? stored : Array.isArray(previews) ? previews : []
+  return values.filter((item): item is Record<string, unknown> =>
+    typeof item === 'object' && item !== null && !Array.isArray(item),
+  ).map(item => ({
+    period: item.period,
+    before: item.before_business_depreciation ?? item.before_depreciation,
+    after: item.after_business_depreciation ?? item.after_depreciation,
+    delta: item.pnl_delta,
+  }))
+})
 </script>
 
 <template>
@@ -35,6 +48,11 @@ const sections = computed(() => ['expense_before', 'expense_after', 'annual_befo
       <dt>{{ t(`battery.auditFields.${row.key}`) }}</dt><dd>{{ row.value }}</dd>
     </template>
   </dl>
+  <ul v-if="monthlyImpacts.length" class="monthly-impacts">
+    <li v-for="item in monthlyImpacts" :key="String(item.period)">
+      {{ item.period }} · {{ item.before ?? '—' }} → {{ item.after ?? '—' }} · Δ {{ item.delta ?? '—' }}
+    </li>
+  </ul>
   <section v-for="section in sections" :key="section.key">
     <h5>{{ t(`battery.auditFields.${section.key}`) }}</h5>
     <BatteryAuditSnapshot v-for="(snapshot, index) in section.snapshots" :key="index" :snapshot="snapshot" />

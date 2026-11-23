@@ -336,6 +336,13 @@ async def compute_profit_loss(
     from jai.models.fixed_asset import FixedAsset
 
     fixed_assets = (await session.scalars(select(FixedAsset))).all()
+    from jai.models.fixed_asset import FixedAssetAnnualUse
+    from jai.services.fixed_asset_preview import apply_yearly_business_use
+
+    annual_rows = (await session.scalars(select(FixedAssetAnnualUse))).all()
+    annual_by_asset: dict[uuid.UUID, list[FixedAssetAnnualUse]] = {}
+    for annual in annual_rows:
+        annual_by_asset.setdefault(annual.asset_id, []).append(annual)
     converted_source_ids = {asset.acquisition_expense_id for asset in fixed_assets}
 
     for exp in expenses:
@@ -366,16 +373,22 @@ async def compute_profit_loss(
     from jai.services.fixed_asset_preview import build_monthly_fixed_asset_schedule
 
     today = date.today()
+    provisional_buckets: set[tuple[int, int]] = set()
     for asset in fixed_assets:
         if asset.in_service_date is None:
             continue
-        for row in build_monthly_fixed_asset_schedule(
+        annuals = sorted(annual_by_asset.get(asset.id, []), key=lambda item: item.year)
+        schedule = build_monthly_fixed_asset_schedule(
             asset.acquisition_cost,
             asset.residual_value,
             asset.useful_life_years,
             asset.in_service_date,
-            asset.business_percentage,
-        ):
+            Decimal("100"),
+        )
+        provisional_years = apply_yearly_business_use(
+            schedule, Decimal(str(asset.business_percentage)), annuals, asset.use_type
+        )
+        for row in schedule:
             if row.period_end > today or row.period_end < date_from or row.period_end > date_to:
                 continue
             key = _bucket_key(row.period_end, granularity)
@@ -384,6 +397,8 @@ async def compute_profit_loss(
                 buckets[key]["expense_actual"] += amount
                 buckets[key]["other_expense_actual"] += amount
                 buckets[key]["fixed_asset_depreciation"] += amount
+                if row.period_end.year in provisional_years:
+                    provisional_buckets.add(key)
 
     # -------------------------------------------------------------------
     # 3. Build series (sorted by period) and compute top-level totals
@@ -408,6 +423,7 @@ async def compute_profit_loss(
                 mileage_expense_actual=mileage_expense,
                 other_expense_actual=other_expense,
                 fixed_asset_depreciation=fixed_asset_depreciation,
+                fixed_asset_depreciation_provisional=key in provisional_buckets,
                 profit_before_mileage=profit_before_mileage,
                 profit_after_mileage=profit_after_mileage,
                 profit=profit_after_mileage,
@@ -442,4 +458,5 @@ async def compute_profit_loss(
         fixed_asset_depreciation=sum(
             (bucket["fixed_asset_depreciation"] for bucket in buckets.values()), _ZERO
         ),
+        fixed_asset_depreciation_provisional=any(key in provisional_buckets for key in buckets),
     )

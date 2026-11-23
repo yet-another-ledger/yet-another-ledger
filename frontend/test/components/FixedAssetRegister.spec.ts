@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -26,6 +26,7 @@ vi.mock('naive-ui', async () => {
   return {
     NAlert: box, NButton: defineComponent({ emits: ['click'], setup(_, { slots, emit }) { return () => h('button', { onClick: () => emit('click') }, slots.default?.()) } }),
     NCard: box, NDataTable: table, NText: box, NSpace: box, NInputNumber: input,
+    NInput: input, NList: box, NListItem: box,
   }
 })
 
@@ -64,7 +65,53 @@ afterEach(() => {
   vi.resetAllMocks()
 })
 
+beforeEach(() => {
+  mocks.get.mockImplementation((url: string) => {
+    if (url.endsWith('/revisions')) return Promise.resolve([])
+    if (url.includes('/annual-use/')) return Promise.resolve(null)
+    return Promise.resolve([])
+  })
+})
+
 describe('fixed asset register year switching', () => {
+  it('shows the selected year effective percentage and its localized confirmation state', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-15T12:00:00'))
+    const mixedAsset = (selectedYear: number, amount: string) => {
+      const result: any[] = asset(selectedYear, amount)
+      result[0].use_type = 'MIXED_USE'
+      return result
+    }
+    mocks.get.mockImplementation((url: string) => {
+      if (url === '/api/v1/fixed-assets?year=2026') return Promise.resolve(mixedAsset(2026, '120.00'))
+      if (url === '/api/v1/fixed-assets?year=2027') return Promise.resolve(mixedAsset(2027, '130.00'))
+      if (url.endsWith('/revisions')) return Promise.resolve([])
+      if (url.includes('/annual-use/2026')) return Promise.resolve({
+        asset_id: 'asset-1', year: 2026, estimated_business_percentage: '50',
+        actual_business_percentage: '80', effective_business_percentage: '80',
+        provisional: false, version: 2, confirmed_at: '2026-11-01T00:00:00Z',
+        full_depreciation: '150.00', private_use_reduction: '30.00', net_pnl_effect: '120.00',
+      })
+      if (url.includes('/annual-use/2027')) return Promise.resolve({
+        asset_id: 'asset-1', year: 2027, estimated_business_percentage: '75',
+        actual_business_percentage: null, effective_business_percentage: '75',
+        provisional: true, version: 1, confirmed_at: null,
+        full_depreciation: '160.00', private_use_reduction: '40.00', net_pnl_effect: '120.00',
+      })
+      return Promise.resolve([])
+    })
+    const wrapper = await setup('/fixed-assets?asset=asset-1&year=2026')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Use status: 80% · confirmed')
+    expect(wrapper.text()).not.toContain('Use status: 50%')
+    const yearInput = wrapper.find('input')
+    await yearInput.setValue('2027')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Use status: 75% · provisional')
+    expect(wrapper.text()).not.toContain('Use status: 80% · confirmed')
+    wrapper.unmount()
+  })
+
   it('shows distinct realized and planned opening-to-closing values in a future year table and detail', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-15T12:00:00'))
@@ -94,11 +141,90 @@ describe('fixed asset register year switching', () => {
     wrapper.unmount()
   })
 
+  it('renders persisted shared monthly impacts and tolerates older snapshots without them', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-15T12:00:00'))
+    const row = { ...asset(2026, '150.00')[0], use_type: 'MIXED_USE' }
+    mocks.get.mockImplementation((url: string) => {
+      if (url === '/api/v1/fixed-assets?year=2026') return Promise.resolve([row])
+      if (url === '/api/v1/fixed-assets/asset-1/revisions') return Promise.resolve([
+        { version: 3, reason: 'Shared purchase correction', actor_id: null,
+          created_at: '2026-11-01T10:00:00Z', affected_periods: [], before_snapshot: {},
+          after_snapshot: { monthly_period_deltas: [
+            { period: '2026-01', before_depreciation: '16.67', after_depreciation: '0.00', pnl_delta: '-16.67' },
+            { period: '2026-02', before_depreciation: '16.66', after_depreciation: '25.00', pnl_delta: '8.34' },
+          ] } },
+        { version: 2, reason: 'Legacy snapshot', actor_id: null,
+          created_at: '2026-10-01T10:00:00Z', affected_periods: [], before_snapshot: {}, after_snapshot: {} },
+      ])
+      if (url.includes('/annual-use/2026/revisions')) return Promise.resolve([])
+      if (url.includes('/annual-use/2026')) return Promise.resolve(null)
+      return Promise.resolve([])
+    })
+    const wrapper = await setup('/fixed-assets?asset=asset-1&year=2026')
+    await flushPromises()
+    try {
+      const text = wrapper.text()
+      expect(text).toContain('2026-01 · 16.67 → 0.00 · Δ -16.67')
+      expect(text).toContain('2026-02 · 16.66 → 25.00 · Δ 8.34')
+      expect(text).toContain('Legacy snapshot')
+    } finally { wrapper.unmount() }
+  })
+
+  it('renders annual percentage and quarterly transitions with and without monthly audit data', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-15T12:00:00'))
+    const row = { ...asset(2026, '150.00')[0], use_type: 'MIXED_USE' }
+    mocks.get.mockImplementation((url: string) => {
+      if (url === '/api/v1/fixed-assets?year=2026') return Promise.resolve([row])
+      if (url.endsWith('/annual-use/2026/revisions')) return Promise.resolve([
+        { version: 1, reason: 'Annual confirmation', actor_id: 'owner-1',
+          created_at: '2026-10-01T10:00:00Z', affected_periods: ['2026-Q1'],
+          before_snapshot: { effective_business_percentage: '41.234' },
+          after_snapshot: { effective_business_percentage: '63.456', period_deltas: [
+            { period: '2026-Q1', before_business_depreciation: '20.62', after_business_depreciation: '31.73', pnl_delta: '11.11' },
+          ] } },
+        { version: 2, reason: 'Annual correction', actor_id: 'owner-1',
+          created_at: '2026-11-01T10:00:00Z', affected_periods: ['2026-Q1'],
+          before_snapshot: { actual_business_percentage: '63.456' },
+          after_snapshot: { actual_business_percentage: '74.321', period_deltas: [
+            { period: '2026-Q1', before_business_depreciation: '31.73', after_business_depreciation: '37.16', pnl_delta: '5.43' },
+          ], monthly_period_deltas: [
+            { period: '2026-01', before_business_depreciation: '10.58', after_business_depreciation: '12.39', pnl_delta: '1.81' },
+          ] } },
+      ])
+      if (url.includes('/annual-use/2026')) return Promise.resolve(null)
+      return Promise.resolve([])
+    })
+    const wrapper = await setup('/fixed-assets?asset=asset-1&year=2026')
+    await flushPromises()
+    try {
+      const text = wrapper.text()
+      expect(text).toContain('41.234% → 63.456%')
+      expect(text).toContain('2026-Q1 · 20.62 → 31.73 · Δ 11.11')
+      expect(text).toContain('63.456% → 74.321%')
+      expect(text).toContain('2026-Q1 · 31.73 → 37.16 · Δ 5.43')
+      expect(text).toContain('2026-01 · 10.58 → 12.39 · Δ 1.81')
+      expect(text).toContain('Annual confirmation')
+      expect(text).toContain('Annual correction')
+    } finally { wrapper.unmount() }
+  })
+
   it('refreshes an open detail from the selected year response', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-15T12:00:00'))
     const targetYear = new Date().getFullYear() + 1
-    mocks.get.mockResolvedValueOnce(asset(new Date().getFullYear(), '11.11')).mockResolvedValueOnce(asset(targetYear, '22.22'))
+    mocks.get.mockImplementation((url: string) => {
+      if (url === `/api/v1/fixed-assets?year=${new Date().getFullYear()}`) {
+        return Promise.resolve(asset(new Date().getFullYear(), '11.11'))
+      }
+      if (url === `/api/v1/fixed-assets?year=${targetYear}`) {
+        return Promise.resolve(asset(targetYear, '22.22'))
+      }
+      if (url.endsWith('/revisions')) return Promise.resolve([])
+      if (url.includes('/annual-use/')) return Promise.resolve(null)
+      return Promise.resolve([])
+    })
     const wrapper = await setup()
     await flushPromises()
     await wrapper.find('button').trigger('click')

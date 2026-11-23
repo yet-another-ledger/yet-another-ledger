@@ -9,7 +9,11 @@ from pydantic import ValidationError
 import jai.services.fixed_asset_preview as preview_service
 from jai.models.expense import Expense
 from jai.schemas.expense import FixedAssetConfirmRequest, FixedAssetPreviewRequest
-from jai.services.fixed_asset_preview import build_fixed_asset_preview
+from jai.services.fixed_asset_preview import (
+    apply_yearly_business_use,
+    build_fixed_asset_preview,
+    build_monthly_fixed_asset_schedule,
+)
 
 
 def _expense(**overrides: object) -> Expense:
@@ -75,9 +79,7 @@ def test_preview_token_normalizes_decimal_scales_and_confirmation_rejects_garbag
     )
     assert first.preview_token == equivalent.preview_token
     with pytest.raises(ValidationError):
-        FixedAssetConfirmRequest(
-            **_request().model_dump(), preview_token="é" * 64
-        )
+        FixedAssetConfirmRequest(**_request().model_dump(), preview_token="é" * 64)
 
 
 def test_cumulative_half_cent_uses_one_precise_division_before_rounding() -> None:
@@ -131,9 +133,9 @@ def test_new_asset_basis_is_rounded_to_minor_unit_without_mutating_purchase() ->
     assert expense.base_gross_amount == Decimal("100.005")
     assert all(row.amount >= 0 for row in result.monthly_schedule)
     assert all(row.closing_book_value >= 0 for row in result.monthly_schedule)
-    assert sum(
-        (row.business_amount for row in result.monthly_schedule), Decimal("0")
-    ) == Decimal("100.01")
+    assert sum((row.business_amount for row in result.monthly_schedule), Decimal("0")) == Decimal(
+        "100.01"
+    )
     assert result.monthly_schedule[-1].cumulative_amount == Decimal("100.01")
     assert result.monthly_schedule[-1].closing_book_value == Decimal("0.00")
 
@@ -256,6 +258,38 @@ def test_completed_month_as_of_date_excludes_current_future_month_plan(
     if current_month_end > result.reporting_as_of:
         assert period.fixed_asset_depreciation == Decimal("0.00")
         assert period.planned_fixed_asset_depreciation > Decimal("0.00")
+
+
+def test_mixed_use_rounds_cumulatively_and_keeps_year_rates_independent() -> None:
+    class Use:
+        def __init__(self, year: int, estimate: str, actual: str | None = None) -> None:
+            self.year = year
+            self.estimated_business_percentage = Decimal(estimate)
+            self.actual_business_percentage = Decimal(actual) if actual is not None else None
+
+    schedule = build_monthly_fixed_asset_schedule(
+        Decimal("0.50"), Decimal("0"), 1, date(2024, 1, 1), Decimal("100")
+    )
+    apply_yearly_business_use(schedule, Decimal("50"), [], "MIXED_USE")
+    rows = build_monthly_fixed_asset_schedule(
+        Decimal("1200"), Decimal("0"), 5, date(2024, 1, 1), Decimal("100")
+    )
+    years = [Use(2024, "50", "40"), Use(2025, "80")]
+    provisional = apply_yearly_business_use(rows, Decimal("50"), years, "MIXED_USE")
+    assert sum((r.business_amount for r in schedule), Decimal("0")) == Decimal("0.25")
+    assert sum(
+        (r.business_amount for r in rows if r.period_end.year == 2024), Decimal("0")
+    ) == Decimal("96.00")
+    assert sum(
+        (r.business_amount for r in rows if r.period_end.year == 2025), Decimal("0")
+    ) == Decimal("192.00")
+    assert 2024 not in provisional
+    assert 2025 in provisional
+    assert 2026 in provisional  # the latest annual row (estimate) carries forward
+    assert sum(
+        (r.business_amount for r in rows if r.period_end.year == 2026), Decimal("0")
+    ) == Decimal("192.00")
+    assert sum((r.amount for r in rows), Decimal("0")) == Decimal("1200.00")
 
 
 def test_pre_purchase_service_date_is_rejected() -> None:
@@ -505,6 +539,26 @@ def test_business_share_is_allocated_from_cumulative_depreciation() -> None:
     assert sum((row.business_amount for row in result.monthly_schedule), Decimal("0")) == Decimal(
         "0.25"
     )
+
+
+def test_partial_rate_conversion_preview_matches_year_local_report_rounding() -> None:
+    result = build_fixed_asset_preview(
+        _expense(
+            expense_date=date(2026, 10, 13),
+            base_net_amount=Decimal("1000.00"),
+            base_vat_amount=Decimal("0.00"),
+            base_gross_amount=Decimal("1000.00"),
+        ),
+        _request(
+            in_service_date=date(2026, 10, 13),
+            residual_value=Decimal("0"),
+            useful_life_years=5,
+            business_percentage=Decimal("30"),
+            use_type="MIXED_USE",
+        ),
+    )
+    february = next(row for row in result.monthly_schedule if row.period_end == date(2027, 2, 28))
+    assert february.business_amount == Decimal("5.00")
 
 
 def test_annual_planned_and_realized_values_reconcile_independently(

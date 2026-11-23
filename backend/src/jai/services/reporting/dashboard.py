@@ -165,11 +165,13 @@ async def compute_dashboard(
             exp_actual = item.expense_actual
             profit = item.profit
             fixed_asset_depreciation = item.fixed_asset_depreciation
+            fixed_asset_provisional = item.fixed_asset_depreciation_provisional
         else:
             rev = _ZERO
             exp_actual = _ZERO
             profit = _ZERO
             fixed_asset_depreciation = _ZERO
+            fixed_asset_provisional = False
         monthly.append(
             DashboardMonthly(
                 month=period_label,
@@ -177,6 +179,7 @@ async def compute_dashboard(
                 expense=exp_actual,
                 profit=profit,
                 fixed_asset_depreciation=fixed_asset_depreciation,
+                provisional_fixed_asset_depreciation=fixed_asset_provisional,
             )
         )
 
@@ -225,6 +228,7 @@ async def compute_dashboard(
         ytd_revenue=pl.revenue_net,
         ytd_expense=pl.expense_actual,
         ytd_fixed_asset_depreciation=pl.fixed_asset_depreciation,
+        ytd_fixed_asset_depreciation_provisional=pl.fixed_asset_depreciation_provisional,
         ytd_profit=pl.profit,
         current_quarter_vat_payable=vat_payable,
     )

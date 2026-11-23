@@ -166,7 +166,7 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
     key: 'fixed_asset_depreciation',
     align: 'right',
     render(row) {
-      return fmtMoney(row.fixed_asset_depreciation)
+      return `${fmtMoney(row.fixed_asset_depreciation)}${row.fixed_asset_depreciation_provisional ? ` · ${t('fixedAssets.provisionalUse')}` : ''}`
     },
   },
   {
@@ -265,6 +265,7 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
               <n-card>
                 <n-statistic :label="t('reports.pl.fixedAssetDepreciation')" :value="fmtMoney(store.plReport.fixed_asset_depreciation)" />
                 <n-text depth="3">{{ t('reports.pl.fixedAssetDepreciationNote') }}</n-text>
+                <n-text v-if="store.plReport.fixed_asset_depreciation_provisional" type="warning">{{ t('fixedAssets.provisionalUse') }}</n-text>
               </n-card>
             </n-grid-item>
             <n-grid-item>

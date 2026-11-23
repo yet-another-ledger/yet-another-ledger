@@ -170,6 +170,8 @@ async def compute_expense_report(
         .order_by(Expense.expense_date, Expense.id)
     )
     if include_in_pl is not None:
+        # This is a raw-entry report. A fixed asset's depreciation is reported
+        # separately and must not rewrite the source Expense's saved choice.
         stmt = stmt.where(Expense.include_in_pl.is_(include_in_pl))
     result = await session.execute(stmt)
     expenses = result.scalars().all()

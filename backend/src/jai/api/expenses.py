@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +46,19 @@ from jai.schemas.expense import (
     FixedAssetPreviewRequest,
     FixedAssetPreviewResult,
     FixedAssetRead,
+)
+from jai.schemas.fixed_asset import (
+    FixedAssetAnnualConfirmInput,
+    FixedAssetAnnualConfirmPreview,
+    FixedAssetAnnualConfirmPreviewInput,
+    FixedAssetAnnualRevisionInput,
+    FixedAssetAnnualRevisionPreview,
+    FixedAssetAnnualRevisionRead,
+    FixedAssetAnnualUseInput,
+    FixedAssetAnnualUseRead,
+    FixedAssetRevisionRead,
+    FixedAssetServiceDateRevisionInput,
+    FixedAssetServiceDateRevisionPreview,
 )
 from jai.services.expense import (
     ExpenseConflict,
@@ -258,6 +272,216 @@ async def get_fixed_asset_endpoint(
 
     try:
         return await get_fixed_asset(session, asset_id, _require_company_id(user), year)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/fixed-assets/{asset_id}/annual-use/{year}", response_model=FixedAssetAnnualUseRead | None
+)
+async def get_fixed_asset_annual_use_endpoint(
+    asset_id: uuid.UUID,
+    year: Annotated[int, Path(ge=1, le=9999)],
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> FixedAssetAnnualUseRead | None:
+    _owner_only(user)
+    from jai.services.fixed_asset import get_annual_use
+
+    try:
+        return await get_annual_use(session, _require_company_id(user), asset_id, year)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FixedAssetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.put("/fixed-assets/{asset_id}/annual-use/{year}", response_model=FixedAssetAnnualUseRead)
+async def put_fixed_asset_annual_estimate_endpoint(
+    asset_id: uuid.UUID,
+    year: Annotated[int, Path(ge=1, le=9999)],
+    body: FixedAssetAnnualUseInput,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> FixedAssetAnnualUseRead:
+    _owner_only(user)
+    from jai.services.fixed_asset import put_annual_estimate
+
+    try:
+        return await put_annual_estimate(session, _require_company_id(user), asset_id, year, body)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FixedAssetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post(
+    "/fixed-assets/{asset_id}/annual-use/{year}/confirm", response_model=FixedAssetAnnualUseRead
+)
+async def confirm_fixed_asset_annual_use_endpoint(
+    asset_id: uuid.UUID,
+    year: Annotated[int, Path(ge=1, le=9999)],
+    body: FixedAssetAnnualConfirmInput,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> FixedAssetAnnualUseRead:
+    _owner_only(user)
+    from jai.services.fixed_asset import confirm_annual_use
+
+    try:
+        return await confirm_annual_use(
+            session, _require_company_id(user), user.id, asset_id, year, body
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FixedAssetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post(
+    "/fixed-assets/{asset_id}/annual-use/{year}/confirm/preview",
+    response_model=FixedAssetAnnualConfirmPreview,
+)
+async def preview_fixed_asset_annual_confirmation_endpoint(
+    asset_id: uuid.UUID,
+    year: Annotated[int, Path(ge=1, le=9999)],
+    body: FixedAssetAnnualConfirmPreviewInput,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> FixedAssetAnnualConfirmPreview:
+    _owner_only(user)
+    from jai.services.fixed_asset import preview_annual_confirmation
+
+    try:
+        return await preview_annual_confirmation(
+            session, _require_company_id(user), asset_id, year, body
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FixedAssetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post(
+    "/fixed-assets/{asset_id}/annual-use/{year}/revisions/preview",
+    response_model=FixedAssetAnnualRevisionPreview,
+)
+async def preview_fixed_asset_annual_revision_endpoint(
+    asset_id: uuid.UUID,
+    year: Annotated[int, Path(ge=1, le=9999)],
+    body: FixedAssetAnnualRevisionInput,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> FixedAssetAnnualRevisionPreview:
+    _owner_only(user)
+    from jai.services.fixed_asset import preview_annual_revision
+
+    try:
+        return await preview_annual_revision(
+            session, _require_company_id(user), asset_id, year, body
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FixedAssetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post(
+    "/fixed-assets/{asset_id}/annual-use/{year}/revisions", response_model=FixedAssetAnnualUseRead
+)
+async def revise_fixed_asset_annual_use_endpoint(
+    asset_id: uuid.UUID,
+    year: Annotated[int, Path(ge=1, le=9999)],
+    body: FixedAssetAnnualRevisionInput,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> FixedAssetAnnualUseRead:
+    _owner_only(user)
+    from jai.services.fixed_asset import revise_annual_use
+
+    try:
+        return await revise_annual_use(
+            session, _require_company_id(user), user.id, asset_id, year, body
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FixedAssetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get(
+    "/fixed-assets/{asset_id}/annual-use/{year}/revisions",
+    response_model=list[FixedAssetAnnualRevisionRead],
+)
+async def get_fixed_asset_annual_revisions_endpoint(
+    asset_id: uuid.UUID,
+    year: Annotated[int, Path(ge=1, le=9999)],
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[FixedAssetAnnualRevisionRead]:
+    _owner_only(user)
+    from jai.services.fixed_asset import list_annual_revisions
+
+    return await list_annual_revisions(session, _require_company_id(user), asset_id, year)
+
+
+@router.post(
+    "/fixed-assets/{asset_id}/service-date/revisions/preview",
+    response_model=FixedAssetServiceDateRevisionPreview,
+)
+async def preview_fixed_asset_service_date_endpoint(
+    asset_id: uuid.UUID,
+    body: FixedAssetServiceDateRevisionInput,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> FixedAssetServiceDateRevisionPreview:
+    _owner_only(user)
+    from jai.services.fixed_asset import preview_service_date_revision
+
+    try:
+        return await preview_service_date_revision(
+            session, _require_company_id(user), asset_id, body
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FixedAssetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post(
+    "/fixed-assets/{asset_id}/service-date/revisions",
+    response_model=FixedAssetRead,
+)
+async def revise_fixed_asset_service_date_endpoint(
+    asset_id: uuid.UUID,
+    body: FixedAssetServiceDateRevisionInput,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> FixedAssetRead:
+    _owner_only(user)
+    from jai.services.fixed_asset import revise_service_date
+
+    try:
+        return await revise_service_date(
+            session, _require_company_id(user), user.id, asset_id, body
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FixedAssetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/fixed-assets/{asset_id}/revisions", response_model=list[FixedAssetRevisionRead])
+async def get_fixed_asset_revisions_endpoint(
+    asset_id: uuid.UUID,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[FixedAssetRevisionRead]:
+    _owner_only(user)
+    from jai.services.fixed_asset import list_asset_revisions
+
+    try:
+        return await list_asset_revisions(session, _require_company_id(user), asset_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

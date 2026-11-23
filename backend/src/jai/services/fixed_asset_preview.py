@@ -7,8 +7,10 @@ import hmac
 import json
 import uuid
 from calendar import monthrange
+from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
+from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +39,23 @@ _ZERO = Decimal("0.00")
 
 class FixedAssetConflict(ValueError):
     """A conversion is blocked by a linked or previously registered record."""
+
+
+class AnnualBusinessUse(Protocol):
+    year: int
+    estimated_business_percentage: Decimal
+    actual_business_percentage: Decimal | None
+
+
+def validate_fixed_asset_schedule_window(
+    in_service_date: date, useful_life_years: int, acquisition_year: int
+) -> None:
+    """Reject schedules outside the supported calendar and preview horizon."""
+    end_year = in_service_date.year + useful_life_years
+    if end_year > acquisition_year + 100:
+        raise ValueError("In-service date and useful life exceed the 100-year preview window.")
+    if end_year > 9999:
+        raise ValueError("Useful life extends beyond the supported calendar range.")
 
 
 def _fixed_asset_preview_token(
@@ -125,6 +144,48 @@ def build_monthly_fixed_asset_schedule(
     return schedule
 
 
+def apply_yearly_business_use(
+    schedule: list[FixedAssetMonthlyDepreciation],
+    initial_percentage: Decimal,
+    annual_uses: Sequence[AnnualBusinessUse],
+    use_type: str,
+) -> set[int]:
+    """Apply annual percentages using cumulative rounding within each calendar year."""
+    if use_type == "FULL_BUSINESS":
+        return set()
+    annuals = sorted(annual_uses, key=lambda item: item.year)
+    provisional_years: set[int] = set()
+    rows_by_year: dict[int, list[FixedAssetMonthlyDepreciation]] = {}
+    for row in schedule:
+        rows_by_year.setdefault(row.period_end.year, []).append(row)
+    for year, rows in rows_by_year.items():
+        current_year = next((item for item in reversed(annuals) if item.year == year), None)
+        # A later provisional year supersedes older actuals for all following
+        # years until another explicit annual row is entered.
+        applicable = current_year or next(
+            (item for item in reversed(annuals) if item.year <= year), None
+        )
+        if applicable is None:
+            percentage = initial_percentage
+            provisional_years.add(year)
+        else:
+            actual = applicable.actual_business_percentage
+            percentage = Decimal(
+                str(actual if actual is not None else applicable.estimated_business_percentage)
+            )
+            if current_year is None or current_year.actual_business_percentage is None:
+                provisional_years.add(year)
+        cumulative_full = Decimal("0.00")
+        cumulative_business = Decimal("0.00")
+        for row in rows:
+            cumulative_full += row.amount
+            target = quantize_to_minor_unit(cumulative_full * percentage / Decimal("100"))
+            row.business_amount = target - cumulative_business
+            row.private_use_reduction = row.amount - row.business_amount
+            cumulative_business = target
+    return provisional_years
+
+
 def build_fixed_asset_preview(
     expense: Expense,
     request: FixedAssetPreviewRequest,
@@ -168,13 +229,9 @@ def build_fixed_asset_preview(
     if request.in_service_date is not None:
         if request.in_service_date < expense.expense_date:
             raise ValueError("In-service date cannot be earlier than the purchase date.")
-        if (
-            request.in_service_date.year + request.useful_life_years
-            > expense.expense_date.year + 100
-        ):
-            raise ValueError("In-service date and useful life exceed the 100-year preview window.")
-        if request.in_service_date.year + request.useful_life_years > 9999:
-            raise ValueError("Useful life extends beyond the supported calendar range.")
+        validate_fixed_asset_schedule_window(
+            request.in_service_date, request.useful_life_years, expense.expense_date.year
+        )
         schedule = build_monthly_fixed_asset_schedule(
             cost,
             residual,
@@ -182,6 +239,10 @@ def build_fixed_asset_preview(
             request.in_service_date,
             request.business_percentage,
         )
+        # Conversion preview and booked/report paths share year-local
+        # cumulative percentage rounding. Starting at month-level rounded
+        # percentages drifts by a cent across calendar boundaries.
+        apply_yearly_business_use(schedule, request.business_percentage, (), request.use_type)
     legacy = compute_stored_cost_preview(expense).annual_cost
     as_of = date.today()
     # Cover every proposed schedule month and every supported legacy anniversary
@@ -356,16 +417,23 @@ async def preview_expense_fixed_asset(
     expense = await _load_expense(session, expense_id, company_id)
     from jai.models.fixed_asset import FixedAsset
 
-    if await session.scalar(
-        select(FixedAsset.id).where(FixedAsset.acquisition_expense_id == expense_id)
-    ) is not None:
+    if (
+        await session.scalar(
+            select(FixedAsset.id).where(FixedAsset.acquisition_expense_id == expense_id)
+        )
+        is not None
+    ):
         raise FixedAssetConflict("This purchase is already linked to a fixed asset.")
     from jai.models.battery import BatteryAsset
 
-    if await session.scalar(
-        select(BatteryAsset.id).where(BatteryAsset.acquisition_expense_id == expense_id)
-    ) is not None:
-        raise FixedAssetConflict(
-            "Battery-linked purchases require the M20 Step 3 shared asset workflow."
-        )
+    battery_asset = await session.scalar(
+        select(BatteryAsset).where(BatteryAsset.acquisition_expense_id == expense_id)
+    )
+    if battery_asset is not None:
+        if request.in_service_date is None:
+            request = request.model_copy(update={"in_service_date": battery_asset.in_service_date})
+        elif request.in_service_date != battery_asset.in_service_date:
+            raise FixedAssetConflict(
+                "The fixed asset and battery must use the same in-service date."
+            )
     return build_fixed_asset_preview(expense, request, company_id=company_id)
