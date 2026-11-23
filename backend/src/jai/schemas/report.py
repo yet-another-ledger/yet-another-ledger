@@ -146,6 +146,10 @@ class ProfitLossSeriesItem(BaseModel):
             "in this period (EUR)."
         )
     )
+    fixed_asset_depreciation: Decimal = Field(
+        default=Decimal("0"),
+        description="Completed-month fixed asset depreciation in this period (EUR).",
+    )
     profit_before_mileage: Decimal = Field(
         description="Revenue net minus non-mileage expense cost for this period (EUR)."
     )
@@ -192,6 +196,10 @@ class ProfitLossReport(BaseModel):
         description=(
             "Total depreciation-adjusted, business%-prorated non-mileage expense cost (EUR)."
         )
+    )
+    fixed_asset_depreciation: Decimal = Field(
+        default=Decimal("0"),
+        description="Completed-month fixed asset depreciation across the range (EUR).",
     )
     profit_before_mileage: Decimal = Field(
         description="Total revenue net minus non-mileage expense cost (EUR)."
@@ -494,6 +502,10 @@ class DashboardKpi(BaseModel):
     ytd_expense: Decimal = Field(
         description="Year-to-date depreciation-adjusted, business%-prorated expense (EUR)."
     )
+    ytd_fixed_asset_depreciation: Decimal = Field(
+        default=Decimal("0"),
+        description="Year-to-date fixed-asset depreciation included in ytd_expense (EUR).",
+    )
     ytd_profit: Decimal = Field(description="ytd_revenue − ytd_expense (EUR).")
     current_quarter_vat_payable: Decimal = Field(
         description=(
@@ -514,6 +526,10 @@ class DashboardMonthly(BaseModel):
     revenue: Decimal = Field(description="Net revenue in this month (EUR).")
     expense: Decimal = Field(
         description="Depreciation-adjusted, business%-prorated expense in this month (EUR)."
+    )
+    fixed_asset_depreciation: Decimal = Field(
+        default=Decimal("0"),
+        description="Fixed-asset depreciation included in this month's expense (EUR).",
     )
     profit: Decimal = Field(description="revenue − expense for this month (EUR).")
 

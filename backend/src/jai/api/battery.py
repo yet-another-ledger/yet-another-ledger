@@ -68,6 +68,7 @@ def _raise(exc: Exception) -> NoReturn:
             if exc.code
             in {
                 "BATTERY_ACQUISITION_ALREADY_REGISTERED",
+                "BATTERY_FIXED_ASSET_LINKED",
                 "BATTERY_HISTORICAL_ACK_REQUIRED",
                 "BATTERY_VERSION_CONFLICT",
                 "BATTERY_PREVIEW_STALE",

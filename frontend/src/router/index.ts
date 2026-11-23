@@ -245,6 +245,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true },
       },
       {
+        path: 'fixed-assets',
+        name: 'fixed-asset-register',
+        component: () => import('../views/FixedAssetRegister.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
         path: 'recurring-expenses',
         name: 'recurring-expense-list',
         component: () => import('../views/expenses/RecurringExpenseList.vue'),

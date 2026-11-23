@@ -2755,6 +2755,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fixed-assets/expenses/{expense_id}/convert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Convert Expense Fixed Asset Endpoint */
+        post: operations["convert_expense_fixed_asset_endpoint_api_v1_fixed_assets_expenses__expense_id__convert_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fixed-assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Fixed Assets Endpoint */
+        get: operations["list_fixed_assets_endpoint_api_v1_fixed_assets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fixed-assets/{asset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Fixed Asset Endpoint */
+        get: operations["get_fixed_asset_endpoint_api_v1_fixed_assets__asset_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses/ai-extract": {
         parameters: {
             query?: never;
@@ -4449,7 +4500,7 @@ export interface components {
          * BatteryConflictCode
          * @enum {string}
          */
-        BatteryConflictCode: "BATTERY_ACQUISITION_ALREADY_REGISTERED" | "BATTERY_EXPENSE_INELIGIBLE" | "BATTERY_OWNER_CONFIRMATION_REQUIRED" | "BATTERY_HISTORICAL_ACK_REQUIRED" | "BATTERY_VERSION_CONFLICT" | "BATTERY_YEAR_NOT_APPLICABLE" | "BATTERY_ANNUAL_INPUT_MISSING" | "BATTERY_ANNUAL_CONFIRMED" | "BATTERY_ANNUAL_ALREADY_CONFIRMED" | "BATTERY_REVISION_REQUIRED" | "BATTERY_REVISION_NO_CHANGES" | "BATTERY_REVISION_PERIOD_ACK_REQUIRED" | "BATTERY_PREVIEW_STALE" | "BATTERY_EXPENSE_PROTECTED" | "BATTERY_EVIDENCE_INVALID";
+        BatteryConflictCode: "BATTERY_ACQUISITION_ALREADY_REGISTERED" | "BATTERY_FIXED_ASSET_LINKED" | "BATTERY_EXPENSE_INELIGIBLE" | "BATTERY_OWNER_CONFIRMATION_REQUIRED" | "BATTERY_HISTORICAL_ACK_REQUIRED" | "BATTERY_VERSION_CONFLICT" | "BATTERY_YEAR_NOT_APPLICABLE" | "BATTERY_ANNUAL_INPUT_MISSING" | "BATTERY_ANNUAL_CONFIRMED" | "BATTERY_ANNUAL_ALREADY_CONFIRMED" | "BATTERY_REVISION_REQUIRED" | "BATTERY_REVISION_NO_CHANGES" | "BATTERY_REVISION_PERIOD_ACK_REQUIRED" | "BATTERY_PREVIEW_STALE" | "BATTERY_EXPENSE_PROTECTED" | "BATTERY_EVIDENCE_INVALID";
         /** BatteryConflictDetail */
         BatteryConflictDetail: {
             code: components["schemas"]["BatteryConflictCode"];
@@ -5088,6 +5139,12 @@ export interface components {
              */
             ytd_expense: string;
             /**
+             * Ytd Fixed Asset Depreciation
+             * @description Year-to-date fixed-asset depreciation included in ytd_expense (EUR).
+             * @default 0
+             */
+            ytd_fixed_asset_depreciation?: string;
+            /**
              * Ytd Profit
              * @description ytd_revenue − ytd_expense (EUR).
              */
@@ -5121,6 +5178,12 @@ export interface components {
              * @description Depreciation-adjusted, business%-prorated expense in this month (EUR).
              */
             expense: string;
+            /**
+             * Fixed Asset Depreciation
+             * @description Fixed-asset depreciation included in this month's expense (EUR).
+             * @default 0
+             */
+            fixed_asset_depreciation?: string;
             /**
              * Profit
              * @description revenue − expense for this month (EUR).
@@ -6578,7 +6641,7 @@ export interface components {
         };
         /**
          * ExpenseCostPreviewResult
-         * @description Backend-calculated cost basis and annual recognized amount.
+         * @description Saved expense cost inputs; linked purchases also include effective asset P&L cost.
          */
         ExpenseCostPreviewResult: {
             /** Cost Basis Amount */
@@ -6587,6 +6650,10 @@ export interface components {
             annual_cost: string;
             /** Included In Pl */
             included_in_pl: boolean;
+            /** Linked Fixed Asset Id */
+            linked_fixed_asset_id?: string | null;
+            /** Effective Annual Cost */
+            effective_annual_cost?: string | null;
         };
         /**
          * ExpenseInput
@@ -7457,6 +7524,29 @@ export interface components {
             /** Gross Amount */
             gross_amount: string;
         };
+        /**
+         * FixedAssetConfirmRequest
+         * @description Terms previously previewed by the server, bound by its signed token.
+         */
+        FixedAssetConfirmRequest: {
+            /** Asset Name */
+            asset_name: string;
+            /** In Service Date */
+            in_service_date?: string | null;
+            /** Useful Life Years */
+            useful_life_years: number;
+            /** Residual Value */
+            residual_value: number | string;
+            /** Business Percentage */
+            business_percentage: number | string;
+            /**
+             * Use Type
+             * @enum {string}
+             */
+            use_type: "FULL_BUSINESS" | "MIXED_USE";
+            /** Preview Token */
+            preview_token: string;
+        };
         /** FixedAssetMonthlyDepreciation */
         FixedAssetMonthlyDepreciation: {
             /**
@@ -7534,6 +7624,10 @@ export interface components {
              * Format: uuid
              */
             expense_id: string;
+            /** Source Updated At */
+            source_updated_at?: string | null;
+            /** Preview Token */
+            preview_token: string;
             /**
              * Expense Date
              * Format: date
@@ -7578,6 +7672,40 @@ export interface components {
             period_deltas: components["schemas"]["FixedAssetPeriodDelta"][];
             /** Monthly Schedule */
             monthly_schedule: components["schemas"]["FixedAssetMonthlyDepreciation"][];
+            /** Yearly Deltas */
+            yearly_deltas: components["schemas"]["FixedAssetYearDelta"][];
+        };
+        /** FixedAssetRead */
+        FixedAssetRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Acquisition Expense Id
+             * Format: uuid
+             */
+            acquisition_expense_id: string;
+            /** Name */
+            name: string;
+            /**
+             * Acquisition Date
+             * Format: date
+             */
+            acquisition_date: string;
+            /** In Service Date */
+            in_service_date: string | null;
+            /** Acquisition Cost */
+            acquisition_cost: string;
+            /** Residual Value */
+            residual_value: string;
+            /** Useful Life Years */
+            useful_life_years: number;
+            /** Business Percentage */
+            business_percentage: string;
+            /** Pending In Service */
+            pending_in_service: boolean;
             /** Yearly Deltas */
             yearly_deltas: components["schemas"]["FixedAssetYearDelta"][];
         };
@@ -10168,6 +10296,12 @@ export interface components {
              */
             other_expense_actual: string;
             /**
+             * Fixed Asset Depreciation
+             * @description Completed-month fixed asset depreciation across the range (EUR).
+             * @default 0
+             */
+            fixed_asset_depreciation?: string;
+            /**
              * Profit Before Mileage
              * @description Total revenue net minus non-mileage expense cost (EUR).
              */
@@ -10229,6 +10363,12 @@ export interface components {
              * @description Depreciation-adjusted, business%-prorated non-mileage expense cost in this period (EUR).
              */
             other_expense_actual: string;
+            /**
+             * Fixed Asset Depreciation
+             * @description Completed-month fixed asset depreciation in this period (EUR).
+             * @default 0
+             */
+            fixed_asset_depreciation?: string;
             /**
              * Profit Before Mileage
              * @description Revenue net minus non-mileage expense cost for this period (EUR).
@@ -18924,6 +19064,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FixedAssetPreviewResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    convert_expense_fixed_asset_endpoint_api_v1_fixed_assets_expenses__expense_id__convert_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FixedAssetConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_fixed_assets_endpoint_api_v1_fixed_assets_get: {
+        parameters: {
+            query?: {
+                year?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fixed_asset_endpoint_api_v1_fixed_assets__asset_id__get: {
+        parameters: {
+            query?: {
+                year?: number | null;
+            };
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetRead"];
                 };
             };
             /** @description Validation Error */

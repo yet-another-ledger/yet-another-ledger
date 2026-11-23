@@ -33,6 +33,7 @@ from jai.db import get_session
 from jai.models.user import User
 from jai.schemas.expense import ExpenseAttachmentListResponse, ExpenseAttachmentRead
 from jai.services.expense import (
+    ExpenseConflict,
     add_attachment,
     delete_attachment,
     get_attachment_content,
@@ -113,6 +114,11 @@ async def upload_attachment_endpoint(
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ExpenseConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "detail": str(exc)},
         ) from exc
     except ReceiptValidationError as exc:
         raise HTTPException(
@@ -214,4 +220,9 @@ async def delete_attachment_endpoint(
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ExpenseConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "detail": str(exc)},
         ) from exc

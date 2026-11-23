@@ -76,6 +76,7 @@ const navOptions = computed<MenuOption[]>(() => [
   { label: t('nav.estimates'), key: 'estimate-list', icon: renderIcon(CalculatorOutline) },
   { label: t('nav.payments'), key: 'payment-list', icon: renderIcon(WalletOutline) },
   { label: t('nav.expenses'), key: 'expense-list', icon: renderIcon(CardOutline) },
+  { label: t('nav.fixedAssets'), key: 'fixed-assets', icon: renderIcon(CubeOutline) },
   { label: t('nav.receiptInbox'), key: 'receipt-inbox', icon: renderIcon(AlbumsOutline) },
   { label: t('nav.externalSales'), key: 'external-sales-list', icon: renderIcon(CashOutline) },
   ...(showBatteryAssets.value
@@ -106,6 +107,7 @@ const activeKey = computed<string | null>(() => {
   if (typeof name === 'string' && name.startsWith('payment')) return 'payment-list'
   if (typeof name === 'string' && name.startsWith('recurring-expense')) return 'recurring-expense-list'
   if (typeof name === 'string' && name.startsWith('expense')) return 'expense-list'
+  if (typeof name === 'string' && name.startsWith('fixed-asset')) return 'fixed-assets'
   if (typeof name === 'string' && name.startsWith('receipt-inbox')) return 'receipt-inbox'
   if (typeof name === 'string' && name.startsWith('external-sales')) return 'external-sales-list'
   if (typeof name === 'string' && name.startsWith('battery-asset')) return 'battery-assets'
@@ -154,6 +156,7 @@ function handleNav(key: string) {
   else if (key === 'estimate-list') void router.push('/estimates')
   else if (key === 'payment-list') void router.push('/payments')
   else if (key === 'expense-list') void router.push({ path: '/expenses', query: { tab: 'purchase' } })
+  else if (key === 'fixed-assets') void router.push('/fixed-assets')
   else if (key === 'receipt-inbox') void router.push('/receipt-inbox')
   else if (key === 'external-sales-list') void router.push('/external-sales')
   else if (key === 'battery-assets') void router.push('/battery-assets')

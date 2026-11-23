@@ -150,6 +150,12 @@ async def preview_asset(
     )
     if exists is not None:
         conflict = BatteryConflictCode.ACQUISITION_ALREADY_REGISTERED
+    from jai.models.fixed_asset import FixedAsset
+
+    if await session.scalar(
+        select(FixedAsset.id).where(FixedAsset.acquisition_expense_id == expense.id)
+    ) is not None:
+        conflict = BatteryConflictCode.FIXED_ASSET_LINKED
     if body.in_service_date < expense.expense_date:
         conflict = BatteryConflictCode.EXPENSE_INELIGIBLE
         warning.append("The in-service date cannot precede the acquisition date.")

@@ -550,6 +550,33 @@ async def update_expense(
     """
     exp = await _load_expense(session, expense_id, company_id, for_update=True)
     battery_registered = await _registered_battery_expense(session, exp, company_id)
+    from jai.models.fixed_asset import FixedAsset
+
+    fixed_asset_registered = (
+        await session.scalar(
+            select(FixedAsset.id).where(FixedAsset.acquisition_expense_id == expense_id)
+        )
+        is not None
+    )
+    if fixed_asset_registered and (
+        body.expense_date != exp.expense_date
+        or body.net_amount != Decimal(str(exp.net_amount))
+        or body.vat_amount != Decimal(str(exp.vat_amount))
+        or body.vat_treatment_id != exp.vat_treatment_id
+        or body.vat_rate_id != exp.vat_rate_id
+        or (body.deductible is not None and body.deductible != exp.deductible)
+        or body.business_percentage != Decimal(str(exp.business_percentage))
+        or body.depreciation_years != exp.depreciation_years
+        or (
+            "include_in_pl" in body.model_fields_set
+            and body.include_in_pl != exp.include_in_pl
+        )
+        or (
+            "pl_cost_basis" in body.model_fields_set
+            and body.pl_cost_basis.value != exp.pl_cost_basis
+        )
+    ):
+        raise ExpenseConflict("Fixed asset acquisition financial fields are protected.")
     frozen_fields: dict[str, object] = {}
     if battery_registered:
         if (
@@ -591,13 +618,39 @@ async def update_expense(
         )
     # PUT always confirms the draft (step-1 contract: PUT sets is_draft → False).
     exp.is_draft = False
-    await _apply_body(
-        session, exp, body, company_id, preserve_tax_snapshot=battery_registered
-    )
+    fixed_asset_frozen: dict[str, object] = {}
+    if fixed_asset_registered:
+        fixed_names = (
+            "expense_date",
+            "vat_treatment_id",
+            "vat_treatment_code",
+            "vat_treatment_label",
+            "vat_treatment_effect",
+            "vat_rate_id",
+            "vat_rate_percent",
+            "vat_rate_label",
+            "net_amount",
+            "vat_amount",
+            "gross_amount",
+            "deductible",
+            "currency",
+            "exchange_rate",
+            "base_net_amount",
+            "base_vat_amount",
+            "base_gross_amount",
+            "business_percentage",
+            "depreciation_years",
+            "include_in_pl",
+            "pl_cost_basis",
+        )
+        fixed_asset_frozen = {name: getattr(exp, name) for name in fixed_names}
+    await _apply_body(session, exp, body, company_id, preserve_tax_snapshot=battery_registered)
     if battery_registered:
         for name, value in frozen_fields.items():
             setattr(exp, name, value)
         exp.include_in_pl = False
+    for name, value in fixed_asset_frozen.items():
+        setattr(exp, name, value)
     await session.commit()
     await session.refresh(exp)
     count = await _count_attachments(session, expense_id)
@@ -623,6 +676,16 @@ async def delete_expense(
     exp = await _load_expense(session, expense_id, company_id, for_update=True)
     if await _registered_battery_expense(session, exp, company_id):
         raise ExpenseConflict("Registered battery acquisition cannot be deleted.")
+    from jai.models.fixed_asset import FixedAsset
+
+    fixed_asset_registered = (
+        await session.scalar(
+            select(FixedAsset.id).where(FixedAsset.acquisition_expense_id == expense_id)
+        )
+        is not None
+    )
+    if fixed_asset_registered:
+        raise ExpenseConflict("Fixed asset acquisition cannot be deleted.")
 
     # Snapshot keys before the DB cascade removes attachment metadata.
     keys: list[str] = []
@@ -898,9 +961,39 @@ async def get_expense_cost_preview(
     expense_id: uuid.UUID,
     company_id: uuid.UUID,
 ) -> ExpenseCostPreviewResult:
-    """Read authoritative current cost without reinterpreting mutable dictionaries."""
+    """Read saved cost inputs and any linked asset's effective current-year cost."""
+    await set_rls_company(session, company_id)
     expense = await _load_expense(session, expense_id, company_id)
-    return compute_stored_cost_preview(expense)
+    result = compute_stored_cost_preview(expense)
+    from jai.models.fixed_asset import FixedAsset
+
+    linked_asset = await session.scalar(
+        select(FixedAsset).where(FixedAsset.acquisition_expense_id == expense.id)
+    )
+    if linked_asset is not None:
+        if linked_asset.in_service_date is not None:
+            from jai.services.fixed_asset_preview import build_monthly_fixed_asset_schedule
+
+            effective = build_monthly_fixed_asset_schedule(
+                linked_asset.acquisition_cost,
+                linked_asset.residual_value,
+                linked_asset.useful_life_years,
+                linked_asset.in_service_date,
+                linked_asset.business_percentage,
+            )
+            as_of = date.today()
+            result.effective_annual_cost = sum(
+                (
+                    row.business_amount
+                    for row in effective
+                    if row.period_end.year == as_of.year and row.period_end <= as_of
+                ),
+                Decimal("0"),
+            )
+        else:
+            result.effective_annual_cost = Decimal("0")
+        result.linked_fixed_asset_id = linked_asset.id
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1080,6 +1173,16 @@ async def delete_attachment(
     att = await _load_attachment(session, attachment_id, company_id)
     if isinstance(att.receipt_inbox_id, uuid.UUID):
         raise LookupError("Pending inbox attachments can only be removed through the inbox.")
+    if att.expense_id is not None:
+        from jai.models.fixed_asset import FixedAsset
+
+        # Serialize against conversion's purchase row lock before touching bytes.
+        await _load_expense(session, att.expense_id, company_id, for_update=True)
+        registered = await session.scalar(
+            select(FixedAsset.id).where(FixedAsset.acquisition_expense_id == att.expense_id)
+        )
+        if registered is not None:
+            raise ExpenseConflict("Fixed asset acquisition receipts must be retained.")
     key = att.storage_key
 
     # Delete disk file (best-effort; failures logged but not raised)

@@ -226,7 +226,11 @@ const topCategoryColumns = computed<DataTableColumns<DashboardTopCategory>>(() =
                   <n-statistic :label="t('dashboard.ytdRevenue')" :value="kpiRevenue" />
                 </n-gi>
                 <n-gi>
-                  <n-statistic :label="t('dashboard.ytdExpense')" :value="kpiExpense" />
+                  <n-statistic :label="t('dashboard.ytdExpense')" :value="kpiExpense">
+                    <template #suffix>
+                      <span class="kpi-hint">{{ t('fixedAssets.depreciation') }} {{ fmtMoney(store.dashboardReport.kpi.ytd_fixed_asset_depreciation) }}</span>
+                    </template>
+                  </n-statistic>
                 </n-gi>
                 <n-gi>
                   <n-statistic

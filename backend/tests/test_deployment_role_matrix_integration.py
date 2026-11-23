@@ -74,7 +74,7 @@ def _wait_for_postgres(name: str, user: str) -> None:
     """Wait for a named disposable server before a host process connects."""
     for _ in range(60):
         result = subprocess.run(
-            ("docker", "exec", name, "pg_isready", "-U", user),
+            ("docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-U", user),
             text=True,
             capture_output=True,
             check=False,

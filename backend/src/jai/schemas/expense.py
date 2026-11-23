@@ -267,11 +267,13 @@ class ExpenseCostPreviewRequest(BaseModel):
 
 
 class ExpenseCostPreviewResult(BaseModel):
-    """Backend-calculated cost basis and annual recognized amount."""
+    """Saved expense cost inputs; linked purchases also include effective asset P&L cost."""
 
     cost_basis_amount: Decimal
     annual_cost: Decimal
     included_in_pl: bool
+    linked_fixed_asset_id: uuid.UUID | None = None
+    effective_annual_cost: Decimal | None = None
 
 
 class FixedAssetPreviewRequest(BaseModel):
@@ -338,6 +340,8 @@ class FixedAssetPeriodDelta(BaseModel):
 
 class FixedAssetPreviewResult(BaseModel):
     expense_id: uuid.UUID
+    source_updated_at: datetime | None = None
+    preview_token: str
     expense_date: date
     acquisition_cost: Decimal
     residual_value: Decimal
@@ -354,6 +358,26 @@ class FixedAssetPreviewResult(BaseModel):
     legacy_preview_truncated: bool
     period_deltas: list[FixedAssetPeriodDelta]
     monthly_schedule: list[FixedAssetMonthlyDepreciation]
+    yearly_deltas: list[FixedAssetYearDelta]
+
+
+class FixedAssetConfirmRequest(FixedAssetPreviewRequest):
+    """Terms previously previewed by the server, bound by its signed token."""
+
+    preview_token: str = Field(min_length=64, max_length=64, pattern="^[0-9a-f]{64}$")
+
+
+class FixedAssetRead(BaseModel):
+    id: uuid.UUID
+    acquisition_expense_id: uuid.UUID
+    name: str
+    acquisition_date: date
+    in_service_date: date | None
+    acquisition_cost: Decimal
+    residual_value: Decimal
+    useful_life_years: int
+    business_percentage: Decimal
+    pending_in_service: bool
     yearly_deltas: list[FixedAssetYearDelta]
 
 

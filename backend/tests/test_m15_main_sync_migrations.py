@@ -35,7 +35,7 @@ def test_m18_step2_follows_si4_with_one_unambiguous_head() -> None:
     assert scripts.get_revision("0056").down_revision == "0055"
     assert scripts.get_revision("0057").down_revision == "0056"
     assert scripts.get_revision("0058").down_revision == "0057"
-    assert scripts.get_heads() == ["0058"]
+    assert scripts.get_heads() == ["0059"]
     revisions = list(scripts.walk_revisions())
     assert len(revisions) == len({revision.revision for revision in revisions})
 
@@ -81,7 +81,9 @@ def test_m18_scope_migration_preserves_old_tokens_and_guards_revoked_scope_downg
                 company_id=company_id,
             )
 
-        result = _run_alembic("upgrade", "head", url=isolated_url)
+        # This regression intentionally exercises the historical M18 downgrade;
+        # Step 2 adds 0059 after that target.
+        result = _run_alembic("upgrade", "0058", url=isolated_url)
         assert result.returncode == 0, result.stderr
         assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
             {"version_num": "0058"}
@@ -188,7 +190,8 @@ def test_si4_scope_migration_preserves_old_tokens_and_guards_cross_company_downg
                 company_id=company_id,
             )
 
-        result = _run_alembic("upgrade", "head", url=isolated_url)
+        # Pin the historical SI4 downgrade fixture before the new 0059 head.
+        result = _run_alembic("upgrade", "0058", url=isolated_url)
         assert result.returncode == 0, result.stderr
         assert _query(isolated_url, "SELECT version_num FROM alembic_version") == [
             {"version_num": "0058"}

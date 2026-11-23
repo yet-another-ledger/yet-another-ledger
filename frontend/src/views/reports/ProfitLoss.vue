@@ -162,6 +162,14 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
     },
   },
   {
+    title: t('reports.pl.fixedAssetDepreciation'),
+    key: 'fixed_asset_depreciation',
+    align: 'right',
+    render(row) {
+      return fmtMoney(row.fixed_asset_depreciation)
+    },
+  },
+  {
     title: t('reports.pl.otherExpenseActual'),
     key: 'other_expense_actual',
     align: 'right',
@@ -251,6 +259,12 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
             <n-grid-item>
               <n-card>
                 <n-statistic :label="t('reports.pl.revenueNet')" :value="summaryRevenue" />
+              </n-card>
+            </n-grid-item>
+            <n-grid-item>
+              <n-card>
+                <n-statistic :label="t('reports.pl.fixedAssetDepreciation')" :value="fmtMoney(store.plReport.fixed_asset_depreciation)" />
+                <n-text depth="3">{{ t('reports.pl.fixedAssetDepreciationNote') }}</n-text>
               </n-card>
             </n-grid-item>
             <n-grid-item>

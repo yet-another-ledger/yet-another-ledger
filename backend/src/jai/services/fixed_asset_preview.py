@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import uuid
 from calendar import monthrange
 from datetime import date
 from decimal import Decimal
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jai.auth.secret import get_auth_secret
 from jai.db import set_rls_company
 from jai.models._enums import ExpenseKind, PlCostBasis, VatTreatmentEffect
 from jai.models.expense import Expense
@@ -30,9 +35,101 @@ from jai.services.reporting.pl import _anniversary_date
 _ZERO = Decimal("0.00")
 
 
+class FixedAssetConflict(ValueError):
+    """A conversion is blocked by a linked or previously registered record."""
+
+
+def _fixed_asset_preview_token(
+    company_id: uuid.UUID,
+    expense: Expense,
+    request: FixedAssetPreviewRequest,
+    acquisition_cost: Decimal,
+    reporting_as_of: date,
+) -> str:
+    payload = {
+        "version": 1,
+        "company_id": str(company_id),
+        "expense_id": str(expense.id),
+        "source_updated_at": expense.updated_at.isoformat() if expense.updated_at else None,
+        "acquisition_cost": str(acquisition_cost),
+        "reporting_as_of": reporting_as_of.isoformat(),
+        "terms": {
+            "asset_name": request.asset_name.strip(),
+            "in_service_date": request.in_service_date.isoformat()
+            if request.in_service_date
+            else None,
+            "useful_life_years": request.useful_life_years,
+            "residual_value": format(request.residual_value.normalize(), "f"),
+            "business_percentage": format(request.business_percentage.normalize(), "f"),
+            "use_type": request.use_type,
+        },
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hmac.new(
+        get_auth_secret().encode("utf-8"),
+        b"jai:m20:fixed-asset-preview:v1:" + encoded,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def build_monthly_fixed_asset_schedule(
+    acquisition_cost: Decimal,
+    residual_value: Decimal,
+    useful_life_years: int,
+    in_service_date: date,
+    business_percentage: Decimal,
+) -> list[FixedAssetMonthlyDepreciation]:
+    """Build the shared monthly schedule without report-preview projections."""
+    depreciable = acquisition_cost - residual_value
+    schedule: list[FixedAssetMonthlyDepreciation] = []
+    cumulative = _ZERO
+    business_cumulative = _ZERO
+    start = in_service_date
+    schedule_months = useful_life_years * 12 + (1 if start.day > 1 else 0)
+    first_month_days = monthrange(start.year, start.month)[1]
+    first_month_weight = first_month_days - start.day + 1
+    total_weight = useful_life_years * 12 * first_month_days
+    for offset in range(schedule_months):
+        month_index = start.month - 1 + offset
+        year = start.year + month_index // 12
+        month = month_index % 12 + 1
+        days_in_month = monthrange(year, month)[1]
+        cumulative_weight = first_month_weight + offset * first_month_days
+        target_cumulative = (
+            depreciable
+            if offset == schedule_months - 1
+            else quantize_to_minor_unit(
+                depreciable * Decimal(cumulative_weight) / Decimal(total_weight)
+            )
+        )
+        amount = target_cumulative - cumulative
+        cumulative += amount
+        target_business_cumulative = (
+            quantize_to_minor_unit(depreciable * business_percentage / Decimal("100"))
+            if offset == schedule_months - 1
+            else quantize_to_minor_unit(cumulative * business_percentage / Decimal("100"))
+        )
+        business_amount = target_business_cumulative - business_cumulative
+        business_cumulative = target_business_cumulative
+        schedule.append(
+            FixedAssetMonthlyDepreciation(
+                period_end=date(year, month, days_in_month),
+                amount=amount,
+                business_amount=business_amount,
+                private_use_reduction=amount - business_amount,
+                opening_book_value=acquisition_cost - cumulative + amount,
+                cumulative_amount=cumulative,
+                closing_book_value=acquisition_cost - cumulative,
+            )
+        )
+    return schedule
+
+
 def build_fixed_asset_preview(
     expense: Expense,
     request: FixedAssetPreviewRequest,
+    *,
+    company_id: uuid.UUID | None = None,
 ) -> FixedAssetPreviewResult:
     """Pure calculation for the proposed asset; it never mutates the purchase."""
     if ExpenseKind(expense.kind) != ExpenseKind.PURCHASE:
@@ -45,14 +142,18 @@ def build_fixed_asset_preview(
     if request.use_type == "FULL_BUSINESS" and request.business_percentage != 100:
         raise ValueError("Full-business use requires 100% business use.")
 
-    cost = compute_pl_cost_basis(
-        Decimal(str(expense.base_net_amount)),
-        Decimal(str(expense.base_vat_amount)),
-        VatTreatmentEffect(expense.vat_treatment_effect),
-        expense.deductible,
-        PlCostBasis.AUTO,
-        expense.vat_treatment_code,
-        Decimal(str(expense.base_gross_amount)),
+    # Preserve the saved Expense at its original precision. The new asset's
+    # locked, reportable acquisition basis follows M7.5's EUR minor-unit rule.
+    cost = quantize_to_minor_unit(
+        compute_pl_cost_basis(
+            Decimal(str(expense.base_net_amount)),
+            Decimal(str(expense.base_vat_amount)),
+            VatTreatmentEffect(expense.vat_treatment_effect),
+            expense.deductible,
+            PlCostBasis.AUTO,
+            expense.vat_treatment_code,
+            Decimal(str(expense.base_gross_amount)),
+        )
     )
     residual = request.residual_value
     if residual > cost:
@@ -74,48 +175,13 @@ def build_fixed_asset_preview(
             raise ValueError("In-service date and useful life exceed the 100-year preview window.")
         if request.in_service_date.year + request.useful_life_years > 9999:
             raise ValueError("Useful life extends beyond the supported calendar range.")
-        cumulative = _ZERO
-        business_cumulative = _ZERO
-        start = request.in_service_date
-        schedule_months = request.useful_life_years * 12 + (1 if start.day > 1 else 0)
-        first_month_days = monthrange(start.year, start.month)[1]
-        first_month_weight = first_month_days - start.day + 1
-        total_weight = request.useful_life_years * 12 * first_month_days
-        for offset in range(schedule_months):
-            month_index = start.month - 1 + offset
-            year = start.year + month_index // 12
-            month = month_index % 12 + 1
-            days_in_month = monthrange(year, month)[1]
-            cumulative_weight = first_month_weight + offset * first_month_days
-            target_cumulative = (
-                depreciable
-                if offset == schedule_months - 1
-                else quantize_to_minor_unit(
-                    depreciable * Decimal(cumulative_weight) / Decimal(total_weight)
-                )
-            )
-            amount = target_cumulative - cumulative
-            cumulative += amount
-            target_business_cumulative = (
-                quantize_to_minor_unit(depreciable * request.business_percentage / Decimal("100"))
-                if offset == schedule_months - 1
-                else quantize_to_minor_unit(
-                    cumulative * request.business_percentage / Decimal("100")
-                )
-            )
-            business_amount = target_business_cumulative - business_cumulative
-            business_cumulative = target_business_cumulative
-            schedule.append(
-                FixedAssetMonthlyDepreciation(
-                    period_end=date(year, month, days_in_month),
-                    amount=amount,
-                    business_amount=business_amount,
-                    private_use_reduction=amount - business_amount,
-                    opening_book_value=cost - cumulative + amount,
-                    cumulative_amount=cumulative,
-                    closing_book_value=cost - cumulative,
-                )
-            )
+        schedule = build_monthly_fixed_asset_schedule(
+            cost,
+            residual,
+            request.useful_life_years,
+            request.in_service_date,
+            request.business_percentage,
+        )
     legacy = compute_stored_cost_preview(expense).annual_cost
     as_of = date.today()
     # Cover every proposed schedule month and every supported legacy anniversary
@@ -246,6 +312,14 @@ def build_fixed_asset_preview(
 
     return FixedAssetPreviewResult(
         expense_id=expense.id,
+        source_updated_at=expense.updated_at,
+        preview_token=_fixed_asset_preview_token(
+            company_id or expense.company_id,
+            expense,
+            request,
+            cost,
+            as_of,
+        ),
         expense_date=expense.expense_date,
         acquisition_cost=cost,
         residual_value=residual,
@@ -280,4 +354,18 @@ async def preview_expense_fixed_asset(
     """Load a tenant-scoped expense and calculate a read-only conversion preview."""
     await set_rls_company(session, company_id)
     expense = await _load_expense(session, expense_id, company_id)
-    return build_fixed_asset_preview(expense, request)
+    from jai.models.fixed_asset import FixedAsset
+
+    if await session.scalar(
+        select(FixedAsset.id).where(FixedAsset.acquisition_expense_id == expense_id)
+    ) is not None:
+        raise FixedAssetConflict("This purchase is already linked to a fixed asset.")
+    from jai.models.battery import BatteryAsset
+
+    if await session.scalar(
+        select(BatteryAsset.id).where(BatteryAsset.acquisition_expense_id == expense_id)
+    ) is not None:
+        raise FixedAssetConflict(
+            "Battery-linked purchases require the M20 Step 3 shared asset workflow."
+        )
+    return build_fixed_asset_preview(expense, request, company_id=company_id)

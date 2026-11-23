@@ -14,7 +14,7 @@
  * - Prod-build button safety: avoid dynamic :loading on buttons inside v-if
  *   branches. Use v-if/v-else pattern for loading states.
  */
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onBeforeUnmount, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { localDateStr } from '../../utils/date'
@@ -32,13 +32,14 @@ import {
 } from '@vicons/ionicons5'
 import { useExpensesStore } from '../../stores/expenses'
 import type { ExpenseRead, ExpenseAttachmentRead } from '../../stores/expenses'
-import { post, ApiError } from '../../api/http'
+import { get, post, ApiError } from '../../api/http'
 import type { components } from '../../api/schema'
 
 type PaidBy = components['schemas']['PaidBy']
 type PlCostBasis = components['schemas']['PlCostBasis']
 type ExpenseCalculateResult = components['schemas']['ExpenseCalculateResult']
 type FixedAssetPreviewResult = components['schemas']['FixedAssetPreviewResult']
+type ExpenseCostPreviewResult = components['schemas']['ExpenseCostPreviewResult']
 
 const route = useRoute()
 const router = useRouter()
@@ -59,6 +60,11 @@ const assetReportBusinessPercentage = computed(() =>
 const assetPreview = ref<FixedAssetPreviewResult | null>(null)
 const assetPreviewLoading = ref(false)
 const assetPreviewError = ref<string | null>(null)
+const assetConversionLoading = ref(false)
+const linkedSourceCost = ref<ExpenseCostPreviewResult | null>(null)
+const linkedSourceCostChecked = ref(false)
+const savedExpenseDate = ref<string | null>(null)
+let linkedSourceCostVersion = 0
 
 // ---- Form state (raw inputs only) ----
 const expenseDate = ref(localDateStr(new Date()))
@@ -124,12 +130,33 @@ let vatPreviewVersion = 0
 let pageVersion = 0
 let dictionariesPromise: Promise<void> | null = null
 let assetPreviewVersion = 0
+let assetConversionVersion = 0
 
 function invalidateAssetPreview() {
   assetPreviewVersion += 1
   assetPreview.value = null
   assetPreviewError.value = null
   assetPreviewLoading.value = false
+}
+
+async function loadLinkedSourceCost(targetId = expenseId.value, version = pageVersion) {
+  const requestVersion = ++linkedSourceCostVersion
+  linkedSourceCost.value = null
+  linkedSourceCostChecked.value = false
+  if (!targetId) {
+    linkedSourceCostChecked.value = true
+    return
+  }
+  try {
+    const result = await get<ExpenseCostPreviewResult>(`/api/v1/expenses/${targetId}/cost-preview`)
+    if (requestVersion === linkedSourceCostVersion && version === pageVersion && targetId === expenseId.value) {
+      linkedSourceCost.value = result
+    }
+  } catch {
+    // A failed preview must not prevent editing a normal purchase.
+  } finally {
+    if (requestVersion === linkedSourceCostVersion && version === pageVersion) linkedSourceCostChecked.value = true
+  }
 }
 
 watch(
@@ -231,6 +258,39 @@ async function previewFixedAsset() {
   }
 }
 
+async function confirmFixedAssetConversion() {
+  const targetId = expenseId.value
+  if (!targetId || assetConversionLoading.value) return
+  const version = pageVersion
+  const requestVersion = ++assetConversionVersion
+  assetConversionLoading.value = true
+  try {
+    const converted = await post<components['schemas']['FixedAssetRead']>('/api/v1/fixed-assets/expenses/' + targetId + '/convert', {
+      asset_name: assetName.value,
+      in_service_date: assetInServiceDate.value || null,
+      useful_life_years: assetUsefulLife.value,
+      residual_value: assetResidualValue.value,
+      business_percentage: assetReportBusinessPercentage.value,
+      use_type: assetUseType.value,
+      preview_token: assetPreview.value?.preview_token,
+    })
+    if (version === pageVersion && targetId === expenseId.value && requestVersion === assetConversionVersion) {
+      await router.push({
+        path: '/fixed-assets',
+        query: { asset: converted.id, year: converted.acquisition_date.slice(0, 4) },
+      })
+    }
+  } catch (error: unknown) {
+    if (version === pageVersion && targetId === expenseId.value && requestVersion === assetConversionVersion) {
+      assetPreviewError.value = error instanceof ApiError ? error.message : String(error)
+    }
+  } finally {
+    if (version === pageVersion && targetId === expenseId.value && requestVersion === assetConversionVersion) {
+      assetConversionLoading.value = false
+    }
+  }
+}
+
 type VatEvidenceTransition = {
   /** Drop an AI receipt baseline when its source is superseded or removed. */
   invalidateAiReceipt?: boolean
@@ -318,6 +378,8 @@ onMounted(async () => {
       const expense = await store.getExpense(targetId)
       if (version !== pageVersion || targetId !== expenseId.value) return
       fillFromExpense(expense)
+      savedExpenseDate.value = expense.expense_date
+      void loadLinkedSourceCost(targetId, version)
       await loadAttachments(targetId, version)
     }
   } catch (e: unknown) {
@@ -329,6 +391,10 @@ onMounted(async () => {
 watch(expenseId, (targetId, previousId) => {
   if (targetId === previousId) return
   invalidateAssetPreview()
+  ++assetConversionVersion
+  assetConversionLoading.value = false
+  linkedSourceCost.value = null; linkedSourceCostChecked.value = false; ++linkedSourceCostVersion
+  savedExpenseDate.value = null
   const version = ++pageVersion
   ++aiRequestVersion; clearTreatmentSuggestion(); invalidateVatPreview()
   pageError.value = null; saveSuccess.value = false; saving.value = false; attachLoading.value = false; attachUploading.value = false; attachments.value = []; lastAiAttachmentId.value = null; lastAiExtractedAttachmentId.value = null; lastAiSuccessfulAttachmentId.value = null
@@ -357,6 +423,8 @@ watch(expenseId, (targetId, previousId) => {
       const expense = await store.getExpense(targetId)
       if (version !== pageVersion || targetId !== expenseId.value) return
       fillFromExpense(expense)
+      savedExpenseDate.value = expense.expense_date
+      void loadLinkedSourceCost(targetId, version)
       await loadAttachments(targetId, version)
     } catch (e: unknown) {
       if (version === pageVersion) pageError.value = e instanceof ApiError ? e.message : String(e)
@@ -364,6 +432,12 @@ watch(expenseId, (targetId, previousId) => {
       if (version === pageVersion) loading.value = false
     }
   })()
+})
+
+onBeforeUnmount(() => {
+  ++pageVersion
+  ++assetPreviewVersion
+  ++assetConversionVersion
 })
 
 // ---- Save ----
@@ -971,7 +1045,9 @@ async function handleAiExtract(attachmentId: string) {
                       </n-button>
                       <n-text v-if="costPreviewError" type="error">{{ t('expenses.costPreviewError') }}</n-text>
                       <n-text v-if="costPreview">
-                        <template v-if="originalCostPreview">{{ t('expenses.costPreviewBefore') }}: {{ originalCostPreview.annual_cost }} · </template>
+                        <template v-if="linkedSourceCost?.linked_fixed_asset_id">{{ t('fixedAssets.savedPurchaseInputs') }}: {{ linkedSourceCost.annual_cost }} ({{ linkedSourceCost.included_in_pl ? t('expenses.plInclusionIncluded') : t('expenses.plInclusionExcluded') }}) ·
+                        {{ t('fixedAssets.effectiveCurrentCost') }}: {{ linkedSourceCost.effective_annual_cost ?? linkedSourceCost.annual_cost }} · </template>
+                        <template v-else-if="originalCostPreview">{{ t('expenses.costPreviewBefore') }}: {{ originalCostPreview.annual_cost }} · </template>
                         {{ t('expenses.costPreviewAfter') }}: {{ costPreview.annual_cost }}
                       </n-text>
                     </n-space>
@@ -1002,7 +1078,13 @@ async function handleAiExtract(attachmentId: string) {
                     <n-button @click="router.push({ path: '/expenses', query: { tab: 'purchase' } })">{{ t('expenses.cancel') }}</n-button>
                   </n-space>
                 </n-form>
-                <n-form v-if="isEdit && !isDraft" class="asset-preview-form" @submit.prevent="previewFixedAsset">
+                <n-alert v-if="linkedSourceCost?.linked_fixed_asset_id" type="info" :show-icon="false">
+                  {{ t('fixedAssets.linkedSourceNotice') }}
+                  <n-button text @click="router.push({ path: '/fixed-assets', query: { asset: linkedSourceCost.linked_fixed_asset_id, year: savedExpenseDate?.slice(0, 4) } })">
+                    {{ t('fixedAssets.openRegisteredAsset') }}
+                  </n-button>
+                </n-alert>
+                <n-form v-if="isEdit && !isDraft && linkedSourceCostChecked && !linkedSourceCost?.linked_fixed_asset_id" class="asset-preview-form" @submit.prevent="previewFixedAsset">
                   <n-card v-if="isEdit && !isDraft" size="small" :title="t('fixedAssets.previewTitle')">
                     <n-text depth="3">{{ t('fixedAssets.previewReadOnly') }}</n-text>
                     <n-form-item :label="t('fixedAssets.assetName')">
@@ -1042,6 +1124,9 @@ async function handleAiExtract(attachmentId: string) {
                         <n-alert v-if="assetPreview.conversion_blocked" type="warning" :show-icon="false">
                           {{ assetPreview.conversion_block_reason }}
                         </n-alert>
+                        <n-button type="primary" :loading="assetConversionLoading" :disabled="assetPreview.conversion_blocked || assetUseType !== 'FULL_BUSINESS'" @click="confirmFixedAssetConversion">
+                          {{ t('fixedAssets.confirmConversion') }}
+                        </n-button>
                         <n-text>{{ t('fixedAssets.costCue') }}</n-text>
                         <n-text v-for="period in assetPreview.period_deltas" :key="period.period_end">
                           {{ t('fixedAssets.period') }} {{ period.period_end }} ·

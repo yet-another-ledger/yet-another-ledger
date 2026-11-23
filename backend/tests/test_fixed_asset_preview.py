@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 import jai.services.fixed_asset_preview as preview_service
 from jai.models.expense import Expense
-from jai.schemas.expense import FixedAssetPreviewRequest
+from jai.schemas.expense import FixedAssetConfirmRequest, FixedAssetPreviewRequest
 from jai.services.fixed_asset_preview import build_fixed_asset_preview
 
 
@@ -63,6 +63,23 @@ def test_schedule_prorates_leap_day_and_settles_rounding_in_final_month() -> Non
         assert row.amount - row.business_amount == row.private_use_reduction
 
 
+def test_preview_token_normalizes_decimal_scales_and_confirmation_rejects_garbage() -> None:
+    expense = _expense(company_id=uuid4())
+    first = build_fixed_asset_preview(
+        expense,
+        _request(residual_value=Decimal("0"), business_percentage=Decimal("100")),
+    )
+    equivalent = build_fixed_asset_preview(
+        expense,
+        _request(residual_value=Decimal("0.00"), business_percentage=Decimal("100.0")),
+    )
+    assert first.preview_token == equivalent.preview_token
+    with pytest.raises(ValidationError):
+        FixedAssetConfirmRequest(
+            **_request().model_dump(), preview_token="é" * 64
+        )
+
+
 def test_cumulative_half_cent_uses_one_precise_division_before_rounding() -> None:
     result = build_fixed_asset_preview(
         _expense(
@@ -97,6 +114,47 @@ def test_residual_value_reduces_depreciation_and_yearly_deltas() -> None:
     )
     assert result.yearly_deltas[0].opening_book_value == Decimal("1000.00")
     assert result.yearly_deltas[0].closing_book_value < Decimal("1000.00")
+
+
+def test_new_asset_basis_is_rounded_to_minor_unit_without_mutating_purchase() -> None:
+    expense = _expense(
+        base_net_amount=Decimal("100.005"),
+        base_vat_amount=Decimal("0.000"),
+        base_gross_amount=Decimal("100.005"),
+    )
+    result = build_fixed_asset_preview(
+        expense,
+        _request(residual_value=Decimal("0.00")),
+    )
+    assert result.acquisition_cost == Decimal("100.01")
+    assert expense.base_net_amount == Decimal("100.005")
+    assert expense.base_gross_amount == Decimal("100.005")
+    assert all(row.amount >= 0 for row in result.monthly_schedule)
+    assert all(row.closing_book_value >= 0 for row in result.monthly_schedule)
+    assert sum(
+        (row.business_amount for row in result.monthly_schedule), Decimal("0")
+    ) == Decimal("100.01")
+    assert result.monthly_schedule[-1].cumulative_amount == Decimal("100.01")
+    assert result.monthly_schedule[-1].closing_book_value == Decimal("0.00")
+
+
+@pytest.mark.parametrize(("raw_cost", "locked_cost"), [("100.005", "100.01"), ("1.009", "1.01")])
+def test_new_asset_basis_rounds_historical_three_place_values(
+    raw_cost: str, locked_cost: str
+) -> None:
+    result = build_fixed_asset_preview(
+        _expense(
+            base_net_amount=Decimal(raw_cost),
+            base_vat_amount=Decimal("0.000"),
+            base_gross_amount=Decimal(raw_cost),
+        ),
+        _request(in_service_date=date(2024, 2, 29), useful_life_years=5),
+    )
+    assert result.acquisition_cost == Decimal(locked_cost)
+    assert all(row.amount >= 0 for row in result.monthly_schedule)
+    assert all(row.closing_book_value >= 0 for row in result.monthly_schedule)
+    assert result.monthly_schedule[-1].cumulative_amount == Decimal(locked_cost)
+    assert result.monthly_schedule[-1].closing_book_value == Decimal("0.00")
 
 
 def test_pending_in_service_returns_no_schedule() -> None:

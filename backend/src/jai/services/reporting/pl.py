@@ -190,6 +190,7 @@ def _build_empty_buckets(
                 "expense_actual": _ZERO,
                 "mileage_expense_actual": _ZERO,
                 "other_expense_actual": _ZERO,
+                "fixed_asset_depreciation": _ZERO,
             }
         # Advance month
         if month == 12:
@@ -237,10 +238,12 @@ async def compute_profit_loss(
             Invoice.company_id == company_id,
             # Advance never creates revenue; Final is the full edited project
             # event (not its residual payable amount).
-            Invoice.document_kind.in_([
-                InvoiceDocumentKind.STANDARD,
-                InvoiceDocumentKind.FINAL,
-            ]),
+            Invoice.document_kind.in_(
+                [
+                    InvoiceDocumentKind.STANDARD,
+                    InvoiceDocumentKind.FINAL,
+                ]
+            ),
             Invoice.status.in_(revenue_statuses),
             Invoice.invoice_date >= date_from,
             Invoice.invoice_date <= date_to,
@@ -330,7 +333,14 @@ async def compute_profit_loss(
     result_exp = await session.execute(stmt_exp)
     expenses = result_exp.scalars().all()
 
+    from jai.models.fixed_asset import FixedAsset
+
+    fixed_assets = (await session.scalars(select(FixedAsset))).all()
+    converted_source_ids = {asset.acquisition_expense_id for asset in fixed_assets}
+
     for exp in expenses:
+        if exp.id in converted_source_ids:
+            continue
         slice_amount = _annual_slice(exp)
         start_year = exp.expense_date.year
         dep_years = int(exp.depreciation_years)
@@ -343,15 +353,37 @@ async def compute_profit_loss(
                 continue
             key = _bucket_key(ann_date, granularity)
             if key in buckets:
-                buckets[key]["expense_actual"] = (
-                    buckets[key]["expense_actual"] + slice_amount
-                )
+                buckets[key]["expense_actual"] = buckets[key]["expense_actual"] + slice_amount
                 cost_key = (
                     "mileage_expense_actual"
                     if ExpenseKind(exp.kind) == ExpenseKind.MILEAGE
                     else "other_expense_actual"
                 )
                 buckets[key][cost_key] += slice_amount
+
+    # Converted purchases stop contributing the legacy Expense amortization.
+    # The register and P/L share the Step 1 schedule calculation.
+    from jai.services.fixed_asset_preview import build_monthly_fixed_asset_schedule
+
+    today = date.today()
+    for asset in fixed_assets:
+        if asset.in_service_date is None:
+            continue
+        for row in build_monthly_fixed_asset_schedule(
+            asset.acquisition_cost,
+            asset.residual_value,
+            asset.useful_life_years,
+            asset.in_service_date,
+            asset.business_percentage,
+        ):
+            if row.period_end > today or row.period_end < date_from or row.period_end > date_to:
+                continue
+            key = _bucket_key(row.period_end, granularity)
+            if key in buckets:
+                amount = row.business_amount
+                buckets[key]["expense_actual"] += amount
+                buckets[key]["other_expense_actual"] += amount
+                buckets[key]["fixed_asset_depreciation"] += amount
 
     # -------------------------------------------------------------------
     # 3. Build series (sorted by period) and compute top-level totals
@@ -365,6 +397,7 @@ async def compute_profit_loss(
         exp_actual = buckets[key]["expense_actual"]
         mileage_expense = buckets[key]["mileage_expense_actual"]
         other_expense = buckets[key]["other_expense_actual"]
+        fixed_asset_depreciation = buckets[key]["fixed_asset_depreciation"]
         profit_before_mileage = rev - other_expense
         profit_after_mileage = rev - exp_actual
         series.append(
@@ -374,6 +407,7 @@ async def compute_profit_loss(
                 expense_actual=exp_actual,
                 mileage_expense_actual=mileage_expense,
                 other_expense_actual=other_expense,
+                fixed_asset_depreciation=fixed_asset_depreciation,
                 profit_before_mileage=profit_before_mileage,
                 profit_after_mileage=profit_after_mileage,
                 profit=profit_after_mileage,
@@ -405,4 +439,7 @@ async def compute_profit_loss(
         series=series,
         by_category=None,
         external_sales=external_sales,
+        fixed_asset_depreciation=sum(
+            (bucket["fixed_asset_depreciation"] for bucket in buckets.values()), _ZERO
+        ),
     )

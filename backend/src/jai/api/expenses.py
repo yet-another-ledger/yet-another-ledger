@@ -41,8 +41,10 @@ from jai.schemas.expense import (
     ExpenseInput,
     ExpenseListResponse,
     ExpenseRead,
+    FixedAssetConfirmRequest,
     FixedAssetPreviewRequest,
     FixedAssetPreviewResult,
+    FixedAssetRead,
 )
 from jai.services.expense import (
     ExpenseConflict,
@@ -55,7 +57,8 @@ from jai.services.expense import (
     list_expenses,
     update_expense,
 )
-from jai.services.fixed_asset_preview import preview_expense_fixed_asset
+from jai.services.fixed_asset import convert_expense_to_fixed_asset
+from jai.services.fixed_asset_preview import FixedAssetConflict, preview_expense_fixed_asset
 from jai.services.mileage import MileageExpenseUpdateError
 from jai.services.storage import get_storage
 
@@ -200,12 +203,63 @@ async def preview_expense_fixed_asset_endpoint(
     company_id = _require_company_id(user)
     try:
         return await preview_expense_fixed_asset(session, expense_id, company_id, body)
+    except FixedAssetConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
+
+
+@router.post(
+    "/fixed-assets/expenses/{expense_id}/convert", response_model=FixedAssetRead, status_code=201
+)
+async def convert_expense_fixed_asset_endpoint(
+    expense_id: uuid.UUID,
+    body: FixedAssetConfirmRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> FixedAssetRead:
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    try:
+        return await convert_expense_to_fixed_asset(session, expense_id, company_id, body, user.id)
+    except FixedAssetConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/fixed-assets", response_model=list[FixedAssetRead])
+async def list_fixed_assets_endpoint(
+    year: int | None = Query(default=None, ge=1, le=9999),
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[FixedAssetRead]:
+    _owner_only(user)
+    from jai.services.fixed_asset import list_fixed_assets
+
+    return await list_fixed_assets(session, _require_company_id(user), year)
+
+
+@router.get("/fixed-assets/{asset_id}", response_model=FixedAssetRead)
+async def get_fixed_asset_endpoint(
+    asset_id: uuid.UUID,
+    year: int | None = Query(default=None, ge=1, le=9999),
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> FixedAssetRead:
+    _owner_only(user)
+    from jai.services.fixed_asset import get_fixed_asset
+
+    try:
+        return await get_fixed_asset(session, asset_id, _require_company_id(user), year)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

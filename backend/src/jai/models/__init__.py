@@ -43,6 +43,7 @@ from jai.models.external_sales import (  # noqa: F401
     ExternalSalesSource,
     ExternalSaleTax,
 )
+from jai.models.fixed_asset import FixedAsset  # noqa: F401
 from jai.models.invoice import Invoice, InvoiceLine, InvoiceLineTax, InvoiceTax  # noqa: F401
 from jai.models.mileage import (  # noqa: F401
     MileageRate,

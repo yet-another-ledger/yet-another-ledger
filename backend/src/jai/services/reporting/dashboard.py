@@ -164,16 +164,19 @@ async def compute_dashboard(
             rev = item.revenue_net
             exp_actual = item.expense_actual
             profit = item.profit
+            fixed_asset_depreciation = item.fixed_asset_depreciation
         else:
             rev = _ZERO
             exp_actual = _ZERO
             profit = _ZERO
+            fixed_asset_depreciation = _ZERO
         monthly.append(
             DashboardMonthly(
                 month=period_label,
                 revenue=rev,
                 expense=exp_actual,
                 profit=profit,
+                fixed_asset_depreciation=fixed_asset_depreciation,
             )
         )
 
@@ -221,6 +224,7 @@ async def compute_dashboard(
     kpi = DashboardKpi(
         ytd_revenue=pl.revenue_net,
         ytd_expense=pl.expense_actual,
+        ytd_fixed_asset_depreciation=pl.fixed_asset_depreciation,
         ytd_profit=pl.profit,
         current_quarter_vat_payable=vat_payable,
     )
