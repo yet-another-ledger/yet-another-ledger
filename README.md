@@ -17,6 +17,8 @@ Built with **FastAPI + Vue 3 + PostgreSQL**.
 - **Cost estimation → quote** — internal margin-based costing that never leaks cost/margin to the customer.
 - **Payments & refunds** — partial payments, Quote deposits, automatic settlement states, Credit-linked Refunds, and Refund Confirmations.
 - **Expenses** — receipt inbox for review before posting, AI extraction from image/PDF originals, recurring expenses, bookkeeping fields (paid-by / business-use % / depreciation years), independent P/L inclusion, and NET/GROSS/AUTO cost handling.
+- **Fixed assets (M20)** — register equipment from a saved or new purchase, estimate and confirm residual values, track pending in-service assets and straight-line depreciation, and review annual mixed-use projections. Depreciation flows into Profit & Loss and the dashboard; battery VAT adjustments remain separately confirmed.
+- **AI settings (M20)** — choose Responses or Chat Completions for receipt recognition, external sales, PDF checks and residual estimates. Fresh configurations default to Responses; legacy configurations without an explicit protocol retain Chat Completions. Residual suggestions are optional and remain subject to user review.
 - **External sales** — retain platform and energy originals with their original numbers, review optional AI suggestions, post multi-rate VAT summaries, and audit revisions, credits, settlement differences and voids; revenue can be excluded from P/L while remaining in VAT.
 - **Home batteries** — register eligible ordinary-VAT acquisitions once, confirm annual private-use inputs for the five-year Q4 adjustment, retain evidence and revision history, and flag missing or unconfirmed inputs. Battery Assets navigation is hidden by default and can be enabled in Settings → Preference.
 - **Customers & catalog** — addresses, VAT IDs, per-customer currency & document language; product/material catalog.
@@ -138,7 +140,7 @@ SI1 (document ordering, Quote duplication and server-side Sent copies) was accep
 
 🟢 **M19 accepted for v0.15.0.** The author accepted the recorded Happy Flow on 2026-11-15. The receipt inbox and Expense attachment extraction offer reviewable VAT-treatment suggestions for Dutch domestic, EU B2B reverse-charge and EU foreign-VAT purchases. The walkthrough records live-provider and reporting checks and the paths covered by automated regression. See the [M19 acceptance conclusion](docs/plan/milestones/M19.md#acceptance-conclusion).
 
-🟡 **[M20 Fixed Asset Register, AI Residual Value Estimates, and AI API Protocol Selection](docs/plan/milestones/M20.md)** is the active milestone. The design is approved and includes seven implementation task cards. It covers registration at purchase, depreciation with residual value, annual mixed-use confirmation for storage batteries, and a testable choice of Responses or Chat Completions.
+🟡 **[M20 Fixed Asset Register, AI Residual Value Estimates, and AI API Protocol Selection](docs/plan/milestones/M20.md)** has all seven steps through isolated local checks and independent review. The delivered application includes purchase registration and conversion, useful-life projections, mixed-use and battery reporting, reviewed residual estimates and shared AI protocol selection. Live-provider checks, the author walkthrough and deployment acceptance remain pending.
 
 ## Documentation
 
