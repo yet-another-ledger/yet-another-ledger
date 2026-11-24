@@ -309,6 +309,7 @@ async def validate_uploaded_invoice_artifact(
             messages=messages,
             client=client,
             max_tokens=ai_service.ARTIFACT_VALIDATION_MAX_TOKENS,
+            api_protocol=cfg.api_protocol,
         )
         overall, confidence, summary, checks = _parse_result(raw, expected)
     except ArtifactAIValidationError:

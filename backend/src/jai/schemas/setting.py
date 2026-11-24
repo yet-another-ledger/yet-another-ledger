@@ -370,8 +370,12 @@ class AiSettings(BaseModel):
     """
 
     enabled: bool = False
+    api_protocol: Literal["responses", "chat_completions"] = "responses"
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
+    # Internal provenance for credentials written by the current settings UI.
+    # Older rows have no binding and must not be guessed onto a provider.
+    api_key_base_url: str = ""
     model: str = ""
     receipt_prompt: str = ""
 
@@ -385,7 +389,9 @@ class AiSettingsRead(BaseModel):
     """
 
     enabled: bool = False
+    api_protocol: Literal["responses", "chat_completions"] = "responses"
     base_url: str = "https://api.openai.com/v1"
+    environment_base_url: str = "https://api.openai.com/v1"
     api_key_set: bool = False
     model: str = ""
     receipt_prompt: str = ""
@@ -403,10 +409,20 @@ class AiSettingsUpdate(BaseModel):
     """
 
     enabled: bool | None = None
+    api_protocol: Literal["responses", "chat_completions"] | None = None
     base_url: str | None = None
     api_key: str | None = None  # None = keep existing; "" = clear
+    # Browser forms include this when submitting a new key, so the server can
+    # reject stale-page credentials if the effective provider has rotated.
+    expected_base_url: str | None = None
     model: str | None = None
     receipt_prompt: str | None = None
+
+
+class AiSettingsConflictDetail(BaseModel):
+    """Safe 409 detail returned when a stale form targets another provider."""
+
+    detail: str
 
 
 class AiTestResult(BaseModel):
@@ -420,6 +436,7 @@ class AiTestResult(BaseModel):
 
     ok: bool
     multimodal: bool
+    api_protocol: Literal["responses", "chat_completions"] = "responses"
     detail: str
 
 

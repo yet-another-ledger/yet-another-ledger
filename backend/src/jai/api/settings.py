@@ -24,6 +24,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.deps import current_mfa_user
+from jai.config import get_settings
 from jai.db import get_session
 from jai.models._enums import SettingLevel
 from jai.models.user import User
@@ -41,6 +42,7 @@ from jai.schemas.setting import (
     SETTING_KEY_USER_PREFERENCES,
     SETTING_KEY_VAT_RATE_TIERS,
     AiSettings,
+    AiSettingsConflictDetail,
     AiSettingsRead,
     AiSettingsUpdate,
     AiTestResult,
@@ -765,7 +767,9 @@ async def update_quote_default_valid_days(
 # ---------------------------------------------------------------------------
 
 
-def _ai_to_read_model(cfg: AiSettings) -> AiSettingsRead:
+def _ai_to_read_model(
+    cfg: AiSettings, environment_base_url: str | None = None
+) -> AiSettingsRead:
     """Convert internal AiSettings to the desensitised API response.
 
     ``api_key`` is replaced by ``api_key_set: bool`` – the raw key is
@@ -773,11 +777,30 @@ def _ai_to_read_model(cfg: AiSettings) -> AiSettingsRead:
     """
     return AiSettingsRead(
         enabled=cfg.enabled,
+        api_protocol=cfg.api_protocol,
         base_url=cfg.base_url,
+        environment_base_url=environment_base_url or get_settings().ai_base_url,
         api_key_set=bool(cfg.api_key),
         model=cfg.model,
         receipt_prompt=cfg.receipt_prompt,
     )
+
+
+def _require_expected_ai_base_url(expected_base_url: str | None, actual_base_url: str) -> None:
+    """Reject stale browser credentials before saving or sending a probe."""
+    # The transport appends its endpoint after stripping trailing slashes, so
+    # compare roots with the same normalization used to build that URL.
+    if (
+        expected_base_url is not None
+        and expected_base_url.rstrip("/") != actual_base_url.rstrip("/")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "AI provider settings changed while this form was open. "
+                "Reload settings and confirm the provider before using this key."
+            ),
+        )
 
 
 @router.get("/ai", response_model=AiSettingsRead)
@@ -788,18 +811,16 @@ async def get_ai_settings(
     """Return the current AI settings (api_key desensitised to api_key_set bool)."""
     _owner_only(user)
 
-    cfg = await get_setting(
-        session,
-        SETTING_KEY_AI,
-        level=SettingLevel.GLOBAL,
-        value_type=AiSettings,
-    )
-    if cfg is None:
-        return AiSettingsRead()
-    return _ai_to_read_model(cfg)
+    from jai.services.ai import _get_ai_config
+
+    return _ai_to_read_model(await _get_ai_config(session))
 
 
-@router.put("/ai", response_model=AiSettingsRead)
+@router.put(
+    "/ai",
+    response_model=AiSettingsRead,
+    responses={status.HTTP_409_CONFLICT: {"model": AiSettingsConflictDetail}},
+)
 async def update_ai_settings(
     body: AiSettingsUpdate,
     user: User = Depends(current_mfa_user),
@@ -816,30 +837,53 @@ async def update_ai_settings(
     """
     _owner_only(user)
 
-    # Load existing to merge partial updates
+    # Resolve once, through the same cached typed setting used by workflow calls.
     existing = await get_setting(
         session,
         SETTING_KEY_AI,
         level=SettingLevel.GLOBAL,
         value_type=AiSettings,
     )
-    base = existing if existing is not None else AiSettings()
+    from jai.services.ai import _resolve_ai_config
 
-    # Resolve api_key: None → keep, "" → clear, other → replace
-    new_api_key: str
-    if body.api_key is None:
-        new_api_key = base.api_key
-    else:
-        new_api_key = body.api_key  # includes "" (clear)
-
-    new_cfg = AiSettings(
-        enabled=body.enabled if body.enabled is not None else base.enabled,
-        base_url=body.base_url if body.base_url is not None else base.base_url,
-        api_key=new_api_key,
-        model=body.model if body.model is not None else base.model,
-        receipt_prompt=(
-            body.receipt_prompt if body.receipt_prompt is not None else base.receipt_prompt
-        ),
+    environment = get_settings()
+    effective = _resolve_ai_config(existing, environment)
+    # Preserve the stored sparse shape so omitted environment-backed fields keep
+    # following their environment values. Explicit empty credentials remain a
+    # stored clear and use the existing environment fallback at resolution time.
+    values = existing.model_dump(exclude_unset=True) if existing is not None else {}
+    if existing is not None and existing.api_key and not existing.api_key_base_url:
+        # Upgrade an unbound legacy key to the root it resolved to before this
+        # write applies any provider changes. This preserves it at A without
+        # silently sending it to a newly selected B.
+        values["api_key_base_url"] = effective.base_url
+    if existing is not None and "api_protocol" not in existing.model_fields_set:
+        # A legacy sparse row used typed defaults for enabled/base_url before
+        # protocol selection was added. Materialize those defaults only while
+        # upgrading that legacy row so its effective behavior stays stable.
+        for field in ("enabled", "base_url", "model", "receipt_prompt"):
+            values.setdefault(field, getattr(existing, field))
+    for field in body.model_fields_set:
+        if field == "expected_base_url":
+            continue
+        value = getattr(body, field)
+        if value is not None:
+            values[field] = value
+    # A write also locks in the currently effective protocol for legacy rows.
+    if body.api_protocol is None:
+        values["api_protocol"] = effective.api_protocol
+    new_cfg = AiSettings.model_validate(values)
+    if body.api_key is not None:
+        # Keep a newly stored credential attached to the provider root the
+        # owner confirmed. Clearing the key also removes its provenance.
+        new_cfg.api_key_base_url = (
+            ""
+            if body.api_key == ""
+            else _resolve_ai_config(new_cfg, environment).base_url
+        )
+    _require_expected_ai_base_url(
+        body.expected_base_url,
+        _resolve_ai_config(new_cfg, environment).base_url,
     )
 
     await set_setting(
@@ -847,13 +891,17 @@ async def update_ai_settings(
         SETTING_KEY_AI,
         new_cfg,
         level=SettingLevel.GLOBAL,
+        exclude_unset=True,
     )
     await session.commit()
+    return _ai_to_read_model(_resolve_ai_config(new_cfg, environment), environment.ai_base_url)
 
-    return _ai_to_read_model(new_cfg)
 
-
-@router.post("/ai/test", response_model=AiTestResult)
+@router.post(
+    "/ai/test",
+    response_model=AiTestResult,
+    responses={status.HTTP_409_CONFLICT: {"model": AiSettingsConflictDetail}},
+)
 async def test_ai_settings(
     body: AiSettingsUpdate,
     user: User = Depends(current_mfa_user),
@@ -871,33 +919,22 @@ async def test_ai_settings(
     """
     _owner_only(user)
 
-    from jai.services.ai import test_ai_config
+    from jai.services.ai import _resolve_ai_config, test_ai_config
+    from jai.services.settings import get_setting
 
-    # Load stored config, then overlay body fields
-    existing = await get_setting(
+    stored = await get_setting(
         session,
         SETTING_KEY_AI,
         level=SettingLevel.GLOBAL,
         value_type=AiSettings,
     )
-    base = existing if existing is not None else AiSettings()
-
-    # Resolve api_key for probe: None → keep stored, "" → clear, other → override
-    probe_api_key: str
-    if body.api_key is None:
-        probe_api_key = base.api_key
-    else:
-        probe_api_key = body.api_key
-
-    probe_cfg = AiSettings(
-        enabled=body.enabled if body.enabled is not None else base.enabled,
-        base_url=body.base_url if body.base_url is not None else base.base_url,
-        api_key=probe_api_key,
-        model=body.model if body.model is not None else base.model,
-        receipt_prompt=(
-            body.receipt_prompt if body.receipt_prompt is not None else base.receipt_prompt
-        ),
+    overrides = body.model_dump(exclude_none=True, exclude={"expected_base_url"})
+    probe_cfg = _resolve_ai_config(
+        stored,
+        get_settings(),
+        overrides=overrides,
     )
+    _require_expected_ai_base_url(body.expected_base_url, probe_cfg.base_url)
 
     return await test_ai_config(probe_cfg)
 

@@ -108,6 +108,7 @@ async def test_mcp_receipt_review_confirmation_and_report_projection(
 
         return AiSettings(
             enabled=True,
+            api_protocol="chat_completions",
             api_key="synthetic-m19-key",
             model="synthetic-m19-model",
             base_url="http://m19-provider",

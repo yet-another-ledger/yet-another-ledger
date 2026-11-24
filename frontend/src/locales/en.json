@@ -464,6 +464,9 @@
     "ai": {
       "title": "AI Settings",
       "enabled": "Enable AI",
+      "apiProtocol": "API Protocol",
+      "responses": "Responses",
+      "chatCompletions": "Chat Completions",
       "baseUrl": "API Base URL",
       "baseUrlPlaceholder": "https://api.openai.com/v1",
       "model": "Model",
@@ -478,6 +481,7 @@
       "promptReset": "Additional instructions cleared — only the built-in default will be used.",
       "save": "Save",
       "saveSuccess": "AI settings saved.",
+      "apiKeyRootChanged": "The provider address changed. Re-enter the API key for the current provider.",
       "saveFailed": "Failed to save AI settings.",
       "test": "Test Connection",
       "testSuccessMultimodal": "Connected — model supports image input (multimodal).",

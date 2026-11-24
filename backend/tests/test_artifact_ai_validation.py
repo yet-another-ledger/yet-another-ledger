@@ -270,7 +270,8 @@ async def test_validation_prompt_and_expected_values_use_complete_frozen_party_s
     async def config(session: object) -> AiSettings:
         del session
         return AiSettings(
-            enabled=True,
+        api_protocol="chat_completions",
+        enabled=True,
             base_url="https://example.test",
             api_key="top-secret",
             model="vision",
@@ -338,7 +339,7 @@ async def test_validation_prompt_and_expected_values_use_complete_frozen_party_s
     assert "MUST-NOT-APPEAR" not in prompt
 
 
-def test_party_identity_omits_blank_optional_snapshot_labels_without_rewriting_nonblank_values(
+def test_party_identity_omits_blank_optional_labels_and_keeps_existing_values(
 ) -> None:
     snapshot = SimpleNamespace(
         buyer_name="  Buyer Display  ",
@@ -382,9 +383,15 @@ def test_party_identity_omits_blank_optional_snapshot_labels_without_rewriting_n
 @pytest.mark.parametrize(
     "cfg",
     [
-        AiSettings(enabled=False, base_url="https://example.test", api_key="key", model="vision"),
-        AiSettings(enabled=True, base_url="https://example.test", api_key="", model="vision"),
-        AiSettings(enabled=True, base_url="https://example.test", api_key="key", model=""),
+        AiSettings(
+        api_protocol="chat_completions",
+        enabled=False, base_url="https://example.test", api_key="key", model="vision"),
+        AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, base_url="https://example.test", api_key="", model="vision"),
+        AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, base_url="https://example.test", api_key="key", model=""),
     ],
 )
 async def test_unconfigured_ai_never_reaches_rasterizer_or_provider(
@@ -418,7 +425,8 @@ async def test_provider_failures_are_stable_and_do_not_log_private_content(
     async def config(session: object) -> AiSettings:
         del session
         return AiSettings(
-            enabled=True,
+        api_protocol="chat_completions",
+        enabled=True,
             base_url="https://example.test",
             api_key="top-secret",
             model="vision",
@@ -479,7 +487,8 @@ async def test_malformed_chat_completion_envelopes_map_to_safe_artifact_error(
     async def config(session: object) -> AiSettings:
         del session
         return AiSettings(
-            enabled=True,
+        api_protocol="chat_completions",
+        enabled=True,
             base_url="https://example.test",
             api_key="top-secret",
             model="vision",
@@ -526,7 +535,8 @@ async def test_length_finish_reason_is_safe_artifact_error_without_retry_or_cont
     async def config(session: object) -> AiSettings:
         del session
         return AiSettings(
-            enabled=True,
+        api_protocol="chat_completions",
+        enabled=True,
             base_url="https://example.test",
             api_key="top-secret",
             model="vision",
@@ -587,7 +597,8 @@ async def test_artifact_json_mode_400_fallback_preserves_4096_token_budget(
     async def config(session: object) -> AiSettings:
         del session
         return AiSettings(
-            enabled=True,
+        api_protocol="chat_completions",
+        enabled=True,
             base_url="https://example.test",
             api_key="top-secret",
             model="vision",
@@ -610,7 +621,10 @@ async def test_artifact_json_mode_400_fallback_preserves_4096_token_budget(
         body = json.loads(request.content)
         assert body["max_tokens"] == 4096
         if "response_format" in body:
-            return httpx.Response(400, json={"error": {"message": "unsupported"}})
+            return httpx.Response(
+                400,
+                json={"error": {"message": "response_format is not supported"}},
+            )
         return httpx.Response(
             200,
             json={
@@ -658,7 +672,8 @@ async def test_chat_completion_http_error_maps_to_safe_artifact_error_without_bo
     async def config(session: object) -> AiSettings:
         del session
         return AiSettings(
-            enabled=True,
+        api_protocol="chat_completions",
+        enabled=True,
             base_url="https://example.test",
             api_key="top-secret",
             model="vision",

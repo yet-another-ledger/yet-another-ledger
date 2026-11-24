@@ -227,6 +227,7 @@ async def set_setting(
     *,
     level: SettingLevel,
     scope_id: uuid.UUID | None = None,
+    exclude_unset: bool = False,
 ) -> None:
     """Persist a typed setting value (upsert).
 
@@ -256,7 +257,7 @@ async def set_setting(
         If ``level``/``scope_id`` combination is invalid.
     """
     _validate_level_scope(level, scope_id)
-    raw = value.model_dump(mode="json")
+    raw = value.model_dump(mode="json", exclude_unset=exclude_unset)
     stmt = pg_insert(Setting).values(
         level=level,
         scope_id=scope_id,

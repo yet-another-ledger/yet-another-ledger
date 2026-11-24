@@ -4134,6 +4134,14 @@ export interface components {
          */
         AgentTokenScope: "receipt:intake" | "customer:read" | "customer:create" | "catalog:read" | "quote:read" | "quote:write_draft" | "invoice:read" | "invoice:write_draft" | "expense:read" | "mileage:create";
         /**
+         * AiSettingsConflictDetail
+         * @description Safe 409 detail returned when a stale form targets another provider.
+         */
+        AiSettingsConflictDetail: {
+            /** Detail */
+            detail: string;
+        };
+        /**
          * AiSettingsRead
          * @description AI settings as returned by the API – ``api_key`` is desensitised.
          *
@@ -4148,10 +4156,21 @@ export interface components {
              */
             enabled?: boolean;
             /**
+             * Api Protocol
+             * @default responses
+             * @enum {string}
+             */
+            api_protocol?: "responses" | "chat_completions";
+            /**
              * Base Url
              * @default https://api.openai.com/v1
              */
             base_url?: string;
+            /**
+             * Environment Base Url
+             * @default https://api.openai.com/v1
+             */
+            environment_base_url?: string;
             /**
              * Api Key Set
              * @default false
@@ -4182,10 +4201,14 @@ export interface components {
         AiSettingsUpdate: {
             /** Enabled */
             enabled?: boolean | null;
+            /** Api Protocol */
+            api_protocol?: ("responses" | "chat_completions") | null;
             /** Base Url */
             base_url?: string | null;
             /** Api Key */
             api_key?: string | null;
+            /** Expected Base Url */
+            expected_base_url?: string | null;
             /** Model */
             model?: string | null;
             /** Receipt Prompt */
@@ -4205,6 +4228,12 @@ export interface components {
             ok: boolean;
             /** Multimodal */
             multimodal: boolean;
+            /**
+             * Api Protocol
+             * @default responses
+             * @enum {string}
+             */
+            api_protocol?: "responses" | "chat_completions";
             /** Detail */
             detail: string;
         };
@@ -14016,6 +14045,15 @@ export interface operations {
                     "application/json": components["schemas"]["AiSettingsRead"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiSettingsConflictDetail"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -14047,6 +14085,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiTestResult"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiSettingsConflictDetail"];
                 };
             };
             /** @description Validation Error */

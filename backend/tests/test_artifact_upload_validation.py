@@ -6,10 +6,11 @@ import json
 import tempfile
 import uuid
 from collections.abc import AsyncIterator, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi import HTTPException
 from httpx import AsyncClient
@@ -18,6 +19,7 @@ from starlette import formparsers
 from jai.api import pdf as pdf_api
 from jai.auth.deps import current_mfa_user
 from jai.config import Settings
+from jai.db import get_session
 from jai.main import app
 from jai.models._enums import (
     DocumentArtifactReason,
@@ -27,6 +29,8 @@ from jai.models._enums import (
     DocumentArtifactValidationStatus,
 )
 from jai.schemas.artifact import DocumentArtifactValidationRead
+from jai.schemas.setting import AiSettings
+from jai.services import ai as ai_service
 from jai.services import artifact_validation as validation_service
 from jai.services import artifacts as artifact_service
 from jai.services.artifact_validation import (
@@ -223,6 +227,102 @@ async def test_artifact_validation_maps_only_stable_ai_errors(
             ),
         }
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason", [[], {}, 7], ids=["array", "object", "numeric"])
+async def test_malformed_chat_finish_reason_maps_to_stable_validation_502(
+    client: AsyncClient,
+    valid_pdf: bytes,
+    artifact_upload_owner: None,
+    monkeypatch: pytest.MonkeyPatch,
+    finish_reason: object,
+) -> None:
+    """Exercise the invoice route through the shared Chat transport parser."""
+    invoice = SimpleNamespace(
+        invoice_number="INV-SYNTHETIC-1",
+        document_kind="STANDARD",
+        invoice_date=date(2026, 1, 2),
+        supply_or_advance_date=date(2026, 1, 1),
+        currency="EUR",
+        subtotal_excl_vat="100.000",
+        vat_total="21.000",
+        total_incl_vat="121.000",
+        party_snapshot=SimpleNamespace(),
+    )
+
+    class Session:
+        async def scalar(self, _statement: object) -> object:
+            return invoice
+
+    session = Session()
+    app.dependency_overrides[get_session] = lambda: session
+
+    async def config(_session: object) -> AiSettings:
+        return AiSettings(
+            api_protocol="chat_completions",
+            enabled=True,
+            base_url="https://provider.invalid/v1",
+            api_key="synthetic-key",
+            model="synthetic-vision",
+        )
+
+    class OnePage:
+        def __init__(self, _data: bytes) -> None:
+            pass
+
+        def __len__(self) -> int:
+            return 1
+
+        def close(self) -> None:
+            pass
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={"choices": [{"finish_reason": finish_reason, "message": {"content": "{}"}}]},
+        )
+
+    original_chat_call = ai_service._call_chat_completions
+
+    async def controlled_chat_call(**kwargs: object) -> str:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as provider:
+            kwargs["client"] = provider
+            return await original_chat_call(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(validation_service.ai_service, "_get_ai_config", config)
+    monkeypatch.setattr(
+        pdf_api, "validate_uploaded_invoice_artifact",
+        validation_service.validate_uploaded_invoice_artifact,
+    )
+    monkeypatch.setattr(validation_service.pdfium, "PdfDocument", OnePage)
+    monkeypatch.setattr(
+        validation_service.ai_service, "rasterize_pdf_pages", lambda *_args: [b"png"]
+    )
+    monkeypatch.setattr(
+        validation_service.ai_service, "_call_chat_completions", controlled_chat_call
+    )
+    try:
+        headers, body = _multipart_body([("file", "historic.pdf", valid_pdf)])
+        response = await client.post(
+            f"/api/v1/invoices/{uuid.uuid4()}/artifacts/validate-upload?language=en",
+            headers=headers,
+            content=body,
+        )
+        assert response.status_code == 502
+        assert response.json() == {
+            "detail": {
+                "code": "AI_VALIDATION_FAILED",
+                "message": "AI validation failed.",
+            }
+        }
+        assert len(requests) == 1
+        assert requests[0].url.path == "/v1/chat/completions"
+    finally:
+        app.dependency_overrides.pop(get_session, None)
 
 
 @pytest.mark.asyncio

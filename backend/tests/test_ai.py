@@ -40,6 +40,7 @@ Coverage:
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date
 from decimal import Decimal
@@ -152,6 +153,457 @@ def test_purchase_classification_prompt_and_contract_are_fixed_footer() -> None:
     assert "vat_treatment_suggestion" in _OUTPUT_CONTRACT
 
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (
+            {
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": '{"ok":true}'}],
+                    }
+                ],
+            },
+            '{"ok":true}',
+        ),
+        (
+            {
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "refusal", "refusal": "private provider text"}],
+                    }
+                ],
+            },
+            None,
+        ),
+        ({"status": "incomplete", "output": []}, None),
+        ({"status": "completed", "output": []}, None),
+    ],
+)
+async def test_responses_transport_extracts_output_and_handles_failures(
+    payload: dict[str, object], expected: str | None
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=payload)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        if expected is None:
+            with pytest.raises(RuntimeError):
+                await _call_chat_completions(
+                    "https://example.test/v1",
+                    "secret",
+                    "vision",
+                    [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": "data:image/png;base64,AA=="},
+                                },
+                                {"type": "text", "text": "Extract JSON"},
+                            ],
+                        }
+                    ],
+                    client=client,
+                    api_protocol="responses",
+                )
+        else:
+            result = await _call_chat_completions(
+                "https://example.test/v1",
+                "secret",
+                "vision",
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": "data:image/png;base64,AA=="},
+                            },
+                            {"type": "text", "text": "Extract JSON"},
+                        ],
+                    }
+                ],
+                client=client,
+                api_protocol="responses",
+            )
+            assert result == expected
+
+    assert [request.url.path for request in requests] == ["/v1/responses"]
+    sent = json.loads(requests[0].content)
+    assert sent["store"] is False
+    assert sent["text"] == {"format": {"type": "json_object"}}
+    assert sent["input"][0]["content"] == [
+        {"type": "input_image", "image_url": "data:image/png;base64,AA=="},
+        {"type": "input_text", "text": "Extract JSON"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_responses_format_rejection_retries_once_on_same_endpoint() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(400, json={"error": {"message": "text.format is not supported"}})
+        return httpx.Response(
+            200,
+            json={
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "{}"}],
+                    }
+                ],
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assert (
+            await _call_chat_completions(
+                "https://example.test/v1",
+                "secret",
+                "vision",
+                [],
+                client=client,
+                api_protocol="responses",
+            )
+            == "{}"
+        )
+    assert len(requests) == 2
+    assert [request.url.path for request in requests] == ["/v1/responses"] * 2
+    assert "text" not in json.loads(requests[1].content)
+
+
+@pytest.mark.asyncio
+async def test_responses_non_format_error_does_not_retry_or_switch_protocol() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            400,
+            json={"error": {"message": "Invalid request; response_format conflicts with input."}},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            await _call_chat_completions(
+                "https://example.test/v1",
+                "secret",
+                "vision",
+                [],
+                client=client,
+                api_protocol="responses",
+            )
+    assert len(requests) == 1
+    assert requests[0].url.path == "/v1/responses"
+
+
+@pytest.mark.asyncio
+async def test_responses_unsupported_endpoint_reports_protocol_without_provider_body() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            404,
+            json={"error": {"message": "private receipt and secret-key diagnostic"}},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await run_ai_config_test(
+            AiSettings(
+                api_protocol="responses",
+                enabled=True,
+                base_url="https://example.test/v1",
+                api_key="secret-key",
+                model="vision",
+            ),
+            client=client,
+        )
+    assert not result.ok
+    assert result.api_protocol == "responses"
+    assert "404" in result.detail
+    assert "secret-key" not in result.detail
+    assert "private receipt" not in result.detail
+    assert [request.url.path for request in requests] == ["/v1/responses"]
+
+
+def test_protocol_resolution_preserves_legacy_and_explicit_precedence() -> None:
+    from jai.services.ai import _resolve_ai_protocol
+
+    assert _resolve_ai_protocol(None, None, "") == "responses"
+    assert _resolve_ai_protocol(None, None, "", has_stored_row=True) == "chat_completions"
+    assert _resolve_ai_protocol(None, None, "configured-key") == "chat_completions"
+    assert _resolve_ai_protocol(None, "chat_completions", "") == "chat_completions"
+    assert _resolve_ai_protocol("responses", "chat_completions", "key") == "responses"
+    assert _resolve_ai_protocol("chat_completions", "responses", "") == "chat_completions"
+
+
+@pytest.mark.asyncio
+async def test_ai_settings_update_keeps_legacy_protocol_when_omitted_and_switches_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from jai.api import settings as api_settings
+    from jai.schemas.setting import AiSettingsUpdate
+
+    legacy = AiSettings.model_validate({"enabled": True, "base_url": "https://legacy.example/v1"})
+    effective = AiSettings(
+        enabled=True,
+        api_protocol="chat_completions",
+        base_url="https://legacy.example/v1",
+        api_key="key",
+        model="vision",
+    )
+    saved: list[AiSettings] = []
+
+    async def save_setting(
+        _session: object, _key: str, value: AiSettings, **kwargs: object
+    ) -> None:
+        saved.append(value)
+
+    monkeypatch.setattr(api_settings, "get_setting", AsyncMock(return_value=legacy))
+    monkeypatch.setattr(api_settings, "set_setting", save_setting)
+    monkeypatch.setattr("jai.services.ai._get_ai_config", AsyncMock(return_value=effective))
+
+    user = SimpleNamespace(role="owner")
+    session = MagicMock()
+    session.commit = AsyncMock()
+    retained = await api_settings.update_ai_settings(
+        AiSettingsUpdate(enabled=False),
+        user=user,  # type: ignore[arg-type]
+        session=session,  # type: ignore[arg-type]
+    )
+    response_selected = await api_settings.update_ai_settings(
+        AiSettingsUpdate(api_protocol="responses"),
+        user=user,  # type: ignore[arg-type]
+        session=session,  # type: ignore[arg-type]
+    )
+    switched_back = await api_settings.update_ai_settings(
+        AiSettingsUpdate(api_protocol="chat_completions"),
+        user=user,  # type: ignore[arg-type]
+        session=session,  # type: ignore[arg-type]
+    )
+
+    assert retained.api_protocol == "chat_completions"
+    assert response_selected.api_protocol == "responses"
+    assert switched_back.api_protocol == "chat_completions"
+    assert [cfg.api_protocol for cfg in saved] == [
+        "chat_completions",
+        "responses",
+        "chat_completions",
+    ]
+    assert retained.enabled is False
+
+
+@pytest.mark.asyncio
+async def test_ai_settings_get_shows_effective_env_fields_without_exposing_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from jai.api import settings as api_settings
+
+    effective = AiSettings(
+        enabled=True,
+        api_protocol="chat_completions",
+        base_url="https://openrouter.example/v1",
+        api_key="environment-secret",
+        model="provider/vision-model",
+        receipt_prompt="effective prompt",
+    )
+    monkeypatch.setattr("jai.services.ai._get_ai_config", AsyncMock(return_value=effective))
+
+    result = await api_settings.get_ai_settings(
+        user=SimpleNamespace(role="owner"),  # type: ignore[arg-type]
+        session=object(),  # type: ignore[arg-type]
+    )
+    assert result.base_url == "https://openrouter.example/v1"
+    assert result.model == "provider/vision-model"
+    assert result.enabled is True
+    assert result.receipt_prompt == "effective prompt"
+    assert result.api_protocol == "chat_completions"
+    assert result.api_key_set is True
+    assert "environment-secret" not in result.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_ai_settings_probe_uses_unsaved_protocol_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from jai.api import settings as api_settings
+    from jai.schemas.setting import AiSettingsUpdate
+
+    legacy_row = AiSettings.model_validate(
+        {"enabled": True, "base_url": "", "api_key": "", "model": ""}
+    )
+    fake_settings = MagicMock()
+    fake_settings.ai_enabled = True
+    fake_settings.ai_api_protocol = None
+    fake_settings.ai_base_url = "https://unsaved.example/v1"
+    fake_settings.ai_api_key = "stored-secret"
+    fake_settings.ai_model = "vision"
+    monkeypatch.setattr("jai.services.settings.get_setting", AsyncMock(return_value=legacy_row))
+    monkeypatch.setattr("jai.services.ai.get_settings", lambda: fake_settings)
+    monkeypatch.setattr("jai.api.settings.get_settings", lambda: fake_settings)
+    monkeypatch.setattr(api_settings, "set_setting", AsyncMock())
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": '{"status":"ok"}'}],
+                    }
+                ],
+            },
+        )
+
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        "jai.services.ai.httpx.AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+
+    result = await api_settings.test_ai_settings(
+        AiSettingsUpdate(api_protocol="responses"),
+        user=SimpleNamespace(role="owner"),  # type: ignore[arg-type]
+        session=object(),  # type: ignore[arg-type]
+    )
+    assert result.api_protocol == "responses"
+    assert result.ok and result.multimodal
+    assert [request.url.path for request in requests] == ["/v1/responses"]
+    assert requests[0].headers["authorization"] == "Bearer stored-secret"
+    body = json.loads(requests[0].content)
+    assert body["store"] is False
+    assert body["input"][0]["content"][0]["type"] == "input_image"
+    assert "stored-secret" not in result.model_dump_json()
+    assert "base64" not in result.model_dump_json()
+    api_settings.set_setting.assert_not_awaited()
+
+
+
+@pytest.mark.asyncio
+async def test_untouched_probe_uses_rotated_environment_endpoint_model_and_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After env A→B rotation, an empty Test body resolves the effective B config."""
+    from types import SimpleNamespace
+
+    from jai.api import settings as api_settings
+    from jai.schemas.setting import AiSettingsUpdate
+
+    sparse = AiSettings(api_protocol="chat_completions")
+    env_b = SimpleNamespace(
+        ai_enabled=True,
+        ai_api_protocol=None,
+        ai_base_url="https://provider-b.invalid/v1",
+        ai_api_key="synthetic-key-b",
+        ai_model="model-b",
+    )
+    monkeypatch.setattr("jai.services.settings.get_setting", AsyncMock(return_value=sparse))
+    monkeypatch.setattr("jai.api.settings.get_settings", lambda: env_b)
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"status":"ok"}'}}]})
+
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        "jai.services.ai.httpx.AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+
+    result = await api_settings.test_ai_settings(
+        AiSettingsUpdate(),
+        user=SimpleNamespace(role="owner"),  # type: ignore[arg-type]
+        session=object(),  # type: ignore[arg-type]
+    )
+
+    assert result.ok and result.api_protocol == "chat_completions"
+    assert len(requests) == 1
+    request = requests[0]
+    assert str(request.url) == "https://provider-b.invalid/v1/chat/completions"
+    assert request.headers["authorization"] == "Bearer synthetic-key-b"
+    body = json.loads(request.content)
+    assert body["model"] == "model-b"
+    assert "provider-a" not in request.url.host
+    assert "model-a" not in request.content.decode()
+
+
+def test_empty_test_key_matches_saved_empty_key_environment_fallback() -> None:
+    from types import SimpleNamespace
+
+    from jai.services.ai import _resolve_ai_config
+
+    stored = AiSettings(
+        enabled=True,
+        api_protocol="responses",
+        base_url="https://configured.invalid/v1",
+        api_key="stored-key",
+        model="model",
+    )
+    cleared = stored.model_copy(update={"api_key": ""})
+    for env_key in ("synthetic-env-key", ""):
+        environment = SimpleNamespace(
+            ai_enabled=True,
+            ai_api_protocol=None,
+            ai_api_key=env_key,
+            # Environment credentials are eligible only at their configured
+            # root, so keep this overlay on the selected stored root.
+            ai_base_url="https://configured.invalid/v1",
+            ai_model="env-model",
+        )
+        saved = _resolve_ai_config(cleared, environment)
+        temporary = _resolve_ai_config(stored, environment, overrides={"api_key": ""})
+        assert temporary.api_key == saved.api_key == env_key
+
+
+def test_probe_classifies_only_explicit_image_capability_rejection() -> None:
+    from jai.services.ai import _explicit_image_input_rejection
+
+    def error(message: str) -> httpx.HTTPStatusError:
+        response = httpx.Response(
+            400,
+            json={"error": {"message": message}},
+            request=httpx.Request("POST", "https://provider.invalid/v1/chat/completions"),
+        )
+        return httpx.HTTPStatusError("400", request=response.request, response=response)
+
+    assert _explicit_image_input_rejection(error("Model does not support image inputs"))
+    assert not _explicit_image_input_rejection(error("Unsupported image format"))
+    assert not _explicit_image_input_rejection(error("Invalid request parameters"))
+
+
 def _assert_purchase_classification_prompt_semantics(sent_text: str) -> None:
     """Check the actual provider payload carries each frozen example and guard."""
     assert sent_text.index("PURCHASE VAT TREATMENT CLASSIFICATION") < sent_text.index(
@@ -205,6 +657,69 @@ async def test_chat_completion_accepts_normal_or_missing_finish_reason(
 
     assert result == "{}"
     assert len(captured) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        {"error": {"code": 502}},
+        {"choices": [{"error": {"code": 502}, "message": {"content": "{}"}}]},
+        {"choices": [{"finish_reason": [], "message": {"content": "{}"}}]},
+        {"choices": [{"finish_reason": {}, "message": {"content": "{}"}}]},
+        {"choices": [{"finish_reason": 7, "message": {"content": "{}"}}]},
+        {"choices": [{"finish_reason": "error", "message": {"content": "{}"}}]},
+        {"choices": [{"finish_reason": "failed", "message": {"content": "{}"}}]},
+        {"choices": [{"finish_reason": "stop", "message": {"content": "  "}}]},
+    ],
+    ids=[
+        "top-level-error", "choice-error", "array-finish", "object-finish",
+        "numeric-finish", "error-finish", "failed-finish", "blank-text",
+    ],
+)
+async def test_chat_completion_rejects_failure_and_empty_signals(
+    envelope: dict[str, object],
+) -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=envelope))
+    ) as client:
+        with pytest.raises(RuntimeError):
+            await _call_chat_completions(
+                base_url="https://example.test",
+                api_key="synthetic-key",
+                model="vision",
+                messages=[{"role": "user", "content": []}],
+                client=client,
+            )
+
+
+@pytest.mark.asyncio
+async def test_json_format_rejection_requires_targeted_semantics() -> None:
+    from jai.services.ai import _explicit_json_format_rejection
+
+    unrelated = httpx.Response(
+        400,
+        json={
+            "error": {
+                "param": None,
+                "message": "Unsupported image format. Requested response format was json_object.",
+            }
+        },
+        request=httpx.Request("POST", "https://example.test"),
+    )
+    specific = httpx.Response(
+        400,
+        json={"error": {"param": None, "message": "The requested JSON mode is not supported."}},
+        request=httpx.Request("POST", "https://example.test"),
+    )
+    unrelated_error = httpx.HTTPStatusError(
+        "400", request=unrelated.request, response=unrelated
+    )
+    specific_error = httpx.HTTPStatusError(
+        "400", request=specific.request, response=specific
+    )
+    assert not _explicit_json_format_rejection(unrelated_error)
+    assert _explicit_json_format_rejection(specific_error)
 
 
 def test_output_contract_in_default_prompt_combination() -> None:
@@ -604,7 +1119,9 @@ def test_attachment_to_images_pdf_mime_with_params() -> None:
 @pytest.mark.asyncio
 async def test_ai_config_success() -> None:
     """Successful probe returns ok=True, multimodal=True."""
-    cfg = AiSettings(enabled=True, base_url="http://fake-ai", api_key="sk-test", model="gpt-v")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, base_url="http://fake-ai", api_key="sk-test", model="gpt-v")
     fake_response = {"choices": [{"message": {"content": '{"status": "ok"}'}}]}
 
     with respx.mock(base_url="http://fake-ai") as mock:
@@ -621,7 +1138,9 @@ async def test_ai_config_success() -> None:
 
 @pytest.mark.asyncio
 async def test_ai_config_auth_failure_401() -> None:
-    cfg = AiSettings(enabled=True, base_url="http://fake-ai", api_key="bad-key", model="gpt-v")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, base_url="http://fake-ai", api_key="bad-key", model="gpt-v")
     error_body = {"error": {"message": "Invalid API key."}}
 
     with respx.mock(base_url="http://fake-ai") as mock:
@@ -640,7 +1159,9 @@ async def test_ai_config_auth_failure_401() -> None:
 
 @pytest.mark.asyncio
 async def test_ai_config_auth_failure_403() -> None:
-    cfg = AiSettings(enabled=True, base_url="http://fake-ai", api_key="bad-key", model="gpt-v")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, base_url="http://fake-ai", api_key="bad-key", model="gpt-v")
 
     with respx.mock(base_url="http://fake-ai") as mock:
         mock.post("/chat/completions").mock(
@@ -656,7 +1177,9 @@ async def test_ai_config_auth_failure_403() -> None:
 @pytest.mark.asyncio
 async def test_ai_config_model_rejects_image_400() -> None:
     """HTTP 400 → model doesn't support multimodal, but endpoint is reachable."""
-    cfg = AiSettings(enabled=True, base_url="http://fake-ai", api_key="sk", model="text-only")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, base_url="http://fake-ai", api_key="sk", model="text-only")
     error_body = {"error": {"message": "model does not support image inputs"}}
 
     with respx.mock(base_url="http://fake-ai") as mock:
@@ -673,7 +1196,9 @@ async def test_ai_config_model_rejects_image_400() -> None:
 
 @pytest.mark.asyncio
 async def test_ai_config_model_not_found_404() -> None:
-    cfg = AiSettings(enabled=True, base_url="http://fake-ai", api_key="sk", model="no-such-model")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, base_url="http://fake-ai", api_key="sk", model="no-such-model")
 
     with respx.mock(base_url="http://fake-ai") as mock:
         mock.post("/chat/completions").mock(
@@ -689,7 +1214,9 @@ async def test_ai_config_model_not_found_404() -> None:
 
 @pytest.mark.asyncio
 async def test_ai_config_connect_error() -> None:
-    cfg = AiSettings(enabled=True, base_url="http://fake-ai", api_key="sk", model="m")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, base_url="http://fake-ai", api_key="sk", model="m")
 
     with respx.mock(base_url="http://fake-ai") as mock:
         mock.post("/chat/completions").mock(side_effect=httpx.ConnectError("refused"))
@@ -703,7 +1230,9 @@ async def test_ai_config_connect_error() -> None:
 
 @pytest.mark.asyncio
 async def test_ai_config_timeout() -> None:
-    cfg = AiSettings(enabled=True, base_url="http://fake-ai", api_key="sk", model="m")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, base_url="http://fake-ai", api_key="sk", model="m")
 
     with respx.mock(base_url="http://fake-ai") as mock:
         mock.post("/chat/completions").mock(
@@ -719,7 +1248,9 @@ async def test_ai_config_timeout() -> None:
 
 @pytest.mark.asyncio
 async def test_ai_config_no_api_key() -> None:
-    cfg = AiSettings(enabled=True, base_url="http://fake-ai", api_key="", model="m")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, base_url="http://fake-ai", api_key="", model="m")
     result = await run_ai_config_test(cfg)
     assert result.ok is False
     assert result.multimodal is False
@@ -728,7 +1259,9 @@ async def test_ai_config_no_api_key() -> None:
 
 @pytest.mark.asyncio
 async def test_ai_config_no_model() -> None:
-    cfg = AiSettings(enabled=True, base_url="http://fake-ai", api_key="sk", model="")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, base_url="http://fake-ai", api_key="sk", model="")
     result = await run_ai_config_test(cfg)
     assert result.ok is False
     assert result.multimodal is False
@@ -1015,7 +1548,9 @@ async def test_reverse_charge_provider_result_through_purchase_entry_points(
     )
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=db_results)
-    cfg = AiSettings(enabled=True, api_key="sk-test", model="vision", base_url="http://fake")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk-test", model="vision", base_url="http://fake")
     model_json = json.dumps({
         "vat_amount": 0,
         "vat_rate_percent": 21,
@@ -1082,7 +1617,9 @@ async def test_unpersistable_reason_preserves_other_extracted_fields(
     db_results.append(MagicMock(scalar_one_or_none=lambda: None))  # category lookup
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=db_results)
-    cfg = AiSettings(enabled=True, api_key="sk-test", model="vision", base_url="http://unsafe-reason")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk-test", model="vision", base_url="http://unsafe-reason")
     model_json = (
         '{"net_amount":"100","vat_amount":"21","suggested_category_name":"Office",'
         '"vat_treatment_suggestion":{"code":"NL_DOMESTIC_PURCH","reason":"'
@@ -1136,7 +1673,9 @@ async def test_non_object_treatment_preserves_other_extracted_fields(
         db_results.append(MagicMock(scalar_one_or_none=lambda: attachment))
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=db_results)
-    cfg = AiSettings(enabled=True, api_key="sk-test", model="vision", base_url="http://bad-shape")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk-test", model="vision", base_url="http://bad-shape")
     model_json = (
         '{"net_amount":"100","vat_amount":"21","vat_rate_percent":"21",'
         '"vat_treatment_suggestion":' + suggestion_json + "}"
@@ -1219,10 +1758,14 @@ async def test_extract_from_attachment_ai_disabled() -> None:
 
     # Patch _get_ai_config to return disabled
     with patch("jai.services.ai._get_ai_config", return_value=AsyncMock(
-        return_value=AiSettings(enabled=False)
+        return_value=AiSettings(
+        api_protocol="chat_completions",
+        enabled=False)
     )):
         with patch("jai.services.ai._get_ai_config", new=AsyncMock(
-            return_value=AiSettings(enabled=False)
+            return_value=AiSettings(
+        api_protocol="chat_completions",
+        enabled=False)
         )):
             with pytest.raises(ValueError, match="disabled"):
                 await extract_from_attachment(session, company_id, att_id)
@@ -1243,7 +1786,9 @@ async def test_extract_from_attachment_no_api_key() -> None:
     session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=lambda: fake_att))
 
     with patch("jai.services.ai._get_ai_config", new=AsyncMock(
-        return_value=AiSettings(enabled=True, api_key="", model="gpt-v")
+        return_value=AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="", model="gpt-v")
     )):
         with pytest.raises(ValueError, match="API key"):
             await extract_from_attachment(session, company_id, att_id)
@@ -1264,7 +1809,9 @@ async def test_extract_from_attachment_no_model() -> None:
     session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=lambda: fake_att))
 
     with patch("jai.services.ai._get_ai_config", new=AsyncMock(
-        return_value=AiSettings(enabled=True, api_key="sk-test", model="")
+        return_value=AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk-test", model="")
     )):
         with pytest.raises(ValueError, match="model"):
             await extract_from_attachment(session, company_id, att_id)
@@ -1302,7 +1849,9 @@ async def test_extract_from_attachment_unsupported_mime_422() -> None:
     fake_att = _make_fake_attachment(str(att_id), mime_type="text/csv", company_id=str(company_id))
     session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=lambda: fake_att))
 
-    cfg = AiSettings(enabled=True, api_key="sk-test", model="gpt-v")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk-test", model="gpt-v")
     fake_storage = MagicMock()
     fake_storage.open.return_value = b"a,b,c\n1,2,3"
 
@@ -1334,6 +1883,7 @@ async def test_extract_from_attachment_happy_path_png() -> None:
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
     cfg = AiSettings(
+        api_protocol="chat_completions",
         enabled=True, api_key="sk-test", model="gpt-v",
         base_url="http://fake-ai"
     )
@@ -1383,6 +1933,7 @@ async def test_extract_from_files_preserves_mixed_image_mimes_and_filters_fields
         return_value=MagicMock(scalar_one_or_none=lambda: None)
     )
     cfg = AiSettings(
+        api_protocol="chat_completions",
         enabled=True, api_key="sk-group-test", model="vision", base_url="http://group-ai"
     )
     # Inputs can be tiny opaque test bytes: only the MIME/message construction matters here.
@@ -1460,6 +2011,7 @@ async def _run_extract_capture_prompt(
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
     cfg = AiSettings(
+        api_protocol="chat_completions",
         enabled=True, api_key="sk", model="m", base_url=base_url,
         receipt_prompt=extra_receipt_prompt,
     )
@@ -1544,7 +2096,9 @@ async def test_extract_from_attachment_code_fenced_response() -> None:
     cat_result = MagicMock(scalar_one_or_none=lambda: None)
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
-    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk", model="m", base_url="http://fake")
     fake_storage = MagicMock()
     fake_storage.open.return_value = png_bytes
 
@@ -1585,7 +2139,9 @@ async def test_extract_from_attachment_missing_fields_all_null() -> None:
     cat_result = MagicMock(scalar_one_or_none=lambda: None)
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
-    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk", model="m", base_url="http://fake")
     fake_storage = MagicMock()
     fake_storage.open.return_value = _make_minimal_png()
 
@@ -1626,7 +2182,9 @@ async def test_extract_from_attachment_extra_keys_ignored() -> None:
     cat_result = MagicMock(scalar_one_or_none=lambda: None)
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
-    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk", model="m", base_url="http://fake")
     fake_storage = MagicMock()
     fake_storage.open.return_value = _make_minimal_png()
 
@@ -1672,7 +2230,9 @@ async def test_extract_from_attachment_connection_error_502() -> None:
     att_result = MagicMock(scalar_one_or_none=lambda: fake_att)
     session.execute = AsyncMock(return_value=att_result)
 
-    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk", model="m", base_url="http://fake")
     fake_storage = MagicMock()
     fake_storage.open.return_value = _make_minimal_png()
 
@@ -1706,7 +2266,9 @@ async def test_extract_from_attachment_timeout_502() -> None:
     att_result = MagicMock(scalar_one_or_none=lambda: fake_att)
     session.execute = AsyncMock(return_value=att_result)
 
-    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk", model="m", base_url="http://fake")
     fake_storage = MagicMock()
     fake_storage.open.return_value = _make_minimal_png()
 
@@ -1740,7 +2302,9 @@ async def test_extract_from_attachment_http_error_502() -> None:
     att_result = MagicMock(scalar_one_or_none=lambda: fake_att)
     session.execute = AsyncMock(return_value=att_result)
 
-    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk", model="m", base_url="http://fake")
     fake_storage = MagicMock()
     fake_storage.open.return_value = _make_minimal_png()
 
@@ -1777,6 +2341,7 @@ async def test_extract_from_attachment_pdf_rasterised_as_images() -> None:
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
     cfg = AiSettings(
+        api_protocol="chat_completions",
         enabled=True, api_key="sk", model="gpt-v", base_url="http://fake"
     )
     fake_storage = MagicMock()
@@ -1837,7 +2402,9 @@ async def test_extract_from_attachment_pdf_max_pages_limits_image_parts() -> Non
     cat_result = MagicMock(scalar_one_or_none=lambda: None)
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
-    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk", model="m", base_url="http://fake")
     fake_storage = MagicMock()
     fake_storage.open.return_value = pdf_bytes
 
@@ -1889,6 +2456,7 @@ async def test_extract_from_attachment_custom_prompt_with_output_contract() -> N
 
     custom_prompt = "Extract only the total amount from this Dutch receipt."
     cfg = AiSettings(
+        api_protocol="chat_completions",
         enabled=True, api_key="sk", model="m", base_url="http://fake",
         receipt_prompt=custom_prompt,
     )
@@ -1955,6 +2523,7 @@ async def test_extract_from_attachment_default_prompt_with_output_contract() -> 
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
     cfg = AiSettings(
+        api_protocol="chat_completions",
         enabled=True, api_key="sk", model="m", base_url="http://fake",
         receipt_prompt="",  # empty → fallback to DEFAULT
     )
@@ -2018,6 +2587,38 @@ async def test_get_ai_config_pure_env_no_db_row() -> None:
     assert cfg.base_url == "https://env.example.com/v1"
     assert cfg.model == "env-model"
     assert cfg.enabled is True
+    assert cfg.api_protocol == "chat_completions"
+
+
+@pytest.mark.asyncio
+async def test_get_ai_config_fresh_defaults_and_environment_protocol_precedence() -> None:
+    from types import SimpleNamespace
+
+    from jai.services.ai import _get_ai_config
+
+    session = AsyncMock()
+    no_credentials = SimpleNamespace(
+        ai_enabled=False,
+        ai_base_url="https://api.example/v1",
+        ai_api_key="",
+        ai_model="",
+        ai_api_protocol=None,
+    )
+    with patch("jai.services.settings.get_setting", new=AsyncMock(return_value=None)):
+        with patch("jai.services.ai.get_settings", return_value=no_credentials):
+            fresh = await _get_ai_config(session)
+    assert fresh.api_protocol == "responses"
+
+    env_selected = SimpleNamespace(
+        **{
+            **no_credentials.__dict__,
+            "ai_api_protocol": "chat_completions",
+        }
+    )
+    with patch("jai.services.settings.get_setting", new=AsyncMock(return_value=None)):
+        with patch("jai.services.ai.get_settings", return_value=env_selected):
+            configured = await _get_ai_config(session)
+    assert configured.api_protocol == "chat_completions"
 
 
 @pytest.mark.asyncio
@@ -2028,6 +2629,7 @@ async def test_get_ai_config_db_row_with_empty_api_key_falls_back_to_env() -> No
     session = AsyncMock()
     # DB row has enabled=True, base_url/model set, but api_key empty
     db_cfg = AiSettings(
+        api_protocol="chat_completions",
         enabled=True,
         base_url="https://db.example.com/v1",
         api_key="",  # empty → should fall back to env
@@ -2044,9 +2646,14 @@ async def test_get_ai_config_db_row_with_empty_api_key_falls_back_to_env() -> No
             fake_settings.ai_model = "env-model"
             mock_gs.return_value = fake_settings
             cfg = await _get_ai_config(session)
+            assert cfg.api_key == ""
+            fake_settings.ai_base_url = "https://db.example.com/v1"
+            matching_cfg = await _get_ai_config(session)
 
-    # api_key was empty in DB → must come from env
-    assert cfg.api_key == "env-fallback-key"
+    # A key for another provider is not attached; a matching env root still
+    # supplies the key through the ordinary sparse settings overlay.
+    assert cfg.api_key == ""
+    assert matching_cfg.api_key == "env-fallback-key"
     # base_url and model are set in DB → use DB values
     assert cfg.base_url == "https://db.example.com/v1"
     assert cfg.model == "db-model"
@@ -2061,6 +2668,7 @@ async def test_get_ai_config_db_row_with_all_fields_uses_db() -> None:
 
     session = AsyncMock()
     db_cfg = AiSettings(
+        api_protocol="chat_completions",
         enabled=True,
         base_url="https://db.example.com/v1",
         api_key="db-key",
@@ -2092,6 +2700,7 @@ async def test_get_ai_config_db_row_empty_base_url_falls_back_to_env() -> None:
 
     session = AsyncMock()
     db_cfg = AiSettings(
+        api_protocol="chat_completions",
         enabled=True,
         base_url="",  # empty → should fall back to env
         api_key="db-key",
@@ -2125,7 +2734,9 @@ async def test_probe_request_does_not_contain_response_format() -> None:
     """Connectivity probe must NOT include response_format in the request body (F2)."""
     import json as _json
 
-    cfg = AiSettings(enabled=True, base_url="http://fake-ai", api_key="sk", model="m")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, base_url="http://fake-ai", api_key="sk", model="m")
     captured: list[httpx.Request] = []
 
     def capture_handler(request: httpx.Request) -> httpx.Response:
@@ -2152,7 +2763,9 @@ async def test_probe_request_does_not_contain_response_format() -> None:
 @pytest.mark.asyncio
 async def test_probe_400_json_mode_only_still_multimodal_false() -> None:
     """Without response_format in probe, a 400 means truly no multimodal support."""
-    cfg = AiSettings(enabled=True, base_url="http://fake-ai", api_key="sk", model="text-only")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, base_url="http://fake-ai", api_key="sk", model="text-only")
 
     with respx.mock(base_url="http://fake-ai") as mock:
         mock.post("/chat/completions").mock(
@@ -2190,7 +2803,9 @@ async def test_extraction_retries_without_response_format_on_400() -> None:
     cat_result = MagicMock(scalar_one_or_none=lambda: None)
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
-    cfg = AiSettings(enabled=True, api_key="sk-test", model="gpt-v", base_url="http://fake-ai")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk-test", model="gpt-v", base_url="http://fake-ai")
     fake_storage = MagicMock()
     fake_storage.open.return_value = png_bytes
 
@@ -2202,7 +2817,7 @@ async def test_extraction_retries_without_response_format_on_400() -> None:
         body = _json.loads(request.content)
         if "response_format" in body:
             # Simulate endpoint that rejects json mode
-            return httpx.Response(400, json={"error": {"message": "json mode not supported"}})
+            return httpx.Response(400, json={"error": {"message": "json mode is not supported"}})
         # Without response_format → success
         return httpx.Response(
             200, json={"choices": [{"message": {"content": model_json}}]}
@@ -2250,7 +2865,9 @@ async def test_extraction_request_contains_response_format_on_success() -> None:
     cat_result = MagicMock(scalar_one_or_none=lambda: None)
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
-    cfg = AiSettings(enabled=True, api_key="sk-test", model="gpt-v", base_url="http://fake-ai")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk-test", model="gpt-v", base_url="http://fake-ai")
     fake_storage = MagicMock()
     fake_storage.open.return_value = png_bytes
 
@@ -2304,7 +2921,9 @@ async def test_extract_summary_present() -> None:
     cat_result = MagicMock(scalar_one_or_none=lambda: None)
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
-    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk", model="m", base_url="http://fake")
     fake_storage = MagicMock()
     fake_storage.open.return_value = png_bytes
 
@@ -2348,7 +2967,9 @@ async def test_extract_summary_absent() -> None:
     cat_result = MagicMock(scalar_one_or_none=lambda: None)
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
-    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk", model="m", base_url="http://fake")
     fake_storage = MagicMock()
     fake_storage.open.return_value = png_bytes
 
@@ -2388,7 +3009,9 @@ async def test_extract_summary_falsy_value() -> None:
     cat_result = MagicMock(scalar_one_or_none=lambda: None)
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
-    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk", model="m", base_url="http://fake")
     fake_storage = MagicMock()
     fake_storage.open.return_value = png_bytes
 
@@ -2435,7 +3058,9 @@ async def test_extract_prompt_contains_today_date() -> None:
     cat_result = MagicMock(scalar_one_or_none=lambda: None)
     session.execute = AsyncMock(side_effect=[att_result, cat_result])
 
-    cfg = AiSettings(enabled=True, api_key="sk", model="m", base_url="http://fake")
+    cfg = AiSettings(
+        api_protocol="chat_completions",
+        enabled=True, api_key="sk", model="m", base_url="http://fake")
     fake_storage = MagicMock()
     fake_storage.open.return_value = _make_minimal_png()
 

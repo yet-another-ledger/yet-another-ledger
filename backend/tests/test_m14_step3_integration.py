@@ -303,6 +303,7 @@ async def _async_ai_settings() -> object:
 
     return AiSettings(
         enabled=True,
+        api_protocol="chat_completions",
         api_key="sk-m19-test",
         model="vision-test",
         base_url="http://m19-provider",

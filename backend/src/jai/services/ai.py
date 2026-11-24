@@ -53,13 +53,13 @@ import re
 import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal, cast
 
 import httpx
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jai.config import get_settings
+from jai.config import Settings, get_settings
 from jai.models._enums import SettingLevel
 from jai.schemas.expense import ExpenseAIPrefill, ExpenseVatTreatmentSuggestion
 from jai.schemas.setting import (
@@ -183,9 +183,7 @@ def _language_context(language: str | None) -> str:
       fixed category list; translating it would break the matching logic).
     """
     lang_name = (
-        "Simplified Chinese (简体中文)"
-        if (language or "").lower().startswith("zh")
-        else "English"
+        "Simplified Chinese (简体中文)" if (language or "").lower().startswith("zh") else "English"
     )
     return (
         "\n\nLANGUAGE OF EXPLANATORY TEXT:\n"
@@ -298,27 +296,149 @@ async def _get_ai_config(session: AsyncSession) -> AiSettings:
         logger.warning("Failed to read AI settings from DB")
         cfg = None
 
-    # Env fallback (field-level, mirroring _get_smtp_config).
     settings = get_settings()
+    return _resolve_ai_config(cfg, settings)
+
+
+def _resolve_ai_config(
+    cfg: AiSettings | None,
+    settings: Settings,
+    *,
+    overrides: dict[str, Any] | None = None,
+) -> AiSettings:
+    """Resolve stored settings and optional unsaved fields against one env snapshot."""
+    protocol = _resolve_ai_protocol(
+        (cfg.api_protocol if cfg is not None and "api_protocol" in cfg.model_fields_set else None),
+        settings.ai_api_protocol,
+        settings.ai_api_key,
+        has_stored_row=cfg is not None,
+    )
 
     if cfg is None:
         # No DB row at all – pure env fallback.
-        return AiSettings(
+        resolved = AiSettings(
             enabled=settings.ai_enabled,
             base_url=settings.ai_base_url,
             api_key=settings.ai_api_key,
             model=settings.ai_model,
+            api_protocol=protocol,
             receipt_prompt="",
         )
 
-    # DB row exists: use DB value per field when non-empty, else fall back to env.
-    return AiSettings(
-        enabled=cfg.enabled,
-        base_url=cfg.base_url if cfg.base_url else settings.ai_base_url,
-        api_key=cfg.api_key if cfg.api_key else settings.ai_api_key,
-        model=cfg.model if cfg.model else settings.ai_model,
-        receipt_prompt=cfg.receipt_prompt,
+    else:
+        # Rows predating protocol selection keep their historical Pydantic
+        # defaults. New sparse rows retain field-level environment overlays.
+        legacy_row = "api_protocol" not in cfg.model_fields_set
+        resolved = AiSettings(
+            enabled=(
+                cfg.enabled
+                if legacy_row or "enabled" in cfg.model_fields_set
+                else settings.ai_enabled
+            ),
+            base_url=(
+                cfg.base_url
+                if legacy_row or "base_url" in cfg.model_fields_set
+                else settings.ai_base_url
+            )
+            or settings.ai_base_url,
+            # A stored credential is usable only for the root it was saved
+            # against. Unbound legacy keys stay in JSONB for readability but
+            # are not retroactively assigned to whichever provider is current.
+            api_key="",
+            api_key_base_url=cfg.api_key_base_url,
+            model=(
+                cfg.model if legacy_row or "model" in cfg.model_fields_set else settings.ai_model
+            )
+            or settings.ai_model,
+            api_protocol=protocol,
+            receipt_prompt=(
+                cfg.receipt_prompt if "receipt_prompt" in cfg.model_fields_set else ""
+            ),
+        )
+
+    if not overrides:
+        return _resolve_ai_credential(cfg, resolved, settings, legacy_root=resolved.base_url)
+    fields = dict(overrides)
+    if "base_url" in fields and not fields["base_url"]:
+        fields["base_url"] = settings.ai_base_url
+    if "model" in fields and not fields["model"]:
+        fields["model"] = settings.ai_model
+    overridden = resolved.model_copy(update=fields)
+    if "api_key" in overrides:
+        # Unsaved probes are explicitly bound by the request's expected root
+        # guard in the route. A key-only probe targets this resolved root.
+        if overrides["api_key"]:
+            overridden.api_key_base_url = overridden.base_url
+            return overridden
+        overridden.api_key = ""
+        overridden.api_key_base_url = ""
+        cleared_cfg = (
+            cfg.model_copy(update={"api_key": "", "api_key_base_url": ""})
+            if cfg is not None
+            else None
+        )
+        return _resolve_ai_credential(
+            cleared_cfg,
+            overridden,
+            settings,
+            legacy_root=resolved.base_url,
+        )
+    return _resolve_ai_credential(
+        cfg, overridden, settings, legacy_root=resolved.base_url
     )
+
+
+def _normalize_ai_root(value: str) -> str:
+    return value.rstrip("/")
+
+
+def _resolve_ai_credential(
+    cfg: AiSettings | None,
+    resolved: AiSettings,
+    settings: Settings,
+    *,
+    legacy_root: str,
+) -> AiSettings:
+    if cfg is None:
+        if (
+            settings.ai_api_key
+            and _normalize_ai_root(settings.ai_base_url)
+            == _normalize_ai_root(resolved.base_url)
+        ):
+            return resolved.model_copy(update={"api_key": settings.ai_api_key})
+        return resolved.model_copy(update={"api_key": ""})
+    if cfg.api_key and cfg.api_key_base_url:
+        if _normalize_ai_root(cfg.api_key_base_url) == _normalize_ai_root(resolved.base_url):
+            return resolved.model_copy(update={"api_key": cfg.api_key})
+    elif cfg.api_key and _normalize_ai_root(legacy_root) == _normalize_ai_root(
+        resolved.base_url
+    ):
+        # Preserve pre-provenance rows at the root they previously resolved
+        # to. A probe that overrides the destination cannot carry this key.
+        return resolved.model_copy(update={"api_key": cfg.api_key})
+    if (
+        settings.ai_api_key
+        and _normalize_ai_root(settings.ai_base_url) == _normalize_ai_root(resolved.base_url)
+    ):
+        return resolved.model_copy(update={"api_key": settings.ai_api_key})
+    return resolved.model_copy(update={"api_key": ""})
+
+
+def _resolve_ai_protocol(
+    stored_protocol: str | None,
+    env_protocol: str | None,
+    env_api_key: str,
+    *,
+    has_stored_row: bool = False,
+) -> Literal["responses", "chat_completions"]:
+    """Resolve the configured protocol while preserving legacy installations."""
+    if stored_protocol in {"responses", "chat_completions"}:
+        return cast(Literal["responses", "chat_completions"], stored_protocol)
+    if env_protocol in {"responses", "chat_completions"}:
+        return cast(Literal["responses", "chat_completions"], env_protocol)
+    if has_stored_row or env_api_key:
+        return "chat_completions"
+    return "responses"
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +514,7 @@ def rasterize_pdf_pages(raw_bytes: bytes, page_indexes: list[int]) -> list[bytes
 
 
 # ---------------------------------------------------------------------------
-# httpx Chat Completions call (injectable client for testing)
+# Shared httpx AI transport (injectable client for testing)
 # ---------------------------------------------------------------------------
 
 
@@ -447,10 +567,12 @@ def _build_group_messages(
         resolved_mime = "image/png" if mime_type == "application/pdf" else mime_type
         for image_bytes in pages:
             encoded = base64.b64encode(image_bytes).decode("ascii")
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{resolved_mime};base64,{encoded}"},
-            })
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{resolved_mime};base64,{encoded}"},
+                }
+            )
     content.append({"type": "text", "text": prompt_text})
     return [{"role": "user", "content": content}]
 
@@ -464,8 +586,9 @@ async def _call_chat_completions(
     *,
     request_json_mode: bool = True,
     max_tokens: int = _DEFAULT_COMPLETION_MAX_TOKENS,
+    api_protocol: str = "chat_completions",
 ) -> str:
-    """POST to {base_url}/chat/completions and return the response text.
+    """POST to the selected AI endpoint and return assistant output text.
 
     The ``client`` parameter is injectable for testing.  When ``None`` a
     temporary ``httpx.AsyncClient`` is created for the duration of the call.
@@ -492,6 +615,19 @@ async def _call_chat_completions(
     RuntimeError
         If the response has an unexpected shape.
     """
+    if api_protocol == "responses":
+        return await _call_responses(
+            base_url,
+            api_key,
+            model,
+            messages,
+            client,
+            request_json_mode=request_json_mode,
+            max_tokens=max_tokens,
+        )
+    if api_protocol != "chat_completions":
+        raise ValueError("Unsupported AI API protocol.")
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -515,7 +651,7 @@ async def _call_chat_completions(
             try:
                 data = await _do_post(client, body_with_json_mode)
             except httpx.HTTPStatusError as exc:
-                if exc.response.status_code == 400:
+                if _explicit_json_format_rejection(exc):
                     # Endpoint doesn't support json mode – retry without it.
                     data = await _do_post(client, base_body)
                 else:
@@ -528,7 +664,7 @@ async def _call_chat_completions(
                 try:
                     data = await _do_post(_client, body_with_json_mode)
                 except httpx.HTTPStatusError as exc:
-                    if exc.response.status_code == 400:
+                    if _explicit_json_format_rejection(exc):
                         data = await _do_post(_client, base_body)
                     else:
                         raise
@@ -547,17 +683,234 @@ async def _call_chat_completions(
     choice = choices[0]
     if not isinstance(choice, dict):
         raise RuntimeError("AI response has an invalid chat completion envelope.")
-    if choice.get("finish_reason") == "length":
+    finish_reason = choice.get("finish_reason")
+    if finish_reason is not None and not isinstance(finish_reason, str):
+        raise RuntimeError("AI response has an invalid chat completion envelope.")
+    if data.get("error") or choice.get("error"):
+        raise RuntimeError("AI provider reported a failed chat completion.")
+    if finish_reason == "length":
         # Do not parse or report partial content: it may be incomplete JSON and
         # must never appear in an exception or log message.
         raise ChatCompletionTruncatedError("AI response was truncated.")
+    if finish_reason in {
+        "error", "failed", "cancelled", "canceled", "content_filter"
+    }:
+        raise RuntimeError("AI response did not complete successfully.")
     message = choice.get("message")
     if not isinstance(message, dict):
         raise RuntimeError("AI response has an invalid chat completion envelope.")
+    refusal = message.get("refusal")
+    if refusal is not None and refusal is not False and refusal != "":
+        raise RuntimeError("AI response was refused.")
     content = message.get("content")
     if not isinstance(content, str):
         raise RuntimeError("AI response has an invalid chat completion envelope.")
+    if not content.strip():
+        raise RuntimeError("AI response was empty.")
     return content
+
+
+def _explicit_json_format_rejection(exc: httpx.HTTPStatusError) -> bool:
+    if exc.response.status_code != 400:
+        return False
+    try:
+        body = exc.response.json()
+    except (ValueError, UnicodeDecodeError):
+        return False
+    if not isinstance(body, dict):
+        return False
+    error = body.get("error")
+    if not isinstance(error, dict):
+        return False
+    parameter = error.get("param")
+    code = error.get("code")
+    message = error.get("message")
+    if not isinstance(message, str):
+        return False
+    text = message.lower()
+    if parameter is not None and not isinstance(parameter, str):
+        return False
+    if isinstance(parameter, str) and parameter.lower() not in {"text.format", "response_format"}:
+        return False
+    if isinstance(code, str) and code.lower() in {
+        "unsupported_response_format",
+        "response_format_not_supported",
+        "unsupported_text_format",
+        "text_format_not_supported",
+        "unsupported_json_mode",
+        "json_mode_not_supported",
+    }:
+        return True
+    if isinstance(parameter, str):
+        targets_format = True
+    else:
+        # Accept either ordering used by common providers, while requiring an
+        # explicit relation between the format field and the rejection. A JSON
+        # object mentioned as part of an image_url validation error is unrelated.
+        subject = (
+            r"(?:text\.format|response[_ ]format|json[_ ]mode|"
+            r"json (?:response )?format|structured (?:output|outputs))"
+        )
+        rejection = (
+            r"(?:unsupported|not supported|does not support|doesn't support|"
+            r"rejected|not accepted)"
+        )
+        targets_format = bool(
+            re.search(
+                subject + r"(?:\s+(?:parameter|field|option))?\s+(?:is\s+)?" + rejection,
+                text,
+            )
+            or re.search(
+                rejection + r"\s+(?:the\s+)?(?:requested\s+)?" + subject,
+                text,
+            )
+        )
+        if re.search(r"(?:input|messages?)\s*\[\s*\d+\s*\]", text):
+            targets_format = False
+    return targets_format
+
+
+def _explicit_image_input_rejection(exc: httpx.HTTPStatusError) -> bool:
+    """Recognize only a provider error that specifically rejects image input."""
+    try:
+        body = exc.response.json()
+    except (ValueError, UnicodeDecodeError):
+        return False
+    if not isinstance(body, dict) or not isinstance(body.get("error"), dict):
+        return False
+    error = body["error"]
+    message = error.get("message")
+    if not isinstance(message, str):
+        return False
+    text = message.lower()
+    code = error.get("code")
+    parameter = error.get("param")
+    if isinstance(code, str) and code.lower() in {
+        "invalid_image_url", "invalid_image_type", "image_too_large",
+        "unsupported_image_format", "invalid_image_format",
+    }:
+        return False
+    if isinstance(code, str) and code.lower() in {
+        "unsupported_image_input", "image_input_not_supported", "vision_not_supported"
+    }:
+        return True
+    # An unrecognized code with an image-field location is a payload error,
+    # not evidence that the model lacks image capability.
+    if isinstance(parameter, str) and re.search(
+        r"(?:image_url|input\[\d+\]\.content\[\d+\]|messages\[\d+\]\.content\[\d+\])",
+        parameter,
+        re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"(?:model\s+)?(?:does not support|doesn't support|cannot accept|can't accept|"
+            r"does not accept|unsupported)\s+(?:image inputs?|vision input)(?:\s*[.!?]|$)",
+            text,
+        )
+        or re.search(
+            r"(?:image inputs?|vision input)\s+(?:are\s+)?"
+            r"(?:not supported|unsupported|not accepted)",
+            text,
+        )
+    )
+
+
+async def _call_responses(
+    base_url: str,
+    api_key: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    client: httpx.AsyncClient | None,
+    *,
+    request_json_mode: bool,
+    max_tokens: int,
+) -> str:
+    """Call the stateless Responses endpoint with equivalent image/text input."""
+    user_input: list[dict[str, str]] = []
+    for message in messages:
+        content = message.get("content", [])
+        if not isinstance(content, list):
+            raise RuntimeError("AI input has an invalid message shape.")
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "text" and isinstance(part.get("text"), str):
+                user_input.append({"type": "input_text", "text": part["text"]})
+            elif part.get("type") == "image_url":
+                image_url = part.get("image_url")
+                if isinstance(image_url, dict) and isinstance(image_url.get("url"), str):
+                    user_input.append({"type": "input_image", "image_url": image_url["url"]})
+    body: dict[str, Any] = {
+        "model": model,
+        "input": [{"role": "user", "content": user_input}],
+        "store": False,
+        "max_output_tokens": max_tokens,
+    }
+    if request_json_mode:
+        body["text"] = {"format": {"type": "json_object"}}
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    url = f"{base_url.rstrip('/')}/responses"
+
+    async def post(_client: httpx.AsyncClient, payload: dict[str, Any]) -> object:
+        response = await _client.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        try:
+            return response.json()
+        except ValueError:
+            raise RuntimeError("AI response has an invalid Responses envelope.") from None
+
+    async def request(_client: httpx.AsyncClient) -> object:
+        if not request_json_mode:
+            return await post(_client, body)
+        try:
+            return await post(_client, body)
+        except httpx.HTTPStatusError as exc:
+            if not _explicit_json_format_rejection(exc):
+                raise
+            return await post(_client, {key: value for key, value in body.items() if key != "text"})
+
+    if client is None:
+        async with httpx.AsyncClient(timeout=60.0) as owned_client:
+            data = await request(owned_client)
+    else:
+        data = await request(client)
+    if not isinstance(data, dict):
+        raise RuntimeError("AI response has an invalid Responses envelope.")
+    status = data.get("status")
+    if status is not None and status != "completed":
+        if status == "incomplete":
+            raise ChatCompletionTruncatedError("AI response was incomplete.")
+        raise RuntimeError("AI response did not complete successfully.")
+    if data.get("error") is not None:
+        raise RuntimeError("AI response did not complete successfully.")
+    output = data.get("output")
+    if not isinstance(output, list):
+        raise RuntimeError("AI response has an invalid Responses envelope.")
+    chunks: list[str] = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "message" and item.get("role") == "assistant":
+            item_status = item.get("status")
+            if item_status is not None and item_status != "completed":
+                if item_status == "incomplete":
+                    raise ChatCompletionTruncatedError("AI response was incomplete.")
+                raise RuntimeError("AI response did not complete successfully.")
+            content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "refusal":
+                    raise RuntimeError("AI response was refused.")
+                if block.get("type") == "output_text" and isinstance(block.get("text"), str):
+                    chunks.append(block["text"])
+    result = "".join(chunks)
+    if not result.strip():
+        raise RuntimeError("AI response contained no assistant output text.")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -807,8 +1160,7 @@ async def extract_from_attachment(
     ai_cfg = await _get_ai_config(session)
     if not ai_cfg.enabled:
         raise ValueError(
-            "AI receipt extraction is disabled. Enable it in Settings → AI to use "
-            "this feature."
+            "AI receipt extraction is disabled. Enable it in Settings → AI to use this feature."
         )
     if not ai_cfg.api_key:
         raise ValueError("AI API key is not configured. Add your key in Settings → AI.")
@@ -818,9 +1170,12 @@ async def extract_from_attachment(
     # Keep the legacy entry point and its guards while sharing the exact same
     # parser/prompt/model implementation as whole inbox groups.
     return await extract_from_files(
-        session, company_id,
+        session,
+        company_id,
         [(attachment.mime_type, get_storage().open(attachment.storage_key))],
-        client=client, language=language,
+        client=client,
+        language=language,
+        strict_response=True,
     )
 
 
@@ -872,6 +1227,7 @@ async def extract_from_files(
             messages=messages,
             client=client,
             max_tokens=RECEIPT_EXTRACTION_MAX_TOKENS,
+            api_protocol=ai_cfg.api_protocol,
         )
     except httpx.TimeoutException as exc:
         raise AIExtractionError(
@@ -1016,8 +1372,7 @@ async def extract_external_sales_from_files(
     if extra:
         prompt += (
             "\n\nAdditional owner instructions (do not override the output schema "
-            "or safety rules):\n"
-            + extra
+            "or safety rules):\n" + extra
         )
     messages = _build_group_messages(group_images, prompt)
     try:
@@ -1028,6 +1383,7 @@ async def extract_external_sales_from_files(
             messages=messages,
             client=client,
             max_tokens=EXTERNAL_SALES_EXTRACTION_MAX_TOKENS,
+            api_protocol=ai_cfg.api_protocol,
         )
     except httpx.TimeoutException as exc:
         raise AIExtractionError("AI_TIMEOUT") from exc
@@ -1043,8 +1399,15 @@ async def extract_external_sales_from_files(
     if not isinstance(parsed, dict):
         raise AIExtractionError("AI_INVALID_RESPONSE")
     allowed = {
-        "document_date", "original_number", "counterparty", "description",
-        "observed_net_total", "observed_vat_total", "tax_summaries", "confidence", "review_notes",
+        "document_date",
+        "original_number",
+        "counterparty",
+        "description",
+        "observed_net_total",
+        "observed_vat_total",
+        "tax_summaries",
+        "confidence",
+        "review_notes",
         "explicit_electricity_sale_component",
     }
     return {key: value for key, value in parsed.items() if key in allowed}, truncated
@@ -1073,11 +1436,17 @@ async def test_ai_config(
     """
     if not cfg.api_key:
         return AiTestResult(
-            ok=False, multimodal=False, detail="API key is not configured."
+            ok=False,
+            multimodal=False,
+            api_protocol=cfg.api_protocol,
+            detail=f"API key is not configured. Selected protocol: {cfg.api_protocol}.",
         )
     if not cfg.model:
         return AiTestResult(
-            ok=False, multimodal=False, detail="Model name is not configured."
+            ok=False,
+            multimodal=False,
+            api_protocol=cfg.api_protocol,
+            detail=f"Model name is not configured. Selected protocol: {cfg.api_protocol}.",
         )
 
     b64 = base64.b64encode(_PROBE_PNG_BYTES).decode("ascii")
@@ -1091,10 +1460,7 @@ async def test_ai_config(
                 },
                 {
                     "type": "text",
-                    "text": (
-                        "This is a connectivity test. Reply with exactly: "
-                        '{"status": "ok"}'
-                    ),
+                    "text": ('This is a connectivity test. Reply with exactly: {"status": "ok"}'),
                 },
             ],
         }
@@ -1108,72 +1474,79 @@ async def test_ai_config(
             messages=probe_messages,
             client=client,
             request_json_mode=False,  # Probe only checks connectivity + multimodal
+            api_protocol=cfg.api_protocol,
         )
         return AiTestResult(
             ok=True,
             multimodal=True,
+            api_protocol=cfg.api_protocol,
             detail="Connection successful and model accepted image input.",
         )
 
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code
-        # Try to get error detail from response body
-        try:
-            err_body = exc.response.json()
-            err_msg = (
-                err_body.get("error", {}).get("message", "")
-                or str(err_body)
-            )
-        except Exception:
-            err_msg = exc.response.text[:200]
+        # Provider error bodies can echo credentials, prompts, or image data.
+        # Return only the selected protocol and HTTP status to the administrator.
+        err_msg = f"Selected protocol: {cfg.api_protocol}."
 
         if status_code in (401, 403):
             return AiTestResult(
                 ok=False,
                 multimodal=False,
+                api_protocol=cfg.api_protocol,
                 detail=f"Authentication failed (HTTP {status_code}): {err_msg}",
             )
         if status_code == 404:
             return AiTestResult(
                 ok=False,
                 multimodal=False,
-                detail=f"Model not found (HTTP 404): {err_msg or cfg.model!r}",
+                api_protocol=cfg.api_protocol,
+                detail=f"Model or endpoint not found (HTTP 404): {err_msg}",
             )
-        # 400 might mean the model doesn't support image inputs, but could also
-        # indicate other provider-side rejections (e.g. image too small).
-        # Report the provider's own message verbatim so the user can diagnose.
         if status_code == 400:
+            if _explicit_image_input_rejection(exc):
+                return AiTestResult(
+                    ok=True,
+                    multimodal=False,
+                    api_protocol=cfg.api_protocol,
+                    detail=(
+                        f"Connection successful; model rejected image input (HTTP 400). "
+                        f"{err_msg}"
+                    ),
+                )
             return AiTestResult(
-                ok=True,
+                ok=False,
                 multimodal=False,
-                detail=(
-                    f"Endpoint returned HTTP 400 — the model may have rejected the "
-                    f"request (see provider message): {err_msg}"
-                ),
+                api_protocol=cfg.api_protocol,
+                detail=f"Probe request was rejected (HTTP 400). {err_msg}",
             )
         return AiTestResult(
             ok=False,
             multimodal=False,
+            api_protocol=cfg.api_protocol,
             detail=f"HTTP {status_code}: {err_msg}",
         )
 
-    except httpx.ConnectError as exc:
+    except httpx.ConnectError:
         return AiTestResult(
             ok=False,
             multimodal=False,
-            detail=f"Connection failed: {exc}",
+            api_protocol=cfg.api_protocol,
+            detail=f"Connection failed. Selected protocol: {cfg.api_protocol}.",
         )
 
     except httpx.TimeoutException:
         return AiTestResult(
             ok=False,
             multimodal=False,
-            detail="Request timed out.",
+            api_protocol=cfg.api_protocol,
+            detail=f"Request timed out. Selected protocol: {cfg.api_protocol}.",
         )
 
-    except Exception as exc:
+    except Exception:
         return AiTestResult(
             ok=False,
             multimodal=False,
-            detail=f"Unexpected error: {exc}",
+            api_protocol=cfg.api_protocol,
+            detail=f"Request failed. Selected protocol: {cfg.api_protocol}.",
         )

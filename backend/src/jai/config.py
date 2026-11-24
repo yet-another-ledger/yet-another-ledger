@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import PrivateAttr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -142,6 +143,7 @@ class Settings(BaseSettings):
     ai_api_key: str = ""
     ai_model: str = ""
     ai_enabled: bool = False
+    ai_api_protocol: Literal["responses", "chat_completions"] | None = None
     # Maximum number of PDF pages to rasterise when extracting from a PDF receipt.
     ai_pdf_max_pages: int = 3
     # Scale factor for pypdfium2 page rendering (higher = more detail, more tokens).

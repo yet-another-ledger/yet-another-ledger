@@ -464,6 +464,9 @@
     "ai": {
       "title": "AI 设置",
       "enabled": "启用 AI",
+      "apiProtocol": "API 协议",
+      "responses": "Responses",
+      "chatCompletions": "Chat Completions",
       "baseUrl": "API 基础地址",
       "baseUrlPlaceholder": "https://api.openai.com/v1",
       "model": "模型",
@@ -478,6 +481,7 @@
       "promptReset": "附加指令已清空，将仅使用内置默认提示词。",
       "save": "保存",
       "saveSuccess": "AI 设置已保存。",
+      "apiKeyRootChanged": "供应商地址已更改，请为当前供应商重新输入 API 密钥。",
       "saveFailed": "保存 AI 设置失败。",
       "test": "测试连接",
       "testSuccessMultimodal": "连接成功——模型支持图片输入（多模态）。",
