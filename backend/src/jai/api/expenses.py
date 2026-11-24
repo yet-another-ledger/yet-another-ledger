@@ -42,6 +42,7 @@ from jai.schemas.expense import (
     ExpenseInput,
     ExpenseListResponse,
     ExpenseRead,
+    ExpenseUpdateInput,
     FixedAssetConfirmRequest,
     FixedAssetPreviewRequest,
     FixedAssetPreviewResult,
@@ -87,6 +88,12 @@ class _AiExtractRequest(BaseModel):
 router = APIRouter(prefix="/api/v1", tags=["expenses"])
 
 
+class ExpenseConflictRead(BaseModel):
+    """Conflict response for a reused client submission identifier."""
+
+    detail: str
+
+
 def _owner_only(user: User) -> None:
     if user.role != "owner":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Owner access required.")
@@ -110,6 +117,7 @@ def _require_company_id(user: User) -> uuid.UUID:
     "/expenses",
     response_model=ExpenseRead,
     status_code=status.HTTP_201_CREATED,
+    responses={409: {"model": ExpenseConflictRead}},
 )
 async def create_expense_endpoint(
     body: ExpenseInput,
@@ -121,6 +129,8 @@ async def create_expense_endpoint(
     company_id = _require_company_id(user)
     try:
         return await create_expense(session, company_id, body, creator_id=user.id)
+    except ExpenseConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
@@ -612,7 +622,7 @@ async def get_expense_endpoint(
 @router.put("/expenses/{expense_id}", response_model=ExpenseRead)
 async def update_expense_endpoint(
     expense_id: uuid.UUID,
-    body: ExpenseInput,
+    body: ExpenseUpdateInput,
     user: User = Depends(current_mfa_user),
     session: AsyncSession = Depends(get_session),
 ) -> ExpenseRead:

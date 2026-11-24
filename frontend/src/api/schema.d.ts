@@ -6781,6 +6781,14 @@ export interface components {
             active?: boolean;
         };
         /**
+         * ExpenseConflictRead
+         * @description Conflict response for a reused client submission identifier.
+         */
+        ExpenseConflictRead: {
+            /** Detail */
+            detail: string;
+        };
+        /**
          * ExpenseCostPreviewRequest
          * @description Raw inputs needed for a backend-authoritative annual P/L preview.
          */
@@ -6827,13 +6835,39 @@ export interface components {
             effective_annual_cost?: string | null;
         };
         /**
+         * ExpenseFixedAssetInput
+         * @description Optional fixed-asset terms collected alongside a new purchase.
+         */
+        ExpenseFixedAssetInput: {
+            /** Asset Name */
+            asset_name: string;
+            /** In Service Date */
+            in_service_date?: string | null;
+            /**
+             * Useful Life Years
+             * @default 5
+             */
+            useful_life_years?: number;
+            /**
+             * Residual Value
+             * @default 0
+             */
+            residual_value?: number | string;
+            /**
+             * Business Percentage
+             * @default 100
+             */
+            business_percentage?: number | string | null;
+            /**
+             * Use Type
+             * @default FULL_BUSINESS
+             * @enum {string}
+             */
+            use_type?: "FULL_BUSINESS" | "MIXED_USE";
+        };
+        /**
          * ExpenseInput
-         * @description Request body for POST/PUT /api/v1/expenses.
-         *
-         *     Only collects raw user input – net/vat amounts, date, category, treatment,
-         *     rate, supplier, reference, note, deductible.  All computed fields
-         *     (gross, base_*, snapshots, currency, exchange_rate, is_draft) are derived
-         *     by the service layer (red-line 1).
+         * @description Create expense contract, including optional replay-protected asset terms.
          */
         ExpenseInput: {
             /**
@@ -6898,6 +6932,9 @@ export interface components {
             include_in_pl?: boolean;
             /** @default NET */
             pl_cost_basis?: components["schemas"]["PlCostBasis"];
+            fixed_asset?: components["schemas"]["ExpenseFixedAssetInput"] | null;
+            /** Client Submission Id */
+            client_submission_id?: string | null;
         };
         /**
          * ExpenseKind
@@ -7029,6 +7066,8 @@ export interface components {
             is_draft: boolean;
             /** Recurring Expense Id */
             recurring_expense_id?: string | null;
+            /** Linked Fixed Asset Id */
+            linked_fixed_asset_id?: string | null;
             /**
              * Attachment Count
              * @default 0
@@ -7097,6 +7136,74 @@ export interface components {
              * @description Sum of non_deductible_net across all categories (EUR). total_deductible_net + total_non_deductible_net == total_net.
              */
             total_non_deductible_net: string;
+        };
+        /**
+         * ExpenseUpdateInput
+         * @description Update contract excludes creation-only asset registration fields.
+         */
+        ExpenseUpdateInput: {
+            /**
+             * Expense Date
+             * Format: date
+             */
+            expense_date: string;
+            /**
+             * Category Id
+             * Format: uuid
+             */
+            category_id: string;
+            /** Supplier Name */
+            supplier_name?: string | null;
+            /**
+             * Vat Treatment Id
+             * Format: uuid
+             */
+            vat_treatment_id: string;
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /**
+             * Net Amount
+             * @description Net (excl. VAT) amount ≥ 0.
+             */
+            net_amount: number | string;
+            /**
+             * Vat Amount
+             * @description VAT amount ≥ 0.
+             */
+            vat_amount: number | string;
+            /**
+             * Deductible
+             * @description Whether this expense is VAT-deductible. Defaults to category.default_deductible, then True.
+             */
+            deductible?: boolean | null;
+            /** Reference */
+            reference?: string | null;
+            /** Note */
+            note?: string | null;
+            /** @default BUSINESS */
+            paid_by?: components["schemas"]["PaidBy"];
+            /**
+             * Business Percentage
+             * @description Business-use percentage 0–100.
+             * @default 100
+             */
+            business_percentage?: number | string;
+            /**
+             * Depreciation Years
+             * @description Depreciation years; 1 = fully expensed this year.
+             * @default 1
+             */
+            depreciation_years?: number;
+            /**
+             * Include In Pl
+             * @default true
+             */
+            include_in_pl?: boolean;
+            /** @default NET */
+            pl_cost_basis?: components["schemas"]["PlCostBasis"];
         };
         /**
          * ExpenseVatTreatmentSuggestion
@@ -11539,6 +11646,75 @@ export interface components {
          * @enum {string}
          */
         ReceiptInboxErrorCode: "INBOX_NOT_PENDING" | "FILE_LIMIT_REACHED" | "LAST_FILE" | "ALREADY_CONFIRMED" | "FILE_GROUP_CHANGED" | "AI_DISABLED" | "AI_NOT_CONFIGURED" | "AI_TIMEOUT" | "AI_PROVIDER_ERROR" | "AI_INVALID_RESPONSE";
+        /**
+         * ReceiptInboxExpenseInput
+         * @description Inbox confirmation retains file-revision protection, not create replay IDs.
+         */
+        ReceiptInboxExpenseInput: {
+            /**
+             * Expense Date
+             * Format: date
+             */
+            expense_date: string;
+            /**
+             * Category Id
+             * Format: uuid
+             */
+            category_id: string;
+            /** Supplier Name */
+            supplier_name?: string | null;
+            /**
+             * Vat Treatment Id
+             * Format: uuid
+             */
+            vat_treatment_id: string;
+            /**
+             * Vat Rate Id
+             * Format: uuid
+             */
+            vat_rate_id: string;
+            /**
+             * Net Amount
+             * @description Net (excl. VAT) amount ≥ 0.
+             */
+            net_amount: number | string;
+            /**
+             * Vat Amount
+             * @description VAT amount ≥ 0.
+             */
+            vat_amount: number | string;
+            /**
+             * Deductible
+             * @description Whether this expense is VAT-deductible. Defaults to category.default_deductible, then True.
+             */
+            deductible?: boolean | null;
+            /** Reference */
+            reference?: string | null;
+            /** Note */
+            note?: string | null;
+            /** @default BUSINESS */
+            paid_by?: components["schemas"]["PaidBy"];
+            /**
+             * Business Percentage
+             * @description Business-use percentage 0–100.
+             * @default 100
+             */
+            business_percentage?: number | string;
+            /**
+             * Depreciation Years
+             * @description Depreciation years; 1 = fully expensed this year.
+             * @default 1
+             */
+            depreciation_years?: number;
+            /**
+             * Include In Pl
+             * @default true
+             */
+            include_in_pl?: boolean;
+            /** @default NET */
+            pl_cost_basis?: components["schemas"]["PlCostBasis"];
+            fixed_asset?: components["schemas"]["ExpenseFixedAssetInput"] | null;
+        };
         /** ReceiptInboxExtractRequest */
         ReceiptInboxExtractRequest: {
             /**
@@ -19336,6 +19512,15 @@ export interface operations {
                     "application/json": components["schemas"]["ExpenseRead"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseConflictRead"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -19998,7 +20183,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ExpenseInput"];
+                "application/json": components["schemas"]["ExpenseUpdateInput"];
             };
         };
         responses: {
@@ -21962,7 +22147,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ExpenseInput"];
+                "application/json": components["schemas"]["ReceiptInboxExpenseInput"];
             };
         };
         responses: {

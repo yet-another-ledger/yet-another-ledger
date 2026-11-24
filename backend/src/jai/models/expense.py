@@ -26,6 +26,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     Numeric,
     String,
@@ -234,4 +235,28 @@ class Expense(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ExpenseSubmission(Base):
+    """Durable company-scoped replay key for purchase creation requests."""
+
+    __tablename__ = "expense_submission"
+    __table_args__ = (
+        UniqueConstraint("company_id", "client_submission_id", name="uq_expense_submission_key"),
+        ForeignKeyConstraint(
+            ["company_id", "expense_id"], ["expense.company_id", "expense.id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company.id", ondelete="RESTRICT"), nullable=False
+    )
+    client_submission_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    expense_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

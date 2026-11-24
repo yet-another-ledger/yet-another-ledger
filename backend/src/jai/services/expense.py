@@ -27,12 +27,15 @@ Red-line compliance
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import uuid
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.db import set_rls_company
@@ -40,13 +43,14 @@ from jai.models._enums import ExpenseKind, PaidBy, PlCostBasis, VatTreatmentEffe
 from jai.models.battery import BatteryAsset
 from jai.models.company import Company
 from jai.models.dictionary import ExpenseCategory
-from jai.models.expense import Expense
+from jai.models.expense import Expense, ExpenseSubmission
 from jai.models.expense_attachment import ExpenseAttachment
 from jai.models.recurring_expense import RecurringExpense
 from jai.models.vat import VatRate, VatTreatment
 from jai.schemas.expense import (
     ExpenseAttachmentListResponse,
     ExpenseAttachmentRead,
+    ExpenseBaseInput,
     ExpenseCalculateRequest,
     ExpenseCalculateResult,
     ExpenseCostPreviewRequest,
@@ -55,6 +59,7 @@ from jai.schemas.expense import (
     ExpenseListItem,
     ExpenseListResponse,
     ExpenseRead,
+    ExpenseUpdateInput,
 )
 from jai.services.mileage import _lock_mileage_company
 from jai.services.money import quantize_to_minor_unit
@@ -336,7 +341,9 @@ async def _registered_battery_expense(
     )
 
 
-def _expense_to_read(exp: Expense, attachment_count: int = 0) -> ExpenseRead:
+def _expense_to_read(
+    exp: Expense, attachment_count: int = 0, linked_fixed_asset_id: uuid.UUID | None = None
+) -> ExpenseRead:
     """Convert an ORM Expense to ExpenseRead schema."""
     return ExpenseRead(
         id=exp.id,
@@ -370,6 +377,7 @@ def _expense_to_read(exp: Expense, attachment_count: int = 0) -> ExpenseRead:
         pl_cost_basis=PlCostBasis(exp.pl_cost_basis),
         is_draft=exp.is_draft,
         recurring_expense_id=getattr(exp, "recurring_expense_id", None),
+        linked_fixed_asset_id=linked_fixed_asset_id,
         attachment_count=attachment_count,
         created_at=exp.created_at,
         updated_at=exp.updated_at,
@@ -379,7 +387,7 @@ def _expense_to_read(exp: Expense, attachment_count: int = 0) -> ExpenseRead:
 async def _apply_body(
     session: AsyncSession,
     exp: Expense,
-    body: ExpenseInput,
+    body: ExpenseBaseInput,
     company_id: uuid.UUID,
     *,
     preserve_tax_snapshot: bool = False,
@@ -481,17 +489,128 @@ async def create_expense(
     - D11: net/vat quantised to minor unit; gross = net + vat.
     - D9: deductible defaults via category.default_deductible → True.
     """
-    exp = await create_expense_record(session, company_id, body, creator_id)
-    await session.commit()
-    await session.refresh(exp)
-    # New expense: no attachments yet
-    return _expense_to_read(exp, attachment_count=0)
+    if body.client_submission_id is not None:
+        return await _create_expense_idempotent(session, company_id, body, creator_id)
+    try:
+        exp = await create_expense_record(session, company_id, body, creator_id)
+        linked_id = None
+        if body.fixed_asset is not None:
+            from jai.services.fixed_asset import register_fixed_asset_for_new_expense
+
+            asset = await register_fixed_asset_for_new_expense(
+                session, exp, company_id, body.fixed_asset, creator_id
+            )
+            linked_id = asset.id
+        await session.commit()
+        await session.refresh(exp)
+        return _expense_to_read(exp, attachment_count=0, linked_fixed_asset_id=linked_id)
+    except BaseException:
+        await session.rollback()
+        raise
+
+
+def _submission_hash(body: ExpenseInput) -> str:
+    def canonical(value: object) -> object:
+        if isinstance(value, Decimal):
+            if value.is_zero():
+                return "0"
+            return str(value.normalize())
+        if isinstance(value, dict):
+            return {key: canonical(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [canonical(item) for item in value]
+        return value
+
+    payload = canonical(body.model_dump(mode="python", exclude={"client_submission_id"}))
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+async def _replay_expense_submission(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    submission_id: uuid.UUID,
+    payload_hash: str,
+) -> ExpenseRead | None:
+    from jai.models.fixed_asset import FixedAsset
+
+    submission = await session.scalar(
+        select(ExpenseSubmission).where(
+            ExpenseSubmission.company_id == company_id,
+            ExpenseSubmission.client_submission_id == submission_id,
+        )
+    )
+    if submission is None:
+        return None
+    if submission.payload_hash != payload_hash:
+        raise ExpenseConflict("Client submission ID was already used with different data.")
+    expense = await _load_expense(session, submission.expense_id, company_id)
+    asset_id = await session.scalar(
+        select(FixedAsset.id).where(FixedAsset.acquisition_expense_id == expense.id)
+    )
+    return _expense_to_read(expense, 0, asset_id)
+
+
+async def _create_expense_idempotent(
+    session: AsyncSession,
+    company_id: uuid.UUID,
+    body: ExpenseInput,
+    creator_id: uuid.UUID | None,
+) -> ExpenseRead:
+    from jai.models.fixed_asset import FixedAsset
+
+    await set_rls_company(session, company_id)
+    submission_id = body.client_submission_id
+    assert submission_id is not None
+    payload_hash = _submission_hash(body)
+    try:
+        replay = await _replay_expense_submission(session, company_id, submission_id, payload_hash)
+        if replay is not None:
+            await session.rollback()
+            return replay
+        expense = await create_expense_record(session, company_id, body, creator_id)
+        if body.fixed_asset is not None:
+            from jai.services.fixed_asset import register_fixed_asset_for_new_expense
+
+            await register_fixed_asset_for_new_expense(
+                session, expense, company_id, body.fixed_asset, creator_id
+            )
+        session.add(
+            ExpenseSubmission(
+                company_id=company_id,
+                client_submission_id=submission_id,
+                payload_hash=payload_hash,
+                expense_id=expense.id,
+            )
+        )
+        await session.flush()
+        # Read the database-quantized values before building the first response.
+        # Replays load this persisted row, so both success paths must serialize
+        # the same state (not the unrounded in-memory input).
+        await session.refresh(expense)
+        linked_id = await session.scalar(
+            select(FixedAsset.id).where(FixedAsset.acquisition_expense_id == expense.id)
+        )
+        result = _expense_to_read(expense, 0, linked_id)
+        await session.commit()
+        return result
+    except IntegrityError:
+        await session.rollback()
+        await set_rls_company(session, company_id)
+        replay = await _replay_expense_submission(session, company_id, submission_id, payload_hash)
+        if replay is not None:
+            await session.rollback()
+            return replay
+        raise
+    except BaseException:
+        await session.rollback()
+        raise
 
 
 async def create_expense_record(
     session: AsyncSession,
     company_id: uuid.UUID,
-    body: ExpenseInput,
+    body: ExpenseBaseInput,
     creator_id: uuid.UUID | None,
 ) -> Expense:
     """Build and flush a confirmed PURCHASE Expense without committing.
@@ -530,16 +649,22 @@ async def get_expense(
 
     Raises ``LookupError`` (→ HTTP 404) if not found or cross-company.
     """
+    await set_rls_company(session, company_id)
     exp = await _load_expense(session, expense_id, company_id)
     count = await _count_attachments(session, expense_id)
-    return _expense_to_read(exp, count)
+    from jai.models.fixed_asset import FixedAsset
+
+    asset_id = await session.scalar(
+        select(FixedAsset.id).where(FixedAsset.acquisition_expense_id == expense_id)
+    )
+    return _expense_to_read(exp, count, asset_id)
 
 
 async def update_expense(
     session: AsyncSession,
     expense_id: uuid.UUID,
     company_id: uuid.UUID,
-    body: ExpenseInput,
+    body: ExpenseUpdateInput,
 ) -> ExpenseRead:
     """Edit an expense.  Same guards as create_expense.
 
@@ -654,7 +779,11 @@ async def update_expense(
     await session.commit()
     await session.refresh(exp)
     count = await _count_attachments(session, expense_id)
-    return _expense_to_read(exp, count)
+    await set_rls_company(session, company_id)
+    linked_asset_id = await session.scalar(
+        select(FixedAsset.id).where(FixedAsset.acquisition_expense_id == expense_id)
+    )
+    return _expense_to_read(exp, count, linked_asset_id)
 
 
 async def delete_expense(

@@ -191,6 +191,7 @@ def build_fixed_asset_preview(
     request: FixedAssetPreviewRequest,
     *,
     company_id: uuid.UUID | None = None,
+    enforce_conversion_protection: bool = True,
 ) -> FixedAssetPreviewResult:
     """Pure calculation for the proposed asset; it never mutates the purchase."""
     if ExpenseKind(expense.kind) != ExpenseKind.PURCHASE:
@@ -346,7 +347,11 @@ def build_fixed_asset_preview(
         closing_value = opening_value - realized_amount
         planned_closing_value = planned_opening_value - asset_amount
         difference = new_amount - old_amount
-        if year < as_of.year and (old_amount != 0 or new_amount != 0):
+        if (
+            enforce_conversion_protection
+            and year < as_of.year
+            and (old_amount != 0 or new_amount != 0)
+        ):
             prior_years_affected.append(year)
         deltas.append(
             FixedAssetYearDelta(

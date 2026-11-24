@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jai.auth.secret import get_auth_secret
 from jai.db import set_rls_company
+from jai.models.expense import Expense
 from jai.models.fixed_asset import (
     FixedAsset,
     FixedAssetAnnualRevision,
@@ -25,7 +26,9 @@ from jai.models.fixed_asset import (
     FixedAssetRevision,
 )
 from jai.schemas.expense import (
+    ExpenseFixedAssetInput,
     FixedAssetConfirmRequest,
+    FixedAssetPreviewRequest,
     FixedAssetRead,
     FixedAssetYearDelta,
 )
@@ -226,6 +229,64 @@ async def convert_expense_to_fixed_asset(
     response = await _read(session, asset)
     await session.commit()
     return response
+
+
+async def register_fixed_asset_for_new_expense(
+    session: AsyncSession,
+    expense: Expense,
+    company_id: uuid.UUID,
+    request: ExpenseFixedAssetInput,
+    actor_id: uuid.UUID | None,
+) -> FixedAssetRead:
+    """Create a fixed asset for a just-flushed purchase in the caller's transaction."""
+    if request.in_service_date is not None and request.in_service_date > date.today():
+        raise ValueError("In-service date cannot be in the future.")
+    business_percentage = (
+        Decimal("100") if request.use_type == "FULL_BUSINESS" else request.business_percentage
+    )
+    if business_percentage is None:
+        raise ValueError("An estimated business percentage is required for mixed use.")
+    if request.use_type == "FULL_BUSINESS" and business_percentage != 100:
+        raise ValueError("Full-business use requires a 100% business percentage.")
+    if request.residual_value < 0:
+        raise ValueError("Residual value must be non-negative.")
+    preview_request = FixedAssetPreviewRequest(
+        asset_name=request.asset_name,
+        in_service_date=request.in_service_date,
+        useful_life_years=request.useful_life_years,
+        residual_value=request.residual_value,
+        business_percentage=business_percentage,
+        use_type=request.use_type,
+    )
+    preview = build_fixed_asset_preview(
+        expense, preview_request, company_id=company_id, enforce_conversion_protection=False
+    )
+    asset = FixedAsset(
+        company_id=company_id,
+        acquisition_expense_id=expense.id,
+        name=request.asset_name,
+        acquisition_date=expense.expense_date,
+        in_service_date=request.in_service_date,
+        acquisition_cost=preview.acquisition_cost,
+        residual_value=request.residual_value,
+        useful_life_years=request.useful_life_years,
+        business_percentage=business_percentage,
+        use_type=request.use_type,
+        created_by=actor_id,
+    )
+    session.add(asset)
+    await session.flush()
+    if request.use_type == "MIXED_USE":
+        session.add(
+            FixedAssetAnnualUse(
+                company_id=company_id,
+                asset_id=asset.id,
+                year=(request.in_service_date or expense.expense_date).year,
+                estimated_business_percentage=business_percentage,
+            )
+        )
+        await session.flush()
+    return await _read(session, asset)
 
 
 async def list_fixed_assets(

@@ -42,6 +42,9 @@ const receiptVatSource = ref<'none' | 'ai' | 'human'>('none')
 const currentExtractionVatMissing = ref(false)
 const deductible = ref<boolean | null>(true), paidBy = ref<'BUSINESS' | 'PRIVATE'>('BUSINESS'), businessPct = ref<number>(100), years = ref<number>(1), reference = ref(''), note = ref('')
 const includeInPl = ref(true), plCostBasis = ref<PlCostBasis>('AUTO')
+const registerAsset = ref(false), assetName = ref(''), assetInServiceDate = ref('')
+const assetUsefulLife = ref(5), assetResidualValue = ref<number>(0)
+const assetUseType = ref<'FULL_BUSINESS' | 'MIXED_USE'>('FULL_BUSINESS'), assetBusinessPercentage = ref<number | null>(null)
 const previewGross = ref<string | null>(null)
 const edited = ref(new Set<string>())
 const aiOwnedFields = new Set<string>()
@@ -132,6 +135,9 @@ function resetDraft() {
   currentExtractionVatMissing.value = false
   deductible.value = true; paidBy.value = 'BUSINESS'; businessPct.value = 100; years.value = 1
   includeInPl.value = true; plCostBasis.value = 'AUTO'
+  registerAsset.value = false; assetName.value = ''; assetInServiceDate.value = ''
+  assetUsefulLife.value = 5; assetResidualValue.value = 0
+  assetUseType.value = 'FULL_BUSINESS'; assetBusinessPercentage.value = null
   reference.value = ''; note.value = ''; previewGross.value = null
   edited.value = new Set()
   treatmentOrigin.value = 'none'; rateOrigin.value = 'none'; ++extractionVersion
@@ -447,6 +453,7 @@ async function confirmExpense() {
     return
   }
   if (!categoryId.value || !treatmentId.value || !rateId.value || net.value == null || vat.value == null) { error.value = t('receiptInbox.validation'); return }
+  if (registerAsset.value && assetUseType.value === 'MIXED_USE' && assetBusinessPercentage.value == null) { error.value = t('expenses.businessPercentage'); return }
   const targetId = id.value
   const version = routeVersion
   const confirmationRetry = retryTask.value && retryTask.value.id === targetId && retryTask.value.routeVersion === version
@@ -455,7 +462,18 @@ async function confirmExpense() {
   const extraction = ++extractionVersion
   if (confirmationRetry) confirmationRetry.confirmation = extraction
   action.value = 'confirm'; error.value = ''; success.value = ''
-  const body: ExpenseInput = toExpenseInput({ expense_date: expenseDate.value, category_id: categoryId.value, supplier_name: supplier.value || null, vat_treatment_id: treatmentId.value, vat_rate_id: rateId.value, net_amount: net.value, vat_amount: vat.value, deductible: deductible.value, reference: reference.value || null, note: note.value || null, paid_by: paidBy.value, business_percentage: businessPct.value, depreciation_years: years.value, include_in_pl: includeInPl.value, pl_cost_basis: plCostBasis.value })
+  const body: ExpenseInput = toExpenseInput({ expense_date: expenseDate.value, category_id: categoryId.value, supplier_name: supplier.value || null, vat_treatment_id: treatmentId.value, vat_rate_id: rateId.value, net_amount: net.value, vat_amount: vat.value, deductible: deductible.value, reference: reference.value || null, note: note.value || null, paid_by: paidBy.value, business_percentage: businessPct.value, depreciation_years: years.value, include_in_pl: includeInPl.value, pl_cost_basis: plCostBasis.value,
+    ...(registerAsset.value ? {
+      fixed_asset: {
+        asset_name: assetName.value,
+        in_service_date: assetInServiceDate.value || null,
+        useful_life_years: assetUsefulLife.value,
+        residual_value: assetResidualValue.value ?? 0,
+        business_percentage: assetUseType.value === 'FULL_BUSINESS' ? 100 : assetBusinessPercentage.value!,
+        use_type: assetUseType.value,
+      },
+    } : {}),
+  })
   try {
     const result = await inbox.confirm(targetId, body, reviewedFileRevision)
     if (version !== routeVersion || extraction !== extractionVersion) return
@@ -628,6 +646,17 @@ function formatBytes(n: number) { return n < 1024 ? `${n} B` : `${(n / 1024).toF
             <n-form-item :label="t('expenses.plCostBasis')"><n-select v-model:value="plCostBasis" :options="[{label:t('expenses.costBasisAuto'),value:'AUTO'},{label:t('expenses.costBasisNet'),value:'NET'},{label:t('expenses.costBasisGross'),value:'GROSS'}]" /></n-form-item>
             <n-form-item :label="t('expenses.reference')"><n-input v-model:value="reference" /></n-form-item>
             <n-form-item :label="t('expenses.note')"><n-input v-model:value="note" type="textarea" @update:value="markEdited('note')" /></n-form-item>
+            <n-form-item :label="t('fixedAssets.registerOption')">
+              <n-checkbox :checked="registerAsset" @update:checked="(checked) => { registerAsset = checked; if (checked && !assetName) assetName = supplier || dict.categories.value.find(x => x.id === categoryId)?.name || '' }">{{ t('fixedAssets.registerOption') }}</n-checkbox>
+            </n-form-item>
+            <template v-if="registerAsset">
+              <n-form-item :label="t('fixedAssets.assetName')"><n-input v-model:value="assetName" /></n-form-item>
+              <n-form-item :label="t('fixedAssets.inServiceDate')"><input v-model="assetInServiceDate" type="date" /></n-form-item>
+              <n-form-item :label="t('fixedAssets.usefulLifeYears')"><n-input-number v-model:value="assetUsefulLife" :min="1" :precision="0" /></n-form-item>
+              <n-form-item :label="t('fixedAssets.residualValue')"><n-input-number v-model:value="assetResidualValue" :min="0" :precision="2" /></n-form-item>
+              <n-form-item :label="t('fixedAssets.useType')"><n-select v-model:value="assetUseType" @update:value="(value) => { if (value === 'MIXED_USE') assetBusinessPercentage = null }" :options="[{label:t('fixedAssets.fullBusiness'),value:'FULL_BUSINESS'},{label:t('fixedAssets.mixedUse'),value:'MIXED_USE'}]" /></n-form-item>
+              <n-form-item v-if="assetUseType === 'MIXED_USE'" :label="t('expenses.businessPercentage')"><n-input-number v-model:value="assetBusinessPercentage" :min="0" :max="100" :precision="1" /></n-form-item>
+            </template>
             <n-button v-if="action==='confirm'" type="primary" loading>{{ t('receiptInbox.confirming') }}</n-button><n-button v-else type="primary" attr-type="submit" :disabled="fileActionPending || fileGroupUnverified">{{ t('receiptInbox.confirm') }}</n-button>
           </n-form>
         </n-card>

@@ -21,7 +21,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator  # noqa: F401
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator  # noqa: F401
 
 from jai.models._enums import ExpenseKind, PaidBy, PlCostBasis
 
@@ -30,7 +30,46 @@ from jai.models._enums import ExpenseKind, PaidBy, PlCostBasis
 # ---------------------------------------------------------------------------
 
 
-class ExpenseInput(BaseModel):
+class ExpenseFixedAssetInput(BaseModel):
+    """Optional fixed-asset terms collected alongside a new purchase."""
+
+    asset_name: str = Field(min_length=1, max_length=200)
+    in_service_date: date | None = None
+    useful_life_years: int = Field(default=5, ge=1, le=100)
+    residual_value: Decimal = Field(default=Decimal("0"), ge=0, max_digits=18, decimal_places=2)
+    business_percentage: Decimal | None = Field(default=Decimal("100"), ge=0, le=100)
+    use_type: Literal["FULL_BUSINESS", "MIXED_USE"] = "FULL_BUSINESS"
+
+    @field_validator("asset_name")
+    @classmethod
+    def _trim_asset_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Asset name is required.")
+        return value
+
+    @field_validator("residual_value")
+    @classmethod
+    def _residual_value_minor_unit(cls, value: Decimal) -> Decimal:
+        if value != value.quantize(Decimal("0.01")):
+            raise ValueError("Residual value must be entered to the nearest cent.")
+        return value
+
+    @model_validator(mode="after")
+    def _use_percentage(self) -> ExpenseFixedAssetInput:
+        if self.use_type == "MIXED_USE" and (
+            self.business_percentage is None or "business_percentage" not in self.model_fields_set
+        ):
+            raise ValueError("An estimated business percentage is required for mixed use.")
+        if self.use_type == "FULL_BUSINESS" and self.business_percentage not in (
+            None,
+            Decimal("100"),
+        ):
+            raise ValueError("Full-business use requires a 100% business percentage.")
+        return self
+
+
+class ExpenseBaseInput(BaseModel):
     """Request body for POST/PUT /api/v1/expenses.
 
     Only collects raw user input – net/vat amounts, date, category, treatment,
@@ -71,6 +110,10 @@ class ExpenseInput(BaseModel):
     )
     include_in_pl: bool = True
     pl_cost_basis: PlCostBasis = PlCostBasis.NET
+    # Legacy purchase clients may send fields the server derives (for example
+    # is_draft). Preserve the original ignore behavior while each new
+    # registration field is explicitly guarded at incompatible entry points.
+    model_config = ConfigDict(extra="ignore")
 
     @field_validator("net_amount", "vat_amount")
     @classmethod
@@ -79,6 +122,45 @@ class ExpenseInput(BaseModel):
             raise ValueError("Amount must be ≥ 0.")
         return v
 
+
+class ExpenseInput(ExpenseBaseInput):
+    """Create expense contract, including optional replay-protected asset terms."""
+
+    fixed_asset: ExpenseFixedAssetInput | None = None
+    client_submission_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _asset_submission_requires_id(self) -> ExpenseInput:
+        if self.fixed_asset is not None and self.client_submission_id is None:
+            raise ValueError("A client submission ID is required when registering an asset.")
+        return self
+
+
+class ReceiptInboxExpenseInput(ExpenseBaseInput):
+    """Inbox confirmation retains file-revision protection, not create replay IDs."""
+
+    fixed_asset: ExpenseFixedAssetInput | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_create_replay_id(cls, value: object) -> object:
+        if isinstance(value, dict) and "client_submission_id" in value:
+            raise ValueError("client_submission_id is not supported for receipt confirmation.")
+        return value
+
+
+class ExpenseUpdateInput(ExpenseBaseInput):
+    """Update contract excludes creation-only asset registration fields."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_creation_fields(cls, value: object) -> object:
+        if isinstance(value, dict):
+            unsupported = {"fixed_asset", "client_submission_id"}.intersection(value)
+            if unsupported:
+                fields = ", ".join(sorted(unsupported))
+                raise ValueError(f"Creation-only fields are not supported: {fields}.")
+        return value
 
 # ---------------------------------------------------------------------------
 # Read
@@ -140,6 +222,7 @@ class ExpenseRead(BaseModel):
 
     # Recurring expense backlink (step 3: FK → recurring_expense.id, SET NULL on delete)
     recurring_expense_id: uuid.UUID | None = None
+    linked_fixed_asset_id: uuid.UUID | None = None
 
     # Attachment count (populated by service; step 2 will use real counts)
     attachment_count: int = 0

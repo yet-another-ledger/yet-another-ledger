@@ -34,7 +34,7 @@ from jai.models.document import (  # noqa: F401
 from jai.models.document_artifact import DocumentArtifact  # noqa: F401
 from jai.models.email_log import EmailLog  # noqa: F401
 from jai.models.estimate import Estimate, EstimateGroup, EstimateLine  # noqa: F401
-from jai.models.expense import Expense  # noqa: F401
+from jai.models.expense import Expense, ExpenseSubmission  # noqa: F401
 from jai.models.expense_attachment import ExpenseAttachment  # noqa: F401
 from jai.models.external_sales import (  # noqa: F401
     ExternalSale,

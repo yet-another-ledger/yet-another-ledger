@@ -13,7 +13,7 @@ from jai.auth.deps import current_mfa_user
 from jai.config import get_settings
 from jai.db import get_session
 from jai.models.user import User
-from jai.schemas.expense import ExpenseInput
+from jai.schemas.expense import ReceiptInboxExpenseInput
 from jai.schemas.receipt_inbox import (
     ReceiptInboxConfirmationRead,
     ReceiptInboxConflict,
@@ -199,7 +199,7 @@ async def extract_receipt_inbox(
 )
 async def confirm_receipt_inbox(
     inbox_id: uuid.UUID,
-    body: ExpenseInput,
+    body: ReceiptInboxExpenseInput,
     expected_file_revision: int | None = Query(None, ge=0),
     user: User = Depends(_owner),
     session: AsyncSession = Depends(get_session),

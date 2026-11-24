@@ -18,6 +18,7 @@ import { ref, onBeforeUnmount, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { localDateStr } from '../../utils/date'
+import { secureUuid } from '../../utils/uuid'
 import { useExpenseCostPreview } from '../../composables/useExpenseCostPreview'
 import { resolvePurchaseTreatmentSuggestion, toExpenseInput, usePurchaseExpenseDictionaries } from '../../composables/usePurchaseExpenseDictionaries'
 import {
@@ -49,11 +50,14 @@ const store = useExpensesStore()
 const expenseId = computed(() => route.params.id as string | undefined)
 const isEdit = computed(() => !!expenseId.value)
 const assetName = ref('')
+const registerAsset = ref(false)
+const clientSubmissionId = ref<string | null>(null)
+const uncertainAssetSubmission = ref<{ id: string; fingerprint: string } | null>(null)
 const assetInServiceDate = ref('')
 const assetUsefulLife = ref(5)
 const assetResidualValue = ref<number>(0)
 const assetUseType = ref<'FULL_BUSINESS' | 'MIXED_USE'>('FULL_BUSINESS')
-const assetBusinessPercentage = ref(100)
+const assetBusinessPercentage = ref<number | null>(null)
 const assetReportBusinessPercentage = computed(() =>
   assetUseType.value === 'FULL_BUSINESS' ? 100 : assetBusinessPercentage.value,
 )
@@ -164,6 +168,12 @@ watch(
     expenseDate, netAmount, vatAmount, deductible, businessPercentage, depreciationYears, includeInPl, plCostBasis],
   invalidateAssetPreview,
 )
+
+watch(assetUseType, (value, previous) => {
+  if (!expenseId.value && value === 'MIXED_USE' && previous !== value) {
+    assetBusinessPercentage.value = null
+  }
+})
 
 // ---- Page state ----
 const loading = ref(false)
@@ -400,7 +410,8 @@ watch(expenseId, (targetId, previousId) => {
   pageError.value = null; saveSuccess.value = false; saving.value = false; attachLoading.value = false; attachUploading.value = false; attachments.value = []; lastAiAttachmentId.value = null; lastAiExtractedAttachmentId.value = null; lastAiSuccessfulAttachmentId.value = null
   expenseDate.value = localDateStr(new Date()); categoryId.value = null; supplierName.value = ''; vatTreatmentId.value = null; vatRateId.value = null
   assetName.value = ''; assetInServiceDate.value = ''; assetUsefulLife.value = 5; assetResidualValue.value = 0
-  assetBusinessPercentage.value = 100; assetUseType.value = 'FULL_BUSINESS'
+  assetBusinessPercentage.value = null; assetUseType.value = 'FULL_BUSINESS'
+  clientSubmissionId.value = null; uncertainAssetSubmission.value = null
   netAmount.value = null; vatAmount.value = null; deductible.value = null; note.value = ''; reference.value = ''; grossAmountDisplay.value = null
   receiptVatBaseline.value = null; ordinaryVatPreview.value = null
   vatManuallyEdited.value = false
@@ -469,6 +480,10 @@ async function handleSave() {
   saveSuccess.value = false
   pageError.value = null
   try {
+    if (!targetId && registerAsset.value && assetUseType.value === 'MIXED_USE' && assetBusinessPercentage.value == null) {
+      pageError.value = t('expenses.businessPercentage')
+      return
+    }
     // Only send raw inputs — no gross/base_*/is_draft (red-line 1)
     // Bookkeeping fields (M8.5): passed as-is, no local computation
     const body = toExpenseInput({
@@ -487,7 +502,34 @@ async function handleSave() {
       depreciation_years: depreciationYears.value,
       include_in_pl: includeInPl.value,
       pl_cost_basis: plCostBasis.value,
+      ...(targetId ? {} : registerAsset.value ? {
+        fixed_asset: {
+          asset_name: assetName.value,
+          in_service_date: assetInServiceDate.value || null,
+          useful_life_years: assetUsefulLife.value,
+          residual_value: assetResidualValue.value ?? 0,
+          business_percentage: assetReportBusinessPercentage.value!,
+          use_type: assetUseType.value,
+        },
+        client_submission_id: clientSubmissionId.value ?? secureUuid(),
+      } : {}),
     })
+    if (!targetId && registerAsset.value) {
+      const { client_submission_id: submissionIdFromBody, ...submittedFields } = body
+      const fingerprint = JSON.stringify(submittedFields)
+      const prior = uncertainAssetSubmission.value
+      if (prior && prior.fingerprint !== fingerprint) {
+        pageError.value = t('fixedAssets.retryOriginalSubmission')
+        return
+      }
+      const submissionId = prior?.id ?? submissionIdFromBody ?? secureUuid()
+      clientSubmissionId.value = submissionId
+      body.client_submission_id = submissionId
+      uncertainAssetSubmission.value = { id: submissionId, fingerprint }
+    } else if (!targetId && uncertainAssetSubmission.value) {
+      pageError.value = t('fixedAssets.retryOriginalSubmission')
+      return
+    }
     let result: ExpenseRead
     if (targetId) {
       result = await store.updateExpense(targetId, body)
@@ -499,12 +541,17 @@ async function handleSave() {
     fillFromExpense(result, lastAiAttachmentId.value !== null
       && lastAiAttachmentId.value === lastAiSuccessfulAttachmentId.value)
     saveSuccess.value = true
+    uncertainAssetSubmission.value = null
+    clientSubmissionId.value = null
     if (!isEdit.value) {
       // Navigate to edit mode after create
       void router.replace({ path: `/expenses/${result.id}/edit`, query: { tab: 'purchase' } })
     }
   } catch (e: unknown) {
-    if (version === pageVersion) pageError.value = e instanceof ApiError ? e.message : String(e)
+    if (version === pageVersion) {
+      pageError.value = e instanceof ApiError ? e.message : String(e)
+      if (e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 409) uncertainAssetSubmission.value = null
+    }
   } finally {
     if (version === pageVersion) saving.value = false
   }
@@ -1070,6 +1117,22 @@ async function handleAiExtract(attachmentId: string) {
                       :rows="3"
                     />
                   </n-form-item>
+
+                  <template v-if="!isEdit">
+                    <n-form-item :label="t('fixedAssets.registerOption')">
+                      <n-checkbox :checked="registerAsset" @update:checked="(checked) => { registerAsset = checked; if (checked && !assetName) assetName = supplierName || categories.find(x => x.id === categoryId)?.name || '' }">{{ t('fixedAssets.registerOption') }}</n-checkbox>
+                    </n-form-item>
+                    <template v-if="registerAsset">
+                      <n-form-item :label="t('fixedAssets.assetName')"><n-input v-model:value="assetName" /></n-form-item>
+                      <n-form-item :label="t('fixedAssets.inServiceDate')"><input v-model="assetInServiceDate" type="date" /></n-form-item>
+                      <n-form-item :label="t('fixedAssets.usefulLifeYears')"><n-input-number v-model:value="assetUsefulLife" :min="1" :precision="0" /></n-form-item>
+                      <n-form-item :label="t('fixedAssets.residualValue')"><n-input-number v-model:value="assetResidualValue" :min="0" :precision="2" /></n-form-item>
+                      <n-form-item :label="t('fixedAssets.useType')">
+                        <n-select v-model:value="assetUseType" :options="[{label:t('fixedAssets.fullBusiness'),value:'FULL_BUSINESS'},{label:t('fixedAssets.mixedUse'),value:'MIXED_USE'}]" />
+                      </n-form-item>
+                      <n-form-item v-if="assetUseType === 'MIXED_USE'" :label="t('expenses.businessPercentage')"><n-input-number v-model:value="assetBusinessPercentage" :min="0" :max="100" :precision="1" /></n-form-item>
+                    </template>
+                  </template>
 
                   <n-space>
                     <!-- Save button: prod-build safe using v-if/v-else -->

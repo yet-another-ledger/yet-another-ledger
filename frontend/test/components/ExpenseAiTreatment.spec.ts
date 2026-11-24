@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -41,7 +41,7 @@ function deferred<T = unknown>() {
 }
 
 async function setup(path = '/expenses/one/edit') {
-  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/expenses/:id/edit', component: ExpenseEdit }] })
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/expenses/:id/edit', component: ExpenseEdit }, { path: '/expenses/new', component: ExpenseEdit }] })
   await router.push(path); await router.isReady()
   const wrapper = mount(ExpenseEdit, { global: { plugins: [router, createI18n({ legacy: false, locale: 'en', messages: { en } })], stubs: { NDatePicker: true } } })
   await flushPromises()
@@ -65,8 +65,48 @@ beforeEach(() => {
   mocks.aiExtract.mockResolvedValue({})
   mocks.post.mockResolvedValue({ vat_amount: '2.1', gross_amount: '12.1' })
 })
+afterEach(() => vi.unstubAllGlobals())
 
 describe('Expense attachment treatment suggestions', () => {
+  it('reuses an uncertain asset submission UUID only for the exact original draft', async () => {
+    const randomValues = vi.fn((bytes: Uint8Array) => bytes.fill(0xab))
+    vi.stubGlobal('crypto', { randomUUID: undefined, getRandomValues: randomValues })
+    const { wrapper } = await setup('/expenses/new')
+    const state = (wrapper.vm as unknown as { $: { setupState: Record<string, any> } }).$.setupState
+    Object.assign(state, {
+      categoryId: 'cat', vatTreatmentId: 'tax', vatRateId: 'rate', netAmount: 1000, vatAmount: 210,
+      registerAsset: true, assetName: 'Laptop', assetUseType: 'FULL_BUSINESS', assetInServiceDate: '',
+      assetUsefulLife: 5, assetResidualValue: 0,
+    })
+    state.assetUseType = 'MIXED_USE'
+    await flushPromises()
+    expect(state.assetBusinessPercentage).toBeNull()
+    state.assetBusinessPercentage = 65
+    mocks.createExpense.mockRejectedValueOnce(new Error('connection lost')).mockResolvedValueOnce(expense('created'))
+    const form = wrapper.find('form')
+    await form.trigger('submit')
+    await flushPromises()
+    const firstBody = mocks.createExpense.mock.calls[0][0]
+    expect(firstBody.client_submission_id).toMatch(/^[0-9a-f-]{36}$/i)
+
+    state.registerAsset = false
+    await form.trigger('submit')
+    await flushPromises()
+    expect(mocks.createExpense).toHaveBeenCalledTimes(1)
+    state.registerAsset = true
+    state.assetName = 'Temporary edit'
+    await form.trigger('submit')
+    await flushPromises()
+    expect(mocks.createExpense).toHaveBeenCalledTimes(1)
+    state.assetName = 'Laptop'
+    await form.trigger('submit')
+    await flushPromises()
+    expect(mocks.createExpense).toHaveBeenCalledTimes(2)
+    expect(mocks.createExpense.mock.calls[1][0].client_submission_id).toBe(firstBody.client_submission_id)
+    expect(randomValues).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   it('keeps fixed asset preview keyboard submission separate from expense saving', async () => {
     mocks.post.mockResolvedValue({
       acquisition_cost: '10.00', annual_baseline: '2.00', preview_period_start: '2026-01-01',
@@ -1109,6 +1149,18 @@ describe('Fixed asset conversion preview freshness', () => {
     await flushPromises()
     expect(mocks.post).toHaveBeenCalledWith('/api/v1/fixed-assets/expenses/mixed/conversion-preview',
       expect.objectContaining({ use_type: 'FULL_BUSINESS', business_percentage: 100 }))
+    wrapper.unmount()
+  })
+
+  it('keeps the saved mixed-use percentage in the conversion preview', async () => {
+    mocks.getExpense.mockResolvedValueOnce(expense('mixed', { business_percentage: '60' }))
+    const { wrapper } = await setup('/expenses/mixed/edit')
+    const state = (wrapper.vm as unknown as { $: { setupState: Record<string, any> } }).$.setupState
+    expect(state.assetBusinessPercentage).toBe(60)
+    await wrapper.findAll('button').find(button => button.text() === en.fixedAssets.previewButton)!.trigger('click')
+    await flushPromises()
+    expect(mocks.post).toHaveBeenCalledWith('/api/v1/fixed-assets/expenses/mixed/conversion-preview',
+      expect.objectContaining({ use_type: 'MIXED_USE', business_percentage: 60 }))
     wrapper.unmount()
   })
 })

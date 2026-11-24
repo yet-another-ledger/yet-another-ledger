@@ -15,7 +15,7 @@ from jai.models.dictionary import ExpenseCategory
 from jai.models.expense_attachment import ExpenseAttachment
 from jai.models.receipt_inbox import ReceiptInbox
 from jai.models.vat import VatRate
-from jai.schemas.expense import ExpenseAIPrefill, ExpenseInput
+from jai.schemas.expense import ExpenseAIPrefill, ReceiptInboxExpenseInput
 from jai.schemas.receipt_inbox import (
     ReceiptInboxAIState,
     ReceiptInboxConfirmationRead,
@@ -442,7 +442,7 @@ async def confirm_item(
     inbox_id: uuid.UUID,
     company_id: uuid.UUID,
     creator_id: uuid.UUID,
-    body: ExpenseInput,
+    body: ReceiptInboxExpenseInput,
     expected_file_revision: int | None = None,
 ) -> ReceiptInboxConfirmationRead:
     """Confirm one pending group atomically with its Expense and attachments."""
@@ -451,11 +451,21 @@ async def confirm_item(
         item = await _owned(session, inbox_id, company_id, lock=True)
         if item.status != "PENDING":
             raise InboxConflict("ALREADY_CONFIRMED", item.expense_id)
+        if body.fixed_asset is not None and expected_file_revision is None:
+            raise InboxConflict("FILE_GROUP_CHANGED")
         if expected_file_revision is not None and item.file_revision != expected_file_revision:
             raise InboxConflict("FILE_GROUP_CHANGED")
 
         attachments = await _files(session, inbox_id)
         expense = await create_expense_record(session, company_id, body, creator_id)
+        linked_asset_id = None
+        if body.fixed_asset is not None:
+            from jai.services.fixed_asset import register_fixed_asset_for_new_expense
+
+            asset = await register_fixed_asset_for_new_expense(
+                session, expense, company_id, body.fixed_asset, creator_id
+            )
+            linked_asset_id = asset.id
         for attachment in attachments:
             attachment.expense_id = expense.id
             attachment.receipt_inbox_id = None
@@ -471,7 +481,7 @@ async def confirm_item(
         await session.refresh(item)
         attachment_count = await _count_attachments(session, expense.id)
         inbox_read = _read(item, [])
-        expense_read = _expense_to_read(expense, attachment_count)
+        expense_read = _expense_to_read(expense, attachment_count, linked_asset_id)
         await session.commit()
         return ReceiptInboxConfirmationRead(inbox=inbox_read, expense=expense_read)
     except Exception:

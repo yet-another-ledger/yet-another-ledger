@@ -12,6 +12,8 @@ export type PurchaseExpenseFields = {
   net_amount: number | string; vat_amount: number | string; deductible?: boolean | null; reference: string | null; note: string | null
   paid_by: components['schemas']['PaidBy']; business_percentage: number | string; depreciation_years: number
   include_in_pl: boolean; pl_cost_basis: components['schemas']['PlCostBasis']
+  fixed_asset?: components['schemas']['ExpenseFixedAssetInput'] | null
+  client_submission_id?: string | null
 }
 
 /** Build the raw contract payload shared by the Expense editor and inbox review form. */
