@@ -9,6 +9,7 @@ import { useReceiptInboxStore, type Inbox, type InboxStatus } from '../../stores
 import { resolvePurchaseTreatmentSuggestion, toExpenseInput, usePurchaseExpenseDictionaries } from '../../composables/usePurchaseExpenseDictionaries'
 import { localDateStr } from '../../utils/date'
 import type { components } from '../../api/schema'
+import ResidualEstimate from '../../components/fixed-assets/ResidualEstimate.vue'
 
 type ExpenseInput = components['schemas']['ExpenseInput']
 type Calc = components['schemas']['ExpenseCalculateResult']
@@ -44,7 +45,22 @@ const deductible = ref<boolean | null>(true), paidBy = ref<'BUSINESS' | 'PRIVATE
 const includeInPl = ref(true), plCostBasis = ref<PlCostBasis>('AUTO')
 const registerAsset = ref(false), assetName = ref(''), assetInServiceDate = ref('')
 const assetUsefulLife = ref(5), assetResidualValue = ref<number>(0)
+const residualEvidenceEpoch = ref(0)
 const assetUseType = ref<'FULL_BUSINESS' | 'MIXED_USE'>('FULL_BUSINESS'), assetBusinessPercentage = ref<number | null>(null)
+const residualEstimateCostInputs = computed<components['schemas']['ExpenseCostPreviewRequest'] | null>(() => {
+  if (net.value == null || vat.value == null || !treatmentId.value) return null
+  return {
+    net_amount: net.value,
+    vat_amount: vat.value,
+    vat_treatment_id: treatmentId.value,
+    category_id: categoryId.value,
+    deductible: deductible.value,
+    pl_cost_basis: plCostBasis.value,
+    include_in_pl: includeInPl.value,
+    business_percentage: businessPct.value,
+    depreciation_years: years.value,
+  }
+})
 const previewGross = ref<string | null>(null)
 const edited = ref(new Set<string>())
 const aiOwnedFields = new Set<string>()
@@ -383,6 +399,7 @@ function applySuggestion(source: Inbox, preserveOrdinaryRate = false) {
   previewVersion++; previewGross.value = null
 }
 function invalidateFileSuggestion() {
+  residualEvidenceEpoch.value++
   suggestionInvalidated.value = true
   if (treatmentOrigin.value === 'ai') { treatmentId.value = null; treatmentOrigin.value = 'none' }
   if (rateOrigin.value === 'ai') { rateId.value = null; rateOrigin.value = 'none' }
@@ -654,6 +671,7 @@ function formatBytes(n: number) { return n < 1024 ? `${n} B` : `${(n / 1024).toF
               <n-form-item :label="t('fixedAssets.inServiceDate')"><input v-model="assetInServiceDate" type="date" /></n-form-item>
               <n-form-item :label="t('fixedAssets.usefulLifeYears')"><n-input-number v-model:value="assetUsefulLife" :min="1" :precision="0" /></n-form-item>
               <n-form-item :label="t('fixedAssets.residualValue')"><n-input-number v-model:value="assetResidualValue" :min="0" :precision="2" /></n-form-item>
+              <ResidualEstimate v-model:value="assetResidualValue" :cost-inputs="residualEstimateCostInputs" :useful-life-years="assetUsefulLife" :suggestion-key="`${residualEvidenceEpoch}:${item?.id ?? ''}:${item?.file_revision ?? ''}:${item?.updated_at ?? ''}:${item?.ai_state ?? ''}`" :suggested-name="!suggestionInvalidated && !fileGroupUnverified && item?.ai_state === 'READY' ? item?.ai_suggestion?.suggested_product_name : null" :suggested-brand="!suggestionInvalidated && !fileGroupUnverified && item?.ai_state === 'READY' ? item?.ai_suggestion?.suggested_product_brand : null" :suggested-model="!suggestionInvalidated && !fileGroupUnverified && item?.ai_state === 'READY' ? item?.ai_suggestion?.suggested_product_model : null" />
               <n-form-item :label="t('fixedAssets.useType')"><n-select v-model:value="assetUseType" @update:value="(value) => { if (value === 'MIXED_USE') assetBusinessPercentage = null }" :options="[{label:t('fixedAssets.fullBusiness'),value:'FULL_BUSINESS'},{label:t('fixedAssets.mixedUse'),value:'MIXED_USE'}]" /></n-form-item>
               <n-form-item v-if="assetUseType === 'MIXED_USE'" :label="t('expenses.businessPercentage')"><n-input-number v-model:value="assetBusinessPercentage" :min="0" :max="100" :precision="1" /></n-form-item>
             </template>

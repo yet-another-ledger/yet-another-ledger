@@ -35,6 +35,7 @@ import { useExpensesStore } from '../../stores/expenses'
 import type { ExpenseRead, ExpenseAttachmentRead } from '../../stores/expenses'
 import { get, post, ApiError } from '../../api/http'
 import type { components } from '../../api/schema'
+import ResidualEstimate from '../../components/fixed-assets/ResidualEstimate.vue'
 
 type PaidBy = components['schemas']['PaidBy']
 type PlCostBasis = components['schemas']['PlCostBasis']
@@ -64,7 +65,24 @@ const assetReportBusinessPercentage = computed(() =>
 const assetPreview = ref<FixedAssetPreviewResult | null>(null)
 const assetPreviewLoading = ref(false)
 const assetPreviewError = ref<string | null>(null)
+const recognizedProduct = ref<{ name: string | null; brand: string | null; model: string | null }>({ name: null, brand: null, model: null })
+const recognizedProductVersion = ref(0)
+const residualEstimateCostInputs = computed<components['schemas']['ExpenseCostPreviewRequest'] | null>(() => {
+  if (netAmount.value == null || vatAmount.value == null || !vatTreatmentId.value) return null
+  return {
+    net_amount: netAmount.value,
+    vat_amount: vatAmount.value,
+    vat_treatment_id: vatTreatmentId.value,
+    category_id: categoryId.value,
+    deductible: deductible.value,
+    pl_cost_basis: plCostBasis.value,
+    include_in_pl: includeInPl.value,
+    business_percentage: businessPercentage.value,
+    depreciation_years: depreciationYears.value,
+  }
+})
 const assetConversionLoading = ref(false)
+const expenseCostSaveVersion = ref(0)
 const linkedSourceCost = ref<ExpenseCostPreviewResult | null>(null)
 const linkedSourceCostChecked = ref(false)
 const savedExpenseDate = ref<string | null>(null)
@@ -408,6 +426,7 @@ watch(expenseId, (targetId, previousId) => {
   const version = ++pageVersion
   ++aiRequestVersion; clearTreatmentSuggestion(); invalidateVatPreview()
   pageError.value = null; saveSuccess.value = false; saving.value = false; attachLoading.value = false; attachUploading.value = false; attachments.value = []; lastAiAttachmentId.value = null; lastAiExtractedAttachmentId.value = null; lastAiSuccessfulAttachmentId.value = null
+  recognizedProduct.value = { name: null, brand: null, model: null }; recognizedProductVersion.value++
   expenseDate.value = localDateStr(new Date()); categoryId.value = null; supplierName.value = ''; vatTreatmentId.value = null; vatRateId.value = null
   assetName.value = ''; assetInServiceDate.value = ''; assetUsefulLife.value = 5; assetResidualValue.value = 0
   assetBusinessPercentage.value = null; assetUseType.value = 'FULL_BUSINESS'
@@ -540,6 +559,7 @@ async function handleSave() {
     if (version !== pageVersion || targetId !== expenseId.value) return
     fillFromExpense(result, lastAiAttachmentId.value !== null
       && lastAiAttachmentId.value === lastAiSuccessfulAttachmentId.value)
+    if (targetId) expenseCostSaveVersion.value++
     saveSuccess.value = true
     uncertainAssetSubmission.value = null
     clientSubmissionId.value = null
@@ -572,6 +592,7 @@ async function handleFileUpload(options: { file: UploadFileInfo }) {
     lastAiAttachmentId.value = newAttach.id
     lastAiExtractedAttachmentId.value = null
     lastAiSuccessfulAttachmentId.value = null
+    recognizedProduct.value = { name: null, brand: null, model: null }; recognizedProductVersion.value++
     transitionVatEvidence({
       invalidateAiReceipt: true,
       switchAttachmentSource: true,
@@ -637,6 +658,7 @@ function withdrawAttachmentValues(id: string) {
     lastAiAttachmentId.value = null
     lastAiExtractedAttachmentId.value = null
     lastAiSuccessfulAttachmentId.value = null
+    recognizedProduct.value = { name: null, brand: null, model: null }; recognizedProductVersion.value++
     currentExtractionVatMissing.value = false
     clearTreatmentSuggestion()
   }
@@ -805,6 +827,8 @@ function onNetInput() {                                        // 改净额：�
 // ---- AI extraction ----
 async function handleAiExtract(attachmentId: string) {
   if (saving.value || deletingAttachId.value === attachmentId) return
+  recognizedProduct.value = { name: null, brand: null, model: null }
+  recognizedProductVersion.value++
   const preserveOrdinaryRate = lastAiExtractedAttachmentId.value === attachmentId
   if (!preserveOrdinaryRate) {
     currentExtractionVatMissing.value = false
@@ -835,6 +859,12 @@ async function handleAiExtract(attachmentId: string) {
     // A new extraction can replace receipt VAT; invalidate both active and debounced previews first.
     invalidateVatPreview()
     treatmentSuggestion.value = prefill.suggested_vat_treatment ?? null
+    recognizedProduct.value = {
+      name: prefill.suggested_product_name ?? null,
+      brand: prefill.suggested_product_brand ?? null,
+      model: prefill.suggested_product_model ?? null,
+    }
+    recognizedProductVersion.value++
     // Populate form fields from prefill — user confirms before saving
     if (prefill.expense_date) expenseDate.value = prefill.expense_date
     if (prefill.supplier_name) supplierName.value = prefill.supplier_name
@@ -1127,6 +1157,7 @@ async function handleAiExtract(attachmentId: string) {
                       <n-form-item :label="t('fixedAssets.inServiceDate')"><input v-model="assetInServiceDate" type="date" /></n-form-item>
                       <n-form-item :label="t('fixedAssets.usefulLifeYears')"><n-input-number v-model:value="assetUsefulLife" :min="1" :precision="0" /></n-form-item>
                       <n-form-item :label="t('fixedAssets.residualValue')"><n-input-number v-model:value="assetResidualValue" :min="0" :precision="2" /></n-form-item>
+                      <ResidualEstimate v-model:value="assetResidualValue" :cost-inputs="residualEstimateCostInputs" :useful-life-years="assetUsefulLife" :suggestion-key="`${lastAiAttachmentId ?? 'none'}:${recognizedProductVersion}`" :suggested-name="recognizedProduct.name" :suggested-brand="recognizedProduct.brand" :suggested-model="recognizedProduct.model" />
                       <n-form-item :label="t('fixedAssets.useType')">
                         <n-select v-model:value="assetUseType" :options="[{label:t('fixedAssets.fullBusiness'),value:'FULL_BUSINESS'},{label:t('fixedAssets.mixedUse'),value:'MIXED_USE'}]" />
                       </n-form-item>
@@ -1162,6 +1193,7 @@ async function handleAiExtract(attachmentId: string) {
                     <n-form-item :label="t('fixedAssets.residualValue')">
                       <n-input-number v-model:value="assetResidualValue" :min="0" :precision="2" />
                     </n-form-item>
+                    <ResidualEstimate v-model:value="assetResidualValue" :expense-id="expenseId" :cost-inputs="residualEstimateCostInputs" :useful-life-years="assetUsefulLife" :suggestion-key="`${lastAiAttachmentId ?? 'none'}:${recognizedProductVersion}:${expenseCostSaveVersion}`" :suggested-name="recognizedProduct.name" :suggested-brand="recognizedProduct.brand" :suggested-model="recognizedProduct.model" />
                     <n-form-item :label="t('fixedAssets.useType')">
                       <n-select v-model:value="assetUseType" :options="[
                         { label: t('fixedAssets.fullBusiness'), value: 'FULL_BUSINESS' },

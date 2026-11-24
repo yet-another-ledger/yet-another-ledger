@@ -2974,6 +2974,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fixed-assets/residual-estimate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fixed Asset Residual Estimate Endpoint
+         * @description Return a review-only model estimate; this endpoint never books an asset.
+         */
+        post: operations["fixed_asset_residual_estimate_endpoint_api_v1_fixed_assets_residual_estimate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses/{expense_id}": {
         parameters: {
             query?: never;
@@ -6624,6 +6644,12 @@ export interface components {
             /** Summary */
             summary?: string | null;
             suggested_vat_treatment?: components["schemas"]["ExpenseVatTreatmentSuggestion"] | null;
+            /** Suggested Product Name */
+            suggested_product_name?: string | null;
+            /** Suggested Product Brand */
+            suggested_product_brand?: string | null;
+            /** Suggested Product Model */
+            suggested_product_model?: string | null;
         };
         /**
          * ExpenseAttachmentListResponse
@@ -8164,6 +8190,45 @@ export interface components {
             pending_in_service: boolean;
             /** Yearly Deltas */
             yearly_deltas: components["schemas"]["FixedAssetYearDelta"][];
+        };
+        /** FixedAssetResidualEstimateRead */
+        FixedAssetResidualEstimateRead: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "suggested" | "insufficient_data";
+            /** Suggested Residual Value */
+            suggested_residual_value?: string | null;
+            /** Reason */
+            reason: string;
+            /** Assumptions */
+            assumptions?: string[];
+            /** Acquisition Cost */
+            acquisition_cost: string;
+            /** Currency Code */
+            currency_code: string;
+        };
+        /**
+         * FixedAssetResidualEstimateRequest
+         * @description Minimum asset identity plus a saved or unsaved purchase cost source.
+         */
+        FixedAssetResidualEstimateRequest: {
+            /** Expense Id */
+            expense_id?: string | null;
+            cost_inputs?: components["schemas"]["ExpenseCostPreviewRequest"] | null;
+            /** Product Name */
+            product_name: string;
+            /** Brand */
+            brand?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Useful Life Years */
+            useful_life_years: number;
+            /** Condition */
+            condition?: string | null;
+            /** Usage */
+            usage?: string | null;
         };
         /** FixedAssetRevisionRead */
         FixedAssetRevisionRead: {
@@ -20175,6 +20240,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExpenseAIPrefill"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fixed_asset_residual_estimate_endpoint_api_v1_fixed_assets_residual_estimate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FixedAssetResidualEstimateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixedAssetResidualEstimateRead"];
                 };
             };
             /** @description Validation Error */

@@ -130,6 +130,51 @@ describe('ReceiptInbox review workflow', () => {
     expect(wrapper.text()).not.toContain('Dutch VAT is charged.')
   })
 
+  it('replaces and withdraws product evidence after same-cost file revisions while preserving product edits', async () => {
+    const files = [
+      { id: 'file-1', filename: 'receipt.jpg', mime_type: 'image/jpeg', byte_size: 42 },
+      { id: 'file-2', filename: 'extra.jpg', mime_type: 'image/jpeg', byte_size: 42 },
+    ]
+    const suggestion = { suggested_product_name: 'Product A', suggested_product_brand: 'Brand A', suggested_product_model: 'Model A' }
+    inbox.detail.mockResolvedValue(pending({ files, file_revision: 1, ai_state: 'READY', ai_suggestion: suggestion }))
+    const firstReply = deferred<unknown>()
+    const wrapper = await setup('/receipt-inbox/inbox-1').mount()
+    await wrapper.findAll('input[type="checkbox"]')[2]!.setValue(true)
+    await flushPromises()
+    expect(wrapper.findAll('input').map(input => (input.element as HTMLInputElement).value)).toContain('Product A')
+    await wrapper.findAll('select')[0]!.setValue('cat')
+    await wrapper.findAll('select')[1]!.setValue('treat')
+    await wrapper.findAll('input[type="number"]')[0]!.setValue('10')
+    await wrapper.findAll('input[type="number"]')[1]!.setValue('2.1')
+    await wrapper.findAll('input[type="number"]').at(-1)!.setValue('3')
+    await flushPromises()
+    const productInput = wrapper.findAll('input').find(input => (input.element as HTMLInputElement).value === 'Product A')!
+    const brandInput = wrapper.findAll('input').find(input => (input.element as HTMLInputElement).value === 'Brand A')!
+    expect((productInput.element as HTMLInputElement).value).toBe('Product A')
+    await brandInput.setValue('Owner brand')
+    api.post.mockReturnValue(firstReply.promise)
+    await wrapper.findAll('button').find(button => button.text() === en.fixedAssets.estimateButton)!.trigger('click')
+    expect(api.post).toHaveBeenLastCalledWith('/api/v1/fixed-assets/residual-estimate', expect.objectContaining({ cost_inputs: expect.objectContaining({ net_amount: 10, vat_amount: 2.1 }) }))
+
+    inbox.removeFile.mockResolvedValueOnce(pending({ files: [files[1]], file_revision: 2, updated_at: '2026-01-01T00:01:00Z', ai_state: 'READY', ai_suggestion: { suggested_product_name: 'Product B', suggested_product_brand: 'Brand B', suggested_product_model: 'Model B' } }))
+    await wrapper.findAll('button').find(button => button.text() === 'Delete')!.trigger('click')
+    await flushPromises()
+    firstReply.resolve({ status: 'suggested', suggested_residual_value: '9.00', reason: 'Previous file estimate', assumptions: [], acquisition_cost: '10.00', currency_code: 'EUR' })
+    await flushPromises()
+    expect((productInput.element as HTMLInputElement).value).toBe('Product B')
+    expect((brandInput.element as HTMLInputElement).value).toBe('Owner brand')
+    expect((wrapper.findAll('input[type="number"]').at(-1)!.element as HTMLInputElement).value).toBe('3')
+    expect(wrapper.text()).not.toContain('Previous file estimate')
+
+    inbox.removeFile.mockResolvedValueOnce(pending({ files: [files[1]], file_revision: 3, updated_at: '2026-01-01T00:02:00Z', ai_state: 'FAILED', ai_suggestion: null }))
+    await wrapper.findAll('button').find(button => button.text() === 'Delete')!.trigger('click')
+    await flushPromises()
+    expect((productInput.element as HTMLInputElement).value).toBe('')
+    expect((brandInput.element as HTMLInputElement).value).toBe('Owner brand')
+    expect((wrapper.findAll('input[type="number"]').at(-1)!.element as HTMLInputElement).value).toBe('3')
+    wrapper.unmount()
+  })
+
   it('blocks confirmation while an append is pending, including direct form submission', async () => {
     inbox.detail.mockResolvedValue(pending({ ai_suggestion: { suggested_vat_treatment: { id: 'treat', code: 'NL_DOMESTIC_PURCH', reason: 'Old files.' } } }))
     let finish!: (value: unknown) => void

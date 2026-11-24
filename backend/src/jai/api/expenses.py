@@ -57,6 +57,8 @@ from jai.schemas.fixed_asset import (
     FixedAssetAnnualRevisionRead,
     FixedAssetAnnualUseInput,
     FixedAssetAnnualUseRead,
+    FixedAssetResidualEstimateRead,
+    FixedAssetResidualEstimateRequest,
     FixedAssetRevisionRead,
     FixedAssetServiceDateRevisionInput,
     FixedAssetServiceDateRevisionPreview,
@@ -548,6 +550,36 @@ async def ai_extract_endpoint(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         ) from exc
+
+
+@router.post(
+    "/fixed-assets/residual-estimate",
+    response_model=FixedAssetResidualEstimateRead,
+)
+async def fixed_asset_residual_estimate_endpoint(
+    body: FixedAssetResidualEstimateRequest,
+    user: User = Depends(current_mfa_user),
+    session: AsyncSession = Depends(get_session),
+) -> FixedAssetResidualEstimateRead:
+    """Return a review-only model estimate; this endpoint never books an asset."""
+    _owner_only(user)
+    company_id = _require_company_id(user)
+    from jai.services.ai import (
+        AIExtractionError,
+        AIUnavailableError,
+        estimate_fixed_asset_residual,
+    )
+
+    try:
+        return await estimate_fixed_asset_residual(session, company_id, body)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Purchase expense not found.") from exc
+    except AIUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AIExtractionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 # NOTE: this route MUST be registered before /expenses/{expense_id} so that

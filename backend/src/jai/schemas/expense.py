@@ -502,6 +502,9 @@ class ExpenseAIPrefill(BaseModel):
     confidence: str | None = None
     summary: str | None = None
     suggested_vat_treatment: ExpenseVatTreatmentSuggestion | None = None
+    suggested_product_name: str | None = Field(default=None, max_length=200)
+    suggested_product_brand: str | None = Field(default=None, max_length=100)
+    suggested_product_model: str | None = Field(default=None, max_length=100)
 
 
 class ExpenseVatTreatmentSuggestion(BaseModel):

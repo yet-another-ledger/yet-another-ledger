@@ -77,6 +77,7 @@ declare module 'vue' {
     QuoteAppendixEditor: typeof import('./components/QuoteAppendixEditor.vue')['default']
     QuotePaymentPanel: typeof import('./components/QuotePaymentPanel.vue')['default']
     ReportSourcePanel: typeof import('./components/reports/ReportSourcePanel.vue')['default']
+    ResidualEstimate: typeof import('./components/fixed-assets/ResidualEstimate.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SettingsPanel: typeof import('./components/settings/SettingsPanel.vue')['default']

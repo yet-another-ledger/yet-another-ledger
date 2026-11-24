@@ -5,8 +5,54 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from jai.schemas.expense import ExpenseCostPreviewRequest
+
+
+class FixedAssetResidualEstimateRequest(BaseModel):
+    """Minimum asset identity plus a saved or unsaved purchase cost source."""
+
+    expense_id: uuid.UUID | None = None
+    cost_inputs: ExpenseCostPreviewRequest | None = None
+    product_name: str = Field(min_length=1, max_length=200)
+    brand: str | None = Field(default=None, max_length=100)
+    model: str | None = Field(default=None, max_length=100)
+    useful_life_years: int = Field(ge=1, le=100)
+    condition: str | None = Field(default=None, max_length=500)
+    usage: str | None = Field(default=None, max_length=500)
+
+    @field_validator("product_name", "brand", "model", "condition", "usage")
+    @classmethod
+    def trim_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @field_validator("product_name")
+    @classmethod
+    def require_product_name(cls, value: str) -> str:
+        if not value:
+            raise ValueError("Product name is required.")
+        return value
+
+    @model_validator(mode="after")
+    def require_one_cost_source(self) -> FixedAssetResidualEstimateRequest:
+        if (self.expense_id is None) == (self.cost_inputs is None):
+            raise ValueError("Provide exactly one saved expense or unsaved cost input.")
+        return self
+
+
+class FixedAssetResidualEstimateRead(BaseModel):
+    status: Literal["suggested", "insufficient_data"]
+    suggested_residual_value: Decimal | None = None
+    reason: str
+    assumptions: list[str] = Field(default_factory=list)
+    acquisition_cost: Decimal
+    currency_code: str = Field(min_length=3, max_length=3)
 
 
 class FixedAssetAnnualUseInput(BaseModel):

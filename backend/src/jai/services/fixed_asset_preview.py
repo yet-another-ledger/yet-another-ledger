@@ -206,17 +206,7 @@ def build_fixed_asset_preview(
 
     # Preserve the saved Expense at its original precision. The new asset's
     # locked, reportable acquisition basis follows M7.5's EUR minor-unit rule.
-    cost = quantize_to_minor_unit(
-        compute_pl_cost_basis(
-            Decimal(str(expense.base_net_amount)),
-            Decimal(str(expense.base_vat_amount)),
-            VatTreatmentEffect(expense.vat_treatment_effect),
-            expense.deductible,
-            PlCostBasis.AUTO,
-            expense.vat_treatment_code,
-            Decimal(str(expense.base_gross_amount)),
-        )
-    )
+    cost = fixed_asset_acquisition_cost(expense)
     residual = request.residual_value
     if residual > cost:
         raise ValueError("Residual value cannot exceed acquisition cost.")
@@ -408,6 +398,21 @@ def build_fixed_asset_preview(
         period_deltas=period_deltas,
         monthly_schedule=schedule,
         yearly_deltas=deltas,
+    )
+
+
+def fixed_asset_acquisition_cost(expense: Expense) -> Decimal:
+    """Return M20's VAT-aware capitalized basis, independent of legacy P&L mode."""
+    return quantize_to_minor_unit(
+        compute_pl_cost_basis(
+            Decimal(str(expense.base_net_amount)),
+            Decimal(str(expense.base_vat_amount)),
+            VatTreatmentEffect(expense.vat_treatment_effect),
+            expense.deductible,
+            PlCostBasis.AUTO,
+            expense.vat_treatment_code,
+            Decimal(str(expense.base_gross_amount)),
+        )
     )
 
 

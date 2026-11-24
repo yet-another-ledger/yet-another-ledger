@@ -52,7 +52,13 @@ def _has_presentable_suggestion(
         return True
     if any(
         isinstance(suggestion.get(field), str) and bool(str(suggestion[field]).strip())
-        for field in ("supplier_name", "summary")
+        for field in (
+            "supplier_name",
+            "summary",
+            "suggested_product_name",
+            "suggested_product_brand",
+            "suggested_product_model",
+        )
     ):
         return True
     return category_matches or rate_matches or treatment_matches

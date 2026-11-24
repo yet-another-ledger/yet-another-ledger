@@ -6,6 +6,7 @@ import en from '../../src/locales/en.json'
 
 const mocks = vi.hoisted(() => ({
   post: vi.fn(), get: vi.fn(), getExpense: vi.fn(), listAttachments: vi.fn(),
+  aiExtract: vi.fn(),
   updateExpense: vi.fn(), fetchRecurringExpenses: vi.fn(), updateRecurringExpense: vi.fn(),
   items: [] as any[],
 }))
@@ -98,6 +99,11 @@ beforeEach(() => {
   mocks.items = [legacy()]
   mocks.getExpense.mockResolvedValue(legacy())
   mocks.listAttachments.mockResolvedValue([])
+  mocks.aiExtract.mockResolvedValue({
+    suggested_product_name: 'Acme measuring instrument',
+    suggested_product_brand: 'Acme',
+    suggested_product_model: 'A4',
+  })
   mocks.updateExpense.mockImplementation(async (_id, body) => ({ ...legacy(), ...body }))
   mocks.updateRecurringExpense.mockResolvedValue(legacy())
   mocks.fetchRecurringExpenses.mockResolvedValue(undefined)
@@ -111,6 +117,30 @@ beforeEach(() => {
 })
 
 describe('Expense cost comparison', () => {
+  it('fills the saved-purchase residual estimate from attachment recognition and sends it on estimate', async () => {
+    mocks.listAttachments.mockResolvedValue([{
+      id: 'receipt-1', filename: 'receipt.pdf', mime_type: 'application/pdf',
+    }])
+    mocks.post.mockImplementation(async (path: string) => path.endsWith('/residual-estimate')
+      ? { status: 'suggested', suggested_residual_value: '74.31', reason: 'Used market value.', assumptions: [], acquisition_cost: '100.00', currency_code: 'EUR' }
+      : result('100.00'))
+    const wrapper = await setup()
+
+    await button(wrapper, en.expenses.ai.autoFill).trigger('click')
+    await flushPromises()
+
+    expect(field(wrapper, en.fixedAssets.estimateProduct).find('input').element.value).toBe('Acme measuring instrument')
+    expect(field(wrapper, en.fixedAssets.estimateBrand).find('input').element.value).toBe('Acme')
+    expect(field(wrapper, en.fixedAssets.estimateModel).find('input').element.value).toBe('A4')
+    await button(wrapper, en.fixedAssets.estimateButton).trigger('click')
+    await flushPromises()
+    expect(mocks.post).toHaveBeenCalledWith('/api/v1/fixed-assets/residual-estimate', expect.objectContaining({
+      expense_id: 'legacy', cost_inputs: null,
+      product_name: 'Acme measuring instrument', brand: 'Acme', model: 'A4',
+    }))
+    wrapper.unmount()
+  })
+
   it.each(['success', 'error'] as const)('keeps a newer purchase page intact when an older conversion completes with %s', async outcome => {
     const pending = deferred<unknown>()
     mocks.post.mockResolvedValueOnce(conversionPreview).mockReturnValueOnce(pending.promise)
@@ -233,6 +263,26 @@ describe('Expense cost comparison', () => {
     expect(w.text()).toContain('Current: 121.00')
     expect(w.text()).toContain('Proposed: 130.00')
     expect(w.text()).not.toContain('Current: 100.00')
+    w.unmount()
+  })
+
+  it('invalidates a saved-purchase estimate on successful save even when the purchase ID is unchanged', async () => {
+    const pendingEstimate = deferred<unknown>()
+    const w = await setup()
+    await field(w, en.fixedAssets.estimateProduct).find('input').setValue('Equipment')
+    await field(w, en.fixedAssets.residualValue).find('input').setValue('12')
+    await field(w, en.expenses.netAmount).find('input').setValue('200')
+    mocks.post.mockReturnValueOnce(pendingEstimate.promise)
+    await button(w, en.fixedAssets.estimateButton).trigger('click')
+    expect(mocks.post).toHaveBeenLastCalledWith('/api/v1/fixed-assets/residual-estimate', expect.objectContaining({ expense_id: 'legacy', cost_inputs: null }))
+
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    pendingEstimate.resolve({ status: 'suggested', suggested_residual_value: '5.00', reason: 'Estimate based on the old saved cost', assumptions: [], acquisition_cost: '100.00', currency_code: 'EUR' })
+    await flushPromises()
+    expect(w.text()).not.toContain('Estimate based on the old saved cost')
+    expect((field(w, en.fixedAssets.residualValue).find('input').element as HTMLInputElement).value).toBe('12')
+    expect(mocks.updateExpense).toHaveBeenCalledWith('legacy', expect.objectContaining({ net_amount: 200 }))
     w.unmount()
   })
 

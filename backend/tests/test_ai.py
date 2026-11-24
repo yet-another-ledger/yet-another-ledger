@@ -1939,7 +1939,9 @@ async def test_extract_from_files_preserves_mixed_image_mimes_and_filters_fields
     # Inputs can be tiny opaque test bytes: only the MIME/message construction matters here.
     response = {"choices": [{"message": {"content": (
         '{"summary":"fuel","vat_treatment_id":"attacker",'
-        '"vat_rate_id":"attacker","confidence":"medium"}'
+        '"vat_rate_id":"attacker","confidence":"medium",'
+        '"product_name":"Solar battery", "product_brand":"Acme", '
+        '"product_model":"S-9", "unrelated":"hidden"}'
     )}}]}
     requested: list[dict[str, object]] = []
 
@@ -1966,6 +1968,9 @@ async def test_extract_from_files_preserves_mixed_image_mimes_and_filters_fields
         "data:image/jpeg", "data:image/webp", "data:image/png"
     ]
     assert result.summary == "fuel"
+    assert result.suggested_product_name == "Solar battery"
+    assert result.suggested_product_brand == "Acme"
+    assert result.suggested_product_model == "S-9"
     assert not hasattr(result, "vat_treatment_id")
     assert not hasattr(result, "vat_rate_id")
 

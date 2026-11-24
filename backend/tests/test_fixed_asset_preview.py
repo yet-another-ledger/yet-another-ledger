@@ -13,6 +13,7 @@ from jai.services.fixed_asset_preview import (
     apply_yearly_business_use,
     build_fixed_asset_preview,
     build_monthly_fixed_asset_schedule,
+    fixed_asset_acquisition_cost,
 )
 
 
@@ -65,6 +66,12 @@ def test_schedule_prorates_leap_day_and_settles_rounding_in_final_month() -> Non
     for row in result.monthly_schedule:
         assert row.opening_book_value - row.amount == row.closing_book_value
         assert row.amount - row.business_amount == row.private_use_reduction
+
+
+def test_fixed_asset_basis_ignores_legacy_net_mode_and_includes_irrecoverable_vat() -> None:
+    expense = _expense(deductible=False, pl_cost_basis="NET")
+
+    assert fixed_asset_acquisition_cost(expense) == Decimal("1210.00")
 
 
 def test_preview_token_normalizes_decimal_scales_and_confirmation_rejects_garbage() -> None:
