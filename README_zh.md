@@ -6,7 +6,7 @@
 
 技术栈 **FastAPI + Vue 3 + PostgreSQL**。
 
-> **状态——1.0 前版本（`v0.15.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
+> **状态——1.0 前版本（`v0.16.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
 
 ## 功能
 
@@ -61,7 +61,7 @@ docker compose up -d
 
 停止：`docker compose down`（加 `-v` 同时删除数据库卷）。
 
-> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.15.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
+> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.16.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
 
 ## 配置
 
@@ -103,11 +103,11 @@ SMTP 测试失败仍返回通用的 `SMTP_SEND_FAILED` API 错误。服务端日
 
 M17 在 v0.11.0 引入 `0053` 和 `0054` 迁移。从 v0.10.0 升级时，既有报价的附录清单初始为空。每次升级前先备份 PostgreSQL 和票据存储。
 
-v0.15.0 的 M19 在票据收件箱和已保存 Expense 的附件识别中提供采购 VAT 类型建议。从 v0.14.0 升级时，数据库迁移 head 仍为 `0058`。如果 `.env` 显式设置了 `APP_VERSION`，请更新为 `0.15.0`。
+v0.16.0 的 M20 加入固定资产登记、残值估计与 AI 协议选择。从 v0.15.0 升级会应用迁移 `0059`–`0061`。未显式设置协议的旧 AI 配置继续使用 Chat Completions。若 `.env` 显式设置了 `APP_VERSION`，请更新为 `0.16.0`。
 
 ## Agent 接入与升级
 
-当前应用镜像通过 `/api/v1/mcp` 提供 Streamable HTTP MCP，包含 21 个工具、十项 scope，迁移最高到 `0058`，包括 M18 里程录入。通过 MFA 登录的 owner 在**设置 → Agent access** 创建具名令牌、选择权限、将只显示一次的密钥保存到客户端私有环境，之后可随时撤销。客户端 HTTP 地址填写 `http://127.0.0.1:<JAI端口>/api/v1/mcp`，通过客户端私有密钥配置传入 `Authorization: Bearer <token>`。端点保持同机／私网使用，浏览器审阅链接单独配置 JAI 的 `BASE_URL`。
+当前应用镜像通过 `/api/v1/mcp` 提供 Streamable HTTP MCP，包含 21 个工具、十项 scope，迁移最高到 `0061`，包括 M18 里程录入。通过 MFA 登录的 owner 在**设置 → Agent access** 创建具名令牌、选择权限、将只显示一次的密钥保存到客户端私有环境，之后可随时撤销。客户端 HTTP 地址填写 `http://127.0.0.1:<JAI端口>/api/v1/mcp`，通过客户端私有密钥配置传入 `Authorization: Bearer <token>`。端点保持同机／私网使用，浏览器审阅链接单独配置 JAI 的 `BASE_URL`。
 
 v0.14.0 的 scope 为 `receipt:intake`、`customer:read`、`customer:create`、`catalog:read`、`quote:read`、`quote:write_draft`、`invoice:read`、`invoice:write_draft`、`expense:read` 和 `mileage:create`。现有令牌保留原有授权；新增权限需创建替代令牌。仅收据接入使用 `receipt:intake`。v0.14.0 完整工作流包含十项 scope、21 个工具，包括只读开支列表／详情和三个受限里程录入工具。较早的 `v0.13.0` 镜像仍为 18 个工具／九项 scope，迁移最高到 `0057`；历史 M15 范围仍为八项 scope／16 个工具，SI4 扩展另有记录。参见 [M15](docs/plan/milestones/M15_zh.md)、[SI4](docs/plan/improvements/SI4_zh.md) 和[客户端通用 M18 工作流](docs/plan/milestones/M18-agent-workflow_zh.md)。每次调用（包括重放）都会检查授权。每次修改都需要调用方生成稳定 `request_id`；完全相同参数的重试使用相同 ID，新操作使用新 ID。普通 CLI 客户端省略 Telegram `source` 元数据。
 
@@ -127,7 +127,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ## 路线图
 
-M0–M19 均已按各自记录范围验收。**M15 于 2026-11-09 验收并纳入 v0.12.0**，证据包括历史真实收据接收、自动化 Codex MCP 验收与隔离真实 Hermes CLI 验证。作者跳过及暂缓的检查继续保留在 [M15 验收结论](docs/plan/milestones/M15_zh.md)和[路线图](docs/plan/roadmap_zh.md)。
+M0–M20 均已按各自记录范围验收。**M15 于 2026-11-09 验收并纳入 v0.12.0**，证据包括历史真实收据接收、自动化 Codex MCP 验收与隔离真实 Hermes CLI 验证。作者跳过及暂缓的检查继续保留在 [M15 验收结论](docs/plan/milestones/M15_zh.md)和[路线图](docs/plan/roadmap_zh.md)。
 
 作者已于 2026-11-01 按记录的代表性走查范围验收 [M16](docs/plan/milestones/M16_zh.md)，外部销售凭证记账、VAT／P&L 分离、储能年度私用调整及并入的 SI3 里程利润拆分已交付；跳过／未重测路径及已知遗留仍明确记录。
 
@@ -139,7 +139,7 @@ SI1（单据排序、Quote 复制和服务器侧 Sent 副本）已于2026-10-25�
 
 🟢 **M19 正常流程已验收（v0.15.0）。** 作者于 2026-11-15 确认记录范围内的正常流程（Happy Flow）通过。收件箱和 Expense 附件识别为荷兰本地、EU B2B 反向征税及 EU 国外 VAT 采购提供可复核的 VAT 类型建议。走查记录包含真实提供商与报表核对，以及采用自动化回归覆盖的项目。详见 [M19 验收结论](docs/plan/milestones/M19_zh.md#验收结论)。
 
-🟡 **[M20 固定资产台账、AI 残值估计与 AI API 协议切换](docs/plan/milestones/M20_zh.md)** 七步均已通过隔离本地检查和独立审查。应用已交付采购登记与转换、使用年限投影、混合用途和电池报表、需复核的残值建议及共用 AI 协议选择。真实提供商检查、作者走查及部署验收仍待完成。
+🟢 **M20 已验收（v0.16.0）。** 作者于 2026-11-24 按记录的开发环境走查范围验收，覆盖采购转换和登记、混用电池报表及真实 OpenRouter Responses。详见 [M20 验收结论](docs/plan/milestones/M20_zh.md#验收结论)。
 
 ## 文档
 

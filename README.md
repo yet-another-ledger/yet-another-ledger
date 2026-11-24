@@ -6,7 +6,7 @@ Self-hosted invoicing and small-business administration for freelancers and smal
 
 Built with **FastAPI + Vue 3 + PostgreSQL**.
 
-> **Status — pre-1.0 (`v0.15.0`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and possible breaking changes before `v1.0`.
+> **Status — pre-1.0 (`v0.16.0`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and possible breaking changes before `v1.0`.
 
 ## Features
 
@@ -62,7 +62,7 @@ Open **http://localhost:8000**, register the first (owner) account, and set up T
 
 To stop: `docker compose down` (add `-v` to also drop the database volume).
 
-> `:latest` tracks the newest non-prerelease release; pin this release by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.15.0` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
+> `:latest` tracks the newest non-prerelease release; pin this release by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.16.0` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
 
 ## Configuration
 
@@ -104,11 +104,11 @@ Appendix originals and their metadata are stored transactionally in PostgreSQL (
 
 M17 introduced migrations `0053` and `0054` in v0.11.0. Existing Quotes start with an empty appendix list when upgrading from v0.10.0. Before any upgrade, back up PostgreSQL and the receipt storage.
 
-M19 in v0.15.0 adds purchase VAT suggestions in the receipt inbox and saved Expense attachment workflow. Upgrading from v0.14.0 uses the same database migration head `0058`. Update any explicit `APP_VERSION` in `.env` to `0.15.0`.
+M20 in v0.16.0 adds fixed asset registration, residual value estimates and AI protocol selection. An upgrade from v0.15.0 applies migrations `0059`–`0061`. Legacy AI configurations without an explicit protocol keep Chat Completions. Update any explicit `APP_VERSION` in `.env` to `0.16.0`.
 
 ## Agent access and upgrades
 
-The current image exposes Streamable HTTP MCP at `/api/v1/mcp` inside the existing app image, with 21 tools, ten scopes and migrations through `0058`, including M18 mileage intake. In **Settings → Agent access**, the MFA-authenticated owner creates a named token, selects its scopes, copies the secret once into the client's private environment, and can revoke it later. Configure the client's HTTP endpoint as `http://127.0.0.1:<JAI-port>/api/v1/mcp` with `Authorization: Bearer <token>` using its private secret configuration. Keep the endpoint on the same host/private network and set JAI's `BASE_URL` separately for browser review links.
+The current image exposes Streamable HTTP MCP at `/api/v1/mcp` inside the existing app image, with 21 tools, ten scopes and migrations through `0061`, including M18 mileage intake. In **Settings → Agent access**, the MFA-authenticated owner creates a named token, selects its scopes, copies the secret once into the client's private environment, and can revoke it later. Configure the client's HTTP endpoint as `http://127.0.0.1:<JAI-port>/api/v1/mcp` with `Authorization: Bearer <token>` using its private secret configuration. Keep the endpoint on the same host/private network and set JAI's `BASE_URL` separately for browser review links.
 
 The v0.14.0 scopes are `receipt:intake`, `customer:read`, `customer:create`, `catalog:read`, `quote:read`, `quote:write_draft`, `invoice:read`, `invoice:write_draft`, `expense:read` and `mileage:create`. Existing tokens retain their original grants; create a replacement token to grant a new scope. Receipt-only access uses `receipt:intake`. The v0.14.0 complete workflow exposes 21 tools across ten scopes, including read-only Expense list/detail and three bounded mileage-intake tools. The earlier `v0.13.0` image remains at 18 tools/nine scopes through migration `0057`; the historical M15 scope remains 16 tools/eight scopes, with the SI4 extension recorded separately. See [M15](docs/plan/milestones/M15.md), [SI4](docs/plan/improvements/SI4.md) and the [client-neutral M18 workflow](docs/plan/milestones/M18-agent-workflow.md). Every call checks authorization, including replay. Each mutation requires a caller-generated stable `request_id`; retry identical arguments with that same ID, and use a new ID for a new operation. Generic CLI clients omit Telegram `source` metadata.
 
@@ -128,7 +128,7 @@ Backend lives in `backend/` (`uv run ...`), frontend in `frontend/` (`npm run ..
 
 ## Roadmap
 
-M0–M19 are accepted within their recorded scopes. **M15 was accepted on 2026-11-09 and is included in v0.12.0**, following historical real receipt intake, automated Codex MCP acceptance and isolated real Hermes CLI validation. Author-skipped and deferred checks remain recorded in the [M15 acceptance conclusion](docs/plan/milestones/M15.md) and [roadmap](docs/plan/roadmap.md).
+M0–M20 are accepted within their recorded scopes. **M15 was accepted on 2026-11-09 and is included in v0.12.0**, following historical real receipt intake, automated Codex MCP acceptance and isolated real Hermes CLI validation. Author-skipped and deferred checks remain recorded in the [M15 acceptance conclusion](docs/plan/milestones/M15.md) and [roadmap](docs/plan/roadmap.md).
 
 The author accepted [M16](docs/plan/milestones/M16.md) on 2026-11-01 on its recorded representative walkthrough scope. External sales bookkeeping, VAT/P&L separation, annual battery private-use adjustment and the incorporated SI3 mileage/profit breakdown are delivered; skipped/unretested paths and known carryovers remain explicitly recorded.
 
@@ -140,7 +140,7 @@ SI1 (document ordering, Quote duplication and server-side Sent copies) was accep
 
 🟢 **M19 accepted for v0.15.0.** The author accepted the recorded Happy Flow on 2026-11-15. The receipt inbox and Expense attachment extraction offer reviewable VAT-treatment suggestions for Dutch domestic, EU B2B reverse-charge and EU foreign-VAT purchases. The walkthrough records live-provider and reporting checks and the paths covered by automated regression. See the [M19 acceptance conclusion](docs/plan/milestones/M19.md#acceptance-conclusion).
 
-🟡 **[M20 Fixed Asset Register, AI Residual Value Estimates, and AI API Protocol Selection](docs/plan/milestones/M20.md)** has all seven steps through isolated local checks and independent review. The delivered application includes purchase registration and conversion, useful-life projections, mixed-use and battery reporting, reviewed residual estimates and shared AI protocol selection. Live-provider checks, the author walkthrough and deployment acceptance remain pending.
+🟢 **M20 accepted for v0.16.0.** The author accepted the recorded development walkthrough on 2026-11-24, including purchase conversion and registration, mixed-use battery reporting, and live OpenRouter Responses. See the [M20 acceptance conclusion](docs/plan/milestones/M20.md#acceptance-conclusion).
 
 ## Documentation
 
