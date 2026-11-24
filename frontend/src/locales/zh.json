@@ -1592,6 +1592,7 @@
     "privateUseReduction": "私人用途扣减",
     "netPnl": "损益净影响",
     "saveEstimate": "保存暂估比例",
+    "confirmationReason": "确认实际业务使用比例的原因",
     "previewConfirmation": "预览实际使用确认",
     "confirmActual": "确认实际使用比例",
     "batteryVat": "电池 VAT 登记入口",

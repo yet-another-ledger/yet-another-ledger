@@ -1592,6 +1592,7 @@
     "privateUseReduction": "Private-use reduction",
     "netPnl": "Net P&L effect",
     "saveEstimate": "Save estimate",
+    "confirmationReason": "Reason for confirming actual business use",
     "previewConfirmation": "Preview actual-use confirmation",
     "confirmActual": "Confirm actual use",
     "batteryVat": "Battery VAT entry",

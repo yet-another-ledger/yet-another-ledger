@@ -7,7 +7,7 @@ import type { UploadFileInfo } from 'naive-ui'
 import { ApiError, post } from '../../api/http'
 import { useReceiptInboxStore, type Inbox, type InboxStatus } from '../../stores/receiptInbox'
 import { resolvePurchaseTreatmentSuggestion, toExpenseInput, usePurchaseExpenseDictionaries } from '../../composables/usePurchaseExpenseDictionaries'
-import { localDateStr } from '../../utils/date'
+import { localDateStr, localDateTimestamp } from '../../utils/date'
 import type { components } from '../../api/schema'
 import ResidualEstimate from '../../components/fixed-assets/ResidualEstimate.vue'
 
@@ -43,7 +43,7 @@ const receiptVatSource = ref<'none' | 'ai' | 'human'>('none')
 const currentExtractionVatMissing = ref(false)
 const deductible = ref<boolean | null>(true), paidBy = ref<'BUSINESS' | 'PRIVATE'>('BUSINESS'), businessPct = ref<number>(100), years = ref<number>(1), reference = ref(''), note = ref('')
 const includeInPl = ref(true), plCostBasis = ref<PlCostBasis>('AUTO')
-const registerAsset = ref(false), assetName = ref(''), assetInServiceDate = ref('')
+const registerAsset = ref(false), assetName = ref(''), assetInServiceDate = ref<string | null>(null)
 const assetUsefulLife = ref(5), assetResidualValue = ref<number>(0)
 const residualEvidenceEpoch = ref(0)
 const assetUseType = ref<'FULL_BUSINESS' | 'MIXED_USE'>('FULL_BUSINESS'), assetBusinessPercentage = ref<number | null>(null)
@@ -151,7 +151,7 @@ function resetDraft() {
   currentExtractionVatMissing.value = false
   deductible.value = true; paidBy.value = 'BUSINESS'; businessPct.value = 100; years.value = 1
   includeInPl.value = true; plCostBasis.value = 'AUTO'
-  registerAsset.value = false; assetName.value = ''; assetInServiceDate.value = ''
+  registerAsset.value = false; assetName.value = ''; assetInServiceDate.value = null
   assetUsefulLife.value = 5; assetResidualValue.value = 0
   assetUseType.value = 'FULL_BUSINESS'; assetBusinessPercentage.value = null
   reference.value = ''; note.value = ''; previewGross.value = null
@@ -483,7 +483,7 @@ async function confirmExpense() {
     ...(registerAsset.value ? {
       fixed_asset: {
         asset_name: assetName.value,
-        in_service_date: assetInServiceDate.value || null,
+        in_service_date: assetInServiceDate.value,
         useful_life_years: assetUsefulLife.value,
         residual_value: assetResidualValue.value ?? 0,
         business_percentage: assetUseType.value === 'FULL_BUSINESS' ? 100 : assetBusinessPercentage.value!,
@@ -668,7 +668,17 @@ function formatBytes(n: number) { return n < 1024 ? `${n} B` : `${(n / 1024).toF
             </n-form-item>
             <template v-if="registerAsset">
               <n-form-item :label="t('fixedAssets.assetName')"><n-input v-model:value="assetName" /></n-form-item>
-              <n-form-item :label="t('fixedAssets.inServiceDate')"><input v-model="assetInServiceDate" type="date" /></n-form-item>
+              <n-form-item :label="t('fixedAssets.inServiceDate')">
+                <n-date-picker
+                  v-model:formatted-value="assetInServiceDate"
+                  value-format="yyyy-MM-dd"
+                  type="date"
+                  :default-calendar-start-time="localDateTimestamp(expenseDate) ?? undefined"
+                  clearable
+                  style="width: 100%"
+                  @keydown.enter.prevent
+                />
+              </n-form-item>
               <n-form-item :label="t('fixedAssets.usefulLifeYears')"><n-input-number v-model:value="assetUsefulLife" :min="1" :precision="0" /></n-form-item>
               <n-form-item :label="t('fixedAssets.residualValue')"><n-input-number v-model:value="assetResidualValue" :min="0" :precision="2" /></n-form-item>
               <ResidualEstimate v-model:value="assetResidualValue" :cost-inputs="residualEstimateCostInputs" :useful-life-years="assetUsefulLife" :suggestion-key="`${residualEvidenceEpoch}:${item?.id ?? ''}:${item?.file_revision ?? ''}:${item?.updated_at ?? ''}:${item?.ai_state ?? ''}`" :suggested-name="!suggestionInvalidated && !fileGroupUnverified && item?.ai_state === 'READY' ? item?.ai_suggestion?.suggested_product_name : null" :suggested-brand="!suggestionInvalidated && !fileGroupUnverified && item?.ai_state === 'READY' ? item?.ai_suggestion?.suggested_product_brand : null" :suggested-model="!suggestionInvalidated && !fileGroupUnverified && item?.ai_state === 'READY' ? item?.ai_suggestion?.suggested_product_model : null" />

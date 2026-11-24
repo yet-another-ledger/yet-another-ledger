@@ -43,7 +43,7 @@ vi.mock('naive-ui', () => {
     function choose(file: File) { fileList.value.push({ file }); emit('change', { fileList: fileList.value }) }
     return { choose, fileList }
   }, template: '<div><slot /></div>' })
-  return { NAlert: box, NButton: button, NCard: box, NCheckbox: checkbox, NEmpty: box, NForm: form, NFormItem: box, NInput: input, NInputNumber: number, NSelect: select, NSpin: box, NSpace: box, NTag: box, NUpload: upload }
+  return { NAlert: box, NButton: button, NCard: box, NCheckbox: checkbox, NDatePicker: box, NEmpty: box, NForm: form, NFormItem: box, NInput: input, NInputNumber: number, NSelect: select, NSpin: box, NSpace: box, NTag: box, NUpload: upload }
 })
 
 import ReceiptInbox from '../../src/views/expenses/ReceiptInbox.vue'

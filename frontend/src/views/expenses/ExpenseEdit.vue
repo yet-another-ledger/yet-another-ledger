@@ -17,7 +17,7 @@
 import { ref, onBeforeUnmount, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { localDateStr } from '../../utils/date'
+import { localDateStr, localDateTimestamp } from '../../utils/date'
 import { secureUuid } from '../../utils/uuid'
 import { useExpenseCostPreview } from '../../composables/useExpenseCostPreview'
 import { resolvePurchaseTreatmentSuggestion, toExpenseInput, usePurchaseExpenseDictionaries } from '../../composables/usePurchaseExpenseDictionaries'
@@ -54,7 +54,7 @@ const assetName = ref('')
 const registerAsset = ref(false)
 const clientSubmissionId = ref<string | null>(null)
 const uncertainAssetSubmission = ref<{ id: string; fingerprint: string } | null>(null)
-const assetInServiceDate = ref('')
+const assetInServiceDate = ref<string | null>(null)
 const assetUsefulLife = ref(5)
 const assetResidualValue = ref<number>(0)
 const assetUseType = ref<'FULL_BUSINESS' | 'MIXED_USE'>('FULL_BUSINESS')
@@ -268,7 +268,7 @@ async function previewFixedAsset() {
       `/api/v1/fixed-assets/expenses/${expenseId.value}/conversion-preview`,
       {
         asset_name: assetName.value,
-        in_service_date: assetInServiceDate.value || null,
+        in_service_date: assetInServiceDate.value,
         useful_life_years: assetUsefulLife.value,
         residual_value: assetResidualValue.value,
         business_percentage: assetReportBusinessPercentage.value,
@@ -295,7 +295,7 @@ async function confirmFixedAssetConversion() {
   try {
     const converted = await post<components['schemas']['FixedAssetRead']>('/api/v1/fixed-assets/expenses/' + targetId + '/convert', {
       asset_name: assetName.value,
-      in_service_date: assetInServiceDate.value || null,
+      in_service_date: assetInServiceDate.value,
       useful_life_years: assetUsefulLife.value,
       residual_value: assetResidualValue.value,
       business_percentage: assetReportBusinessPercentage.value,
@@ -428,7 +428,7 @@ watch(expenseId, (targetId, previousId) => {
   pageError.value = null; saveSuccess.value = false; saving.value = false; attachLoading.value = false; attachUploading.value = false; attachments.value = []; lastAiAttachmentId.value = null; lastAiExtractedAttachmentId.value = null; lastAiSuccessfulAttachmentId.value = null
   recognizedProduct.value = { name: null, brand: null, model: null }; recognizedProductVersion.value++
   expenseDate.value = localDateStr(new Date()); categoryId.value = null; supplierName.value = ''; vatTreatmentId.value = null; vatRateId.value = null
-  assetName.value = ''; assetInServiceDate.value = ''; assetUsefulLife.value = 5; assetResidualValue.value = 0
+  assetName.value = ''; assetInServiceDate.value = null; assetUsefulLife.value = 5; assetResidualValue.value = 0
   assetBusinessPercentage.value = null; assetUseType.value = 'FULL_BUSINESS'
   clientSubmissionId.value = null; uncertainAssetSubmission.value = null
   netAmount.value = null; vatAmount.value = null; deductible.value = null; note.value = ''; reference.value = ''; grossAmountDisplay.value = null
@@ -524,7 +524,7 @@ async function handleSave() {
       ...(targetId ? {} : registerAsset.value ? {
         fixed_asset: {
           asset_name: assetName.value,
-          in_service_date: assetInServiceDate.value || null,
+          in_service_date: assetInServiceDate.value,
           useful_life_years: assetUsefulLife.value,
           residual_value: assetResidualValue.value ?? 0,
           business_percentage: assetReportBusinessPercentage.value!,
@@ -1154,7 +1154,17 @@ async function handleAiExtract(attachmentId: string) {
                     </n-form-item>
                     <template v-if="registerAsset">
                       <n-form-item :label="t('fixedAssets.assetName')"><n-input v-model:value="assetName" /></n-form-item>
-                      <n-form-item :label="t('fixedAssets.inServiceDate')"><input v-model="assetInServiceDate" type="date" /></n-form-item>
+                      <n-form-item :label="t('fixedAssets.inServiceDate')">
+                        <n-date-picker
+                          v-model:formatted-value="assetInServiceDate"
+                          value-format="yyyy-MM-dd"
+                          type="date"
+                          :default-calendar-start-time="localDateTimestamp(expenseDate) ?? undefined"
+                          clearable
+                          style="width: 100%"
+                          @keydown.enter.prevent
+                        />
+                      </n-form-item>
                       <n-form-item :label="t('fixedAssets.usefulLifeYears')"><n-input-number v-model:value="assetUsefulLife" :min="1" :precision="0" /></n-form-item>
                       <n-form-item :label="t('fixedAssets.residualValue')"><n-input-number v-model:value="assetResidualValue" :min="0" :precision="2" /></n-form-item>
                       <ResidualEstimate v-model:value="assetResidualValue" :cost-inputs="residualEstimateCostInputs" :useful-life-years="assetUsefulLife" :suggestion-key="`${lastAiAttachmentId ?? 'none'}:${recognizedProductVersion}`" :suggested-name="recognizedProduct.name" :suggested-brand="recognizedProduct.brand" :suggested-model="recognizedProduct.model" />
@@ -1185,7 +1195,14 @@ async function handleAiExtract(attachmentId: string) {
                       <n-input v-model:value="assetName" />
                     </n-form-item>
                     <n-form-item :label="t('fixedAssets.inServiceDate')">
-                      <n-input v-model:value="assetInServiceDate" type="text" placeholder="YYYY-MM-DD" />
+                      <n-date-picker
+                        v-model:formatted-value="assetInServiceDate"
+                        value-format="yyyy-MM-dd"
+                        type="date"
+                        :default-calendar-start-time="localDateTimestamp(savedExpenseDate) ?? undefined"
+                        clearable
+                        style="width: 100%"
+                      />
                     </n-form-item>
                     <n-form-item :label="t('fixedAssets.usefulLifeYears')">
                       <n-input-number v-model:value="assetUsefulLife" :min="1" :max="100" :precision="0" />
@@ -1417,6 +1434,10 @@ async function handleAiExtract(attachmentId: string) {
 .form-col {
   flex: 1;
   min-width: 0;
+}
+
+.asset-preview-form {
+  margin-top: 16px;
 }
 
 .vat-field {

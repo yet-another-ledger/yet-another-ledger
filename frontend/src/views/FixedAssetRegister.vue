@@ -8,6 +8,7 @@ import { useRouter } from 'vue-router'
 import { useRoute } from 'vue-router'
 import { get, post, put, ApiError } from '../api/http'
 import type { components } from '../api/schema'
+import { localDateTimestamp } from '../utils/date'
 
 type Asset = components['schemas']['FixedAssetRead']
 const { t } = useI18n()
@@ -31,7 +32,7 @@ const revisionPreview = ref<components['schemas']['FixedAssetAnnualRevisionPrevi
 const revisionHistory = ref<components['schemas']['FixedAssetAnnualRevisionRead'][]>([])
 const annualError = ref('')
 const annualBusy = ref(false)
-const serviceDateValue = ref('')
+const serviceDateValue = ref<string | null>(null)
 const serviceDateReason = ref('')
 const serviceDatePreview = ref<components['schemas']['FixedAssetServiceDateRevisionPreview'] | null>(null)
 const assetRevisionHistory = ref<components['schemas']['FixedAssetRevisionRead'][]>([])
@@ -60,19 +61,22 @@ function yearly(row: Asset) { return row.yearly_deltas.find(item => item.year ==
 const columns = computed<DataTableColumns<Asset>>(() => {
   void year.value
   return [
-  { title: t('fixedAssets.assetName'), key: 'name' },
-  { title: t('fixedAssets.acquisitionCost'), key: 'acquisition_cost', render: row => `${row.acquisition_cost} / ${row.residual_value}` },
-  { title: t('fixedAssets.inServiceDate'), key: 'in_service_date', render: row => row.pending_in_service ? t('fixedAssets.pendingInService') : row.in_service_date },
-  { title: t('fixedAssets.completedPnl'), key: 'completed', render: row => `${yearly(row)?.fixed_asset_depreciation ?? '0.00'}${yearly(row)?.provisional ? ` · ${t('fixedAssets.provisionalUse')}` : ''}` },
-  { title: t('fixedAssets.fullYearPlan'), key: 'planned', render: row => yearly(row)?.planned_fixed_asset_depreciation ?? '0.00' },
-  { title: t('fixedAssets.bookValue'), key: 'book', render: row => {
+  { title: t('fixedAssets.assetName'), key: 'name', width: 153, ellipsis: { tooltip: true } },
+  { title: t('fixedAssets.acquisitionCost'), key: 'acquisition_cost', width: 130, render: row => `${row.acquisition_cost} / ${row.residual_value}` },
+  { title: t('fixedAssets.inServiceDate'), key: 'in_service_date', width: 150, render: row => row.pending_in_service ? t('fixedAssets.pendingInService') : row.in_service_date },
+  { title: t('fixedAssets.completedPnl'), key: 'completed', width: 130, render: row => `${yearly(row)?.fixed_asset_depreciation ?? '0.00'}${yearly(row)?.provisional ? ` · ${t('fixedAssets.provisionalUse')}` : ''}` },
+  { title: t('fixedAssets.fullYearPlan'), key: 'planned', width: 110, render: row => yearly(row)?.planned_fixed_asset_depreciation ?? '0.00' },
+  { title: t('fixedAssets.bookValue'), key: 'book', width: 210, render: row => {
     const item = yearly(row)
     return item
-      ? `${t('fixedAssets.bookValue')}: ${item.opening_book_value} → ${item.closing_book_value}; ${t('fixedAssets.plannedBookValue')}: ${item.planned_opening_book_value} → ${item.planned_closing_book_value}`
+      ? [
+          h('div', `${t('fixedAssets.bookValue')}: ${item.opening_book_value} → ${item.closing_book_value}`),
+          h('div', `${t('fixedAssets.plannedBookValue')}: ${item.planned_opening_book_value} → ${item.planned_closing_book_value}`),
+        ]
       : '—'
   } },
-  { title: t('fixedAssets.sourcePurchase'), key: 'source', render: row => h(NButton, { text: true, onClick: () => router.push(`/expenses/${row.acquisition_expense_id}/edit`) }, { default: () => t('fixedAssets.openPurchase') }) },
-  { title: t('fixedAssets.details'), key: 'details', render: row => h(NButton, { text: true, onClick: () => selectAsset(row) }, { default: () => t('fixedAssets.details') }) },
+  { title: t('fixedAssets.sourcePurchase'), key: 'source', width: 132, render: row => h(NButton, { text: true, onClick: () => router.push(`/expenses/${row.acquisition_expense_id}/edit`) }, { default: () => t('fixedAssets.openPurchase') }) },
+  { title: t('fixedAssets.details'), key: 'details', width: 85, render: row => h(NButton, { text: true, onClick: () => selectAsset(row) }, { default: () => t('fixedAssets.details') }) },
   ]
 })
 const detail = computed(() => selectedAsset.value ? yearly(selectedAsset.value) : undefined)
@@ -130,7 +134,7 @@ async function loadAnnualUse(row: Asset) {
   confirmationPreview.value = null
   revisionHistory.value = []
   assetRevisionHistory.value = []
-  serviceDateValue.value = ''
+  serviceDateValue.value = null
   serviceDateReason.value = ''
   serviceDatePreview.value = null
   annualPercentage.value = Number(row.business_percentage)
@@ -170,7 +174,7 @@ async function previewServiceDate() {
   } catch (e) { annualError.value = e instanceof Error ? e.message : String(e) }
 }
 async function confirmServiceDate() {
-  if (!selectedAsset.value || !serviceDatePreview.value) return
+  if (!selectedAsset.value || !serviceDateValue.value || !serviceDatePreview.value) return
   annualBusy.value = true
   try {
     const updated = await post<Asset>(
@@ -268,8 +272,14 @@ watch(year, () => void load())
           <n-text depth="3">{{ t('fixedAssets.registerYear', { year }) }}</n-text>
           <n-input-number v-model:value="year" :precision="0" :min="MIN_YEAR" :max="MAX_YEAR" />
         </n-space>
-        <n-data-table :columns="columns" :data="assets" :loading="loading" :row-key="row => row.id" />
-    <n-card v-if="selectedAsset" :title="selectedAsset.name" size="small">
+        <n-data-table
+          :columns="columns"
+          :data="assets"
+          :loading="loading"
+          :scroll-x="1100"
+          :row-key="row => row.id"
+        />
+        <n-card v-if="selectedAsset" :title="selectedAsset.name" size="small">
           <n-space vertical>
             <n-text>{{ t('fixedAssets.sourcePurchase') }}: <a @click="router.push(`/expenses/${selectedAsset.acquisition_expense_id}/edit`)">{{ t('fixedAssets.openPurchase') }}</a></n-text>
             <n-text>{{ t('fixedAssets.acquisitionCost') }}: {{ selectedAsset.acquisition_cost }} · {{ t('fixedAssets.residualValue') }}: {{ selectedAsset.residual_value }}</n-text>
@@ -278,7 +288,12 @@ watch(year, () => void load())
             <n-alert v-if="selectedAsset.use_type === 'MIXED_USE'" :type="annualUse?.provisional === false ? 'success' : 'warning'">{{ t('fixedAssets.useStatus') }}: {{ annualUseStatus }} · {{ t('fixedAssets.realized') }}: {{ annualUse?.full_depreciation ?? '—' }} · {{ t('fixedAssets.privateUseReduction') }}: {{ annualUse?.private_use_reduction ?? '—' }} · {{ t('fixedAssets.netPnl') }}: {{ annualUse?.net_pnl_effect ?? '—' }}</n-alert>
             <n-alert v-if="annualError" type="error">{{ annualError }}</n-alert>
             <n-space v-if="selectedAsset.pending_in_service" align="center">
-              <n-input v-model:value="serviceDateValue" type="text" placeholder="YYYY-MM-DD" />
+              <n-date-picker
+                v-model:formatted-value="serviceDateValue"
+                value-format="yyyy-MM-dd"
+                type="date"
+                :default-calendar-start-time="localDateTimestamp(selectedAsset.acquisition_date) ?? undefined"
+              />
               <n-input v-model:value="serviceDateReason" :placeholder="t('fixedAssets.correctionReason')" />
               <n-button @click="previewServiceDate">{{ t('fixedAssets.previewActivation') }}</n-button>
               <n-button v-if="serviceDatePreview" :loading="annualBusy" @click="confirmServiceDate">{{ t('fixedAssets.confirmActivation') }}</n-button>
@@ -349,5 +364,9 @@ watch(year, () => void load())
 </template>
 
 <style scoped>
-.fixed-assets-page { padding: 24px; }
+.fixed-assets-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
 </style>

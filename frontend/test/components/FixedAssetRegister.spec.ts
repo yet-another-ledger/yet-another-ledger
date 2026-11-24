@@ -26,7 +26,7 @@ vi.mock('naive-ui', async () => {
   return {
     NAlert: box, NButton: defineComponent({ emits: ['click'], setup(_, { slots, emit }) { return () => h('button', { onClick: () => emit('click') }, slots.default?.()) } }),
     NCard: box, NDataTable: table, NText: box, NSpace: box, NInputNumber: input,
-    NInput: input, NList: box, NListItem: box,
+    NInput: input, NList: box, NListItem: box, NDatePicker: box,
   }
 })
 

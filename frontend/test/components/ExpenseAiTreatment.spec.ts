@@ -75,7 +75,7 @@ describe('Expense attachment treatment suggestions', () => {
     const state = (wrapper.vm as unknown as { $: { setupState: Record<string, any> } }).$.setupState
     Object.assign(state, {
       categoryId: 'cat', vatTreatmentId: 'tax', vatRateId: 'rate', netAmount: 1000, vatAmount: 210,
-      registerAsset: true, assetName: 'Laptop', assetUseType: 'FULL_BUSINESS', assetInServiceDate: '',
+      registerAsset: true, assetName: 'Laptop', assetUseType: 'FULL_BUSINESS', assetInServiceDate: null,
       assetUsefulLife: 5, assetResidualValue: 0,
     })
     state.assetUseType = 'MIXED_USE'
@@ -148,7 +148,7 @@ describe('Expense attachment treatment suggestions', () => {
 
     await router.push('/expenses/two/edit')
     await flushPromises()
-    expect(setupState.assetInServiceDate).toBe('')
+    expect(setupState.assetInServiceDate).toBeNull()
     expect(setupState.assetUsefulLife).toBe(5)
     expect(setupState.assetResidualValue).toBe(0)
 
