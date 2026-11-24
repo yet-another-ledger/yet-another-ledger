@@ -10,6 +10,7 @@
  */
 import { computed, h, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { InformationCircleOutline } from '@vicons/ionicons5'
 import {
   NAlert,
   NButton,
@@ -18,14 +19,16 @@ import {
   NDatePicker,
   NGrid,
   NGridItem,
+  NIcon,
   NRadioButton,
   NRadioGroup,
   NSpace,
   NSpin,
   NStatistic,
   NText,
+  NTooltip,
 } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
+import type { DataTableColumns, TooltipInst } from 'naive-ui'
 import { useReportsStore } from '../../stores/reports'
 import type { ProfitLossSeriesItem } from '../../stores/reports'
 import ReportSourcePanel from '../../components/reports/ReportSourcePanel.vue'
@@ -33,6 +36,7 @@ import { localDateStr } from '../../utils/date'
 
 const { t } = useI18n()
 const store = useReportsStore()
+const depreciationTooltip = ref<TooltipInst | null>(null)
 
 // ─── Filters ─────────────────────────────────────────────────────────────────
 
@@ -263,9 +267,34 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
             </n-grid-item>
             <n-grid-item>
               <n-card>
-                <n-statistic :label="t('reports.pl.fixedAssetDepreciation')" :value="fmtMoney(store.plReport.fixed_asset_depreciation)" />
-                <n-text depth="3">{{ t('reports.pl.fixedAssetDepreciationNote') }}</n-text>
-                <n-text v-if="store.plReport.fixed_asset_depreciation_provisional" type="warning">{{ t('fixedAssets.provisionalUse') }}</n-text>
+                <n-statistic :value="fmtMoney(store.plReport.fixed_asset_depreciation)">
+                  <template #label>
+                    <span class="statistic-label">
+                      {{ t('reports.pl.fixedAssetDepreciation') }}
+                      <n-tooltip ref="depreciationTooltip" display-directive="show">
+                        <template #trigger>
+                          <n-button
+                            text
+                            :type="store.plReport.fixed_asset_depreciation_provisional ? 'warning' : 'default'"
+                            :aria-label="t('fixedAssets.details')"
+                            aria-describedby="pl-fixed-asset-note"
+                            @focus="depreciationTooltip?.setShow(true)"
+                            @blur="depreciationTooltip?.setShow(false)"
+                            @keydown.esc="depreciationTooltip?.setShow(false)"
+                          >
+                            <n-icon :size="14" aria-hidden="true"><InformationCircleOutline /></n-icon>
+                          </n-button>
+                        </template>
+                        <div id="pl-fixed-asset-note" role="tooltip">
+                          <div>{{ t('reports.pl.fixedAssetDepreciationNote') }}</div>
+                          <n-text v-if="store.plReport.fixed_asset_depreciation_provisional" type="warning">
+                            {{ t('fixedAssets.provisionalUse') }}
+                          </n-text>
+                        </div>
+                      </n-tooltip>
+                    </span>
+                  </template>
+                </n-statistic>
               </n-card>
             </n-grid-item>
             <n-grid-item>
@@ -351,6 +380,12 @@ const tableColumns = computed<DataTableColumns<ProfitLossSeriesItem>>(() => [
 
 .summary-grid {
   margin-bottom: 20px;
+}
+
+.statistic-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .series-card {

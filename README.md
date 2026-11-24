@@ -6,7 +6,7 @@ Self-hosted invoicing and small-business administration for freelancers and smal
 
 Built with **FastAPI + Vue 3 + PostgreSQL**.
 
-> **Status — pre-1.0 (`v0.16.0`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and possible breaking changes before `v1.0`.
+> **Status — pre-1.0 (`v0.16.1`).** Open source and self-hosted. Container images are published to the GitHub Container Registry (GHCR). Expect rough edges and possible breaking changes before `v1.0`.
 
 ## Features
 
@@ -62,7 +62,7 @@ Open **http://localhost:8000**, register the first (owner) account, and set up T
 
 To stop: `docker compose down` (add `-v` to also drop the database volume).
 
-> `:latest` tracks the newest non-prerelease release; pin this release by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.16.0` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
+> `:latest` tracks the newest non-prerelease release. Pin this release by setting `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.16.1` in `.env`. To build the image yourself instead of pulling, run `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .` before `docker compose up -d`.
 
 ## Configuration
 
@@ -104,7 +104,7 @@ Appendix originals and their metadata are stored transactionally in PostgreSQL (
 
 M17 introduced migrations `0053` and `0054` in v0.11.0. Existing Quotes start with an empty appendix list when upgrading from v0.10.0. Before any upgrade, back up PostgreSQL and the receipt storage.
 
-M20 in v0.16.0 adds fixed asset registration, residual value estimates and AI protocol selection. An upgrade from v0.15.0 applies migrations `0059`–`0061`. Legacy AI configurations without an explicit protocol keep Chat Completions. Update any explicit `APP_VERSION` in `.env` to `0.16.0`.
+M20 in v0.16.0 adds fixed asset registration, residual value estimates and AI protocol selection. An upgrade from v0.15.0 applies migrations `0059`–`0061`. Legacy AI configurations without an explicit protocol keep Chat Completions. The v0.16.1 patch aligns the P&L fixed asset depreciation card and adds no migrations. Update any explicit `APP_VERSION` in `.env` to `0.16.1`.
 
 ## Agent access and upgrades
 

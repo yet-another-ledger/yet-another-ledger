@@ -12,6 +12,7 @@ const store = vi.hoisted(() => ({
     revenue_net: '100.00', expense_actual: '0', mileage_expense_actual: '0',
     other_expense_actual: '0', profit_before_mileage: '100.00',
     profit_after_mileage: '100.00', profit: '100.00', series: [],
+    fixed_asset_depreciation: '0', fixed_asset_depreciation_provisional: false,
     external_sales: [{ external_sale_id: 'external-42', source_name: 'Frozen platform', original_number: 'EXT-42', event_date: '2026-03-31' }],
   },
   vatLoading: false, vatError: null, fetchVatReturn: vi.fn(),
@@ -42,12 +43,12 @@ vi.mock('naive-ui', async (importOriginal) => {
   const slot = { template: '<div><slot /></div>' }
   const statistic = {
     props: ['label', 'value'],
-    template: '<div class="statistic">{{ label }}: {{ value }}</div>',
+    template: '<div class="statistic"><slot name="label">{{ label }}</slot>: {{ value }}</div>',
   }
   return {
     NAlert: slot, NButton: actual.NButton, NCard: slot, NCollapse: actual.NCollapse, NCollapseItem: actual.NCollapseItem,
-    NDataTable: slot, NDatePicker: slot, NGrid: slot, NGridItem: slot, NList: actual.NList, NListItem: actual.NListItem, NRadioButton: slot, NRadioGroup: slot, NSelect: slot,
-    NSpace: slot, NSpin: slot, NStatistic: statistic, NText: slot,
+    NDataTable: slot, NDatePicker: slot, NGrid: slot, NGridItem: slot, NIcon: actual.NIcon, NList: actual.NList, NListItem: actual.NListItem, NRadioButton: slot, NRadioGroup: slot, NSelect: slot,
+    NSpace: slot, NSpin: slot, NStatistic: statistic, NText: slot, NTooltip: actual.NTooltip,
   }
 })
 import ProfitLoss from '../../src/views/reports/ProfitLoss.vue'

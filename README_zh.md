@@ -6,7 +6,7 @@
 
 技术栈 **FastAPI + Vue 3 + PostgreSQL**。
 
-> **状态——1.0 前版本（`v0.16.0`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
+> **状态——1.0 前版本（`v0.16.1`）。** 开源、自托管。容器镜像已发布到 GitHub Container Registry（GHCR）。`v1.0` 之前仍可能有粗糙之处与破坏性变更。
 
 ## 功能
 
@@ -61,7 +61,7 @@ docker compose up -d
 
 停止：`docker compose down`（加 `-v` 同时删除数据库卷）。
 
-> `:latest` 指向最新的非预发布版本；想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.16.0`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
+> `:latest` 指向最新的非预发布版本。想固定本次版本就在 `.env` 里设 `JAI_IMAGE=ghcr.io/yet-another-ledger/yet-another-ledger:0.16.1`。想自行 build 而非拉取，在 `docker compose up -d` 之前先跑 `docker build -t ghcr.io/yet-another-ledger/yet-another-ledger:latest .`。
 
 ## 配置
 
@@ -103,7 +103,7 @@ SMTP 测试失败仍返回通用的 `SMTP_SEND_FAILED` API 错误。服务端日
 
 M17 在 v0.11.0 引入 `0053` 和 `0054` 迁移。从 v0.10.0 升级时，既有报价的附录清单初始为空。每次升级前先备份 PostgreSQL 和票据存储。
 
-v0.16.0 的 M20 加入固定资产登记、残值估计与 AI 协议选择。从 v0.15.0 升级会应用迁移 `0059`–`0061`。未显式设置协议的旧 AI 配置继续使用 Chat Completions。若 `.env` 显式设置了 `APP_VERSION`，请更新为 `0.16.0`。
+v0.16.0 的 M20 加入固定资产登记、残值估计与 AI 协议选择。从 v0.15.0 升级会应用迁移 `0059`–`0061`。未显式设置协议的旧 AI 配置继续使用 Chat Completions。v0.16.1 补丁对齐了损益报表的固定资产折旧卡片，无新增迁移。若 `.env` 显式设置了 `APP_VERSION`，请更新为 `0.16.1`。
 
 ## Agent 接入与升级
 
